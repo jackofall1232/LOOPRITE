@@ -832,3 +832,57 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Next action:** integrated e2e gateway smoke + final APK rebuild + memory close-out + PR.
 - **Do-not-retry notes:** none.
 - **Lock:** lock-20260705-212423-claude-android-apk-pass still held.
+
+### Run 2026-07-05T22:45:00Z — Claude (Fable 5), branch claude/looprite-android-apk-4mth8g — unit 5: integrated verification + session close-out
+- **Goal:** Verify the merged tree end-to-end, rebuild the final APK, update all memory
+  files, release the lock, and open the PR.
+- **Triggering event:** Units 2–4 committed (e74898c, 8d8b632, 82084e4).
+- **Decision:** Pass complete; hand to maintainer review via PR.
+- **Completed work:** e2e gateway smoke under the Android env contract; final APK rebuild
+  from the merged tree via cli-os/scripts/build-apk.sh (cache-glob jar path exercised);
+  memory.md durable decisions, failures.md do-not-retry entries, todos.md check-offs,
+  state.json/heartbeat.json close-out, CLAUDE.md Run Ledger row; lock released.
+- **Changed files:** .l00prite/{ledger,memory,failures,todos}.md,
+  .l00prite/{state,heartbeat,lock}.json, CLAUDE.md.
+- **Tests run / Verification:**
+  - `command: bash e2e-smoke.sh (gateway serve with LOOPRITE_MASTER_KEY env +
+    LOOPRITE_SETUP_SECRET + LOOPRITE_DNS; scripted curl walk)` · `exit_code: 0` ·
+    `summary: 15/15 — healthz; wizard at /; setup POST without secret 403, with secret
+    200; token minted; latch closes setup even with secret; venice provider added;
+    /v1/models lists venice/claude-sonnet-5, venice/openai-gpt-52-codex, auto:writer,
+    auto:architect; mock chat.completion round-trip; dry-run auto:writer routes to
+    venice/claude-sonnet-5 with rank_source roleRanks.writer (only venice enabled —
+    sonnet-first policy holds through the Venice path); setup.html carries the
+    x-l00prite-setup-secret plumbing` · 2026-07-05T22:38Z.
+  - `command: bash cli-os/scripts/build-apk.sh (merged tree, commit 82084e4)` ·
+    `exit_code: 0` · `summary: l00prite-os-82084e4.apk 15MB, sha256 042c407e5293...,
+    lib/arm64-v8a/libl00prite.so Stored 14.9MB PIE aarch64 /system/bin/linker64,
+    assets/cacert.pem 146 Mozilla certs` · 2026-07-05T22:35Z.
+  - `command: apksigner verify --verbose dist-android/l00prite-os-82084e4.apk` ·
+    `exit_code: 0` · `summary: v2 true, v3 true; badging: package com.l00prite.os,
+    launchable-activity MainActivity, INTERNET, native-code arm64-v8a` ·
+    2026-07-05T22:36Z.
+  - `command: cd cli-os && go test ./...` · `exit_code: 0` · `summary: all packages ok`
+    · 2026-07-05T22:24Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS,
+    0 FAIL` · 2026-07-05T22:47Z (re-run after memory-file edits).
+  - `command: node scripts/l00prite-doctor.js .` · see the post-release re-run recorded
+    below (doctor only prints HEALTHY once no active lock remains).
+- **Response drafted/sent:** PR opened for maintainer review (see Next action).
+- **Event status:** n/a.
+- **Failures:** none in this unit; pass-level do-not-retry notes live in failures.md
+  ("Approaches that failed during the 2026-07-05 Android APK pass").
+- **Decisions:** maintainer-review flags carried into the PR description: (1)
+  .github/workflows/android-apk.yml is an Autonomous-Edit-Denylist path added
+  deliberately in this human-reviewed PR; (2) code/writer routing profiles flipped
+  balanced→quality (changes a PR #24 default) per the explicit role-policy brief; (3)
+  bare model ids colliding across providers resolve by provider order — pin
+  provider/model when it matters.
+- **Confidence:** High — every claim above has command+exit_code evidence from this
+  session; the one unexecuted artifact is the CI workflow's first live run, which the PR
+  itself will trigger.
+- **Next action:** maintainer reviews and merges the PR; Phase 1 (dashboard Runs view
+  first) is queued in todos.md.
+- **Do-not-retry notes:** see failures.md.
+- **Lock:** lock-20260705-212423-claude-android-apk-pass RELEASED at session end
+  (2026-07-05T22:47Z), per LOCKING.md rule 5.

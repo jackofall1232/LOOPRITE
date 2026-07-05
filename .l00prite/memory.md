@@ -44,9 +44,35 @@ Durable project facts and decisions that future agents should preserve.
   human review. The 2026-07-02 changes to both were made at the maintainer's explicit
   direction on the review branch and still require review before merge.
 
+- Android packaging (maintainer brief 2026-07-05): the APK bundles the UNMODIFIED Go
+  gateway as an android/arm64 PIE binary exec'd from the APK's native-library dir under a
+  thin no-AndroidX Java wrapper — never gomobile, never a Termux dependency, never a
+  parallel native UI. One code path for desktop and Android. Design:
+  `cli-os/docs/android-architecture.md`.
+- On-device secrets: the vault master key exists only Keystore-wrapped in app prefs and in
+  the gateway process env (`LOOPRITE_MASTER_KEY`); `master.key` must never be written on
+  Android. `LOOPRITE_MASTER_KEY`/`LOOPRITE_SETUP_SECRET` are scrubbed from every child
+  process the engine or clone path spawns.
+- All git operations go through the `internal/gitx` seam: exec-git (verbatim legacy
+  behavior) whenever a git binary exists, pure-Go go-git fallback otherwise. Never call
+  `exec.Command("git", ...)` directly from engine/gateway code again. go-git is PINNED at
+  v5.18.0 while the module targets go 1.24 (v5.19+ requires go >= 1.25).
+- Role-policy routing (maintainer): Fable-5-class models architect/plan/review, Sonnet
+  5-class models do the bulk writing. The writer/code profiles are `quality` preference on
+  purpose — a balanced cost-blend demonstrably handed the writing role to the cheapest
+  tools-capable catalog model, making the policy decorative. Cost control lives in PEP caps
+  and the cheap/balanced profiles. A role-map rank that must beat an unmapped candidate has
+  to EXCEED that candidate's qualityRanks fallback (exact ties break alphabetically).
+- Provider manifests must carry honest provenance: Venice pricing is first-party (docs
+  mirror github.com/veniceai/api-docs — use it; docs.venice.ai and api.venice.ai are
+  egress-blocked from build containers); Gemini pricing stays null until first-party
+  verifiable. Never backfill prices from training memory.
+
 ## Facts
 - l00prite ships no backend, hosted service, or install script; setup is manual (clone,
-  copy prompts/templates).
+  copy prompts/templates). The Android APK (cli-os/dist-android via
+  cli-os/scripts/build-apk.sh, or the android-apk CI workflow) is self-contained — the
+  device is the control plane; still no hosted service.
 - Prompt parity is byte-exact across seven locations per prompt (canonical + 6 mirrors),
   mechanically enforced — `node scripts/validate-l00prite.js` fails on any drift.
 - `scripts/validate-l00prite.js` has no external dependencies; as of the v1.1 pass it runs

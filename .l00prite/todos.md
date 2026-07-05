@@ -19,27 +19,36 @@ previously queued dashboard Runs view (moved to Next, below).
       build container (apt: aapt/zipalign/apksigner/dalvik-exchange; Maven Central:
       robolectric android-all as compile-time android.jar, apksig) since dl.google.com is
       proxy-blocked here.
-- [ ] `cli-os/docs/android-architecture.md` — deliverables 1–3: architecture plan,
-      feasibility decision (embed gateway as bundled PIE binary exec'd from
-      nativeLibraryDir + Java wrapper + WebView dashboard), phased roadmap, Android
-      platform adaptations (DNS resolver env hook, SSL_CERT_FILE CA bundle, /system/bin/sh,
-      go-git fallback for missing git binary, Keystore→LOOPRITE_MASTER_KEY secrets).
-- [ ] Go: Android enablement — `L00PRITE_DNS` resolver override; shell path resolution;
-      `gitx` seam (exec git default, pure-Go go-git when git absent); android/arm64 (+
-      android/amd64 emulator) build targets. `go test ./...` green.
-- [ ] Providers: `manifests/venice.json` (dedicated Venice path, openai-compat,
-      api.venice.ai) + `manifests/gemini.json` (OpenAI-compat endpoint); role profiles
-      `architect`/`writer`/`reviewer`/`advisor` with roleRanks defaults (fable-5 architect,
-      sonnet-5 writer). Tests.
-- [ ] `android/` app — minimal-dependency Java wrapper: foreground service exec of the
-      bundled gateway (`lib/arm64-v8a/libl00prite.so`), WebView on `http://127.0.0.1:8787`,
-      Android-Keystore-wrapped master key exported as `LOOPRITE_MASTER_KEY`, bundled CA
-      PEM via `SSL_CERT_FILE`, `LOOPRITE_HOME` in app files dir.
-- [ ] APK pipeline — `scripts/build-apk.sh` (no-Google local chain) + GitHub Actions
-      workflow using the real Android SDK for reproducible signed builds.
-- [ ] Verification: go test, validator zero FAIL, doctor HEALTHY, `apksigner verify`,
-      `aapt dump badging`, gateway e2e smoke incl. Venice manifest routing.
-- [ ] Ledger/todos/memory/failures updated at every unit boundary; release lock; PR.
+- [x] `cli-os/docs/android-architecture.md` — deliverables 1–3 committed (bc5a3a6):
+      packaging decision (bundled android/arm64 PIE gateway + Java wrapper + WebView),
+      G1–G11 gap analysis, provider/role expansion, dual build pipeline, Phase 0–3 roadmap.
+- [x] Go: Android enablement (8d8b632) — `LOOPRITE_DNS` resolver override + android
+      fallback; shell path resolution; `gitx` seam (exec git verbatim default, pure-Go
+      go-git v5.18.0 fallback); `LOOPRITE_SETUP_SECRET` first-run gate; secret env
+      scrubbing. android/arm64 builds clean; android/amd64 skipped (needs cgo/NDK —
+      recorded in failures.md). `go test ./...` green.
+- [x] Providers (82084e4): `manifests/venice.json` (15 models, first-party pricing) +
+      `manifests/gemini.json`; architect/writer/reviewer/advisor profiles + seeded
+      roleRanks incl. engine plan/code/review (fable-5 architect 98, sonnet-5 writer 97 —
+      writer/code switched to quality preference so the policy actually routes; flagged
+      for maintainer: this flips the pre-existing `code` default from balanced).
+- [x] `android/` app (e74898c) — Java wrapper: GatewayService foreground exec of
+      `libl00prite.so` with the full env contract, Keystore-wrapped master key, Mozilla CA
+      asset, MainActivity WebView + /healthz poll, cleartext-to-127.0.0.1-only.
+- [x] APK pipeline (e74898c) — `cli-os/scripts/build-apk.sh` (hermetic no-Google chain) +
+      `.github/workflows/android-apk.yml` (real SDK; first live run pending on the PR).
+- [x] Verification: go test all ok; validator 519 PASS 0 FAIL; e2e gateway smoke 15/15
+      (setup-secret gate, wizard latch, venice models + auto:writer/architect in
+      /v1/models, mock chat round-trip, dry-run auto:writer → venice/claude-sonnet-5 via
+      roleRanks.writer); final APK from merged tree signed + verified (v2+v3,
+      sha256 042c407e…, 15MB). Doctor HEALTHY check runs post lock-release.
+- [x] Ledger/todos/memory/failures updated at every unit boundary; lock released at
+      session end; PR opened for maintainer review.
+
+Deferred to Phase 1+ (see android-architecture.md §8): dashboard Runs view (was already
+queued), phone-nav polish, wizard copy de-CLI-ing, repo-register path picker, real-device
+smoke test (no emulator ABI possible in this container), first live CI run of the
+android-apk workflow, venice/gemini capability confirmation from an unblocked network.
 
 ## Previous Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
 

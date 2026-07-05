@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
   "project_name": "l00prite",
-  "current_goal": "Android APK pass (branch claude/looprite-android-apk-4mth8g, maintainer brief 2026-07-05): evolve cli-os into a self-contained L00prite OS Android APK — local control plane, no hosted server; deliverables: architecture plan, embed-gateway feasibility decision, phased roadmap, smallest useful APK prototype (keys → repo → prompt → run), Venice AI provider, role routing (architect/writer/reviewer/advisor)",
-  "current_phase": "planning",
-  "active_agent": "claude",
+  "current_goal": "Android APK pass (branch claude/looprite-android-apk-4mth8g): COMPLETE pending maintainer review — architecture plan + feasibility + roadmap committed, gateway Android-enabled (DNS/shell/gitx/setup-secret/env-scrub), Venice+Gemini providers + role routing (fable architect / sonnet writer), android/ wrapper app, signed APK built and verified from both pipelines, e2e smoke 15/15",
+  "current_phase": "review",
+  "active_agent": null,
   "last_agent": "claude",
-  "last_updated": "2026-07-05T21:24:23Z",
+  "last_updated": "2026-07-05T22:45:00Z",
   "status": "in_progress",
   "blocked": false,
   "blocker_reason": null,
@@ -16,5 +16,5 @@
   "ci_status": "unknown",
   "execution_active": false,
   "execution_stop_reason": null,
-  "next_recommended_action": "write cli-os/docs/android-architecture.md (packaging decision: bundled android/arm64 PIE gateway binary as jniLib + Java wrapper + WebView; feasibility evidence already gathered: GOOS=android CGO_ENABLED=0 build succeeds, no-Google APK toolchain proven), then implement per its roadmap; dashboard Runs view from the previous pass remains queued after this maintainer-directed pass"
+  "next_recommended_action": "maintainer: review the Android APK PR (includes one Autonomous-Edit-Denylist path — .github/workflows/android-apk.yml — and one default-behavior change — code/writer profiles balanced→quality); after merge, Phase 1 starts with the dashboard Runs view (spec: cli-os/docs/os-architecture.md §4, roadmap: android-architecture.md §8)"
 }
