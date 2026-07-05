@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "lock_id": "lock-20260705-201723-claude-os-apk-merge-close",
-  "owner_agent": null,
-  "owner_session": null,
-  "acquired_at": "2026-07-05T20:17:23Z",
-  "expires_at": "2026-07-05T20:47:23Z",
-  "ttl_seconds": 1800,
-  "purpose": null,
+  "lock_id": "lock-20260705-212423-claude-android-apk-pass",
+  "owner_agent": "claude",
+  "owner_session": "claude/looprite-android-apk-4mth8g",
+  "acquired_at": "2026-07-05T21:24:23Z",
+  "expires_at": "2026-07-06T01:24:23Z",
+  "ttl_seconds": 14400,
+  "purpose": "Android APK pass (maintainer brief 2026-07-05): architecture plan, feasibility, roadmap, APK prototype; frequent ledger/todos updates throughout",
   "protected_paths": [
     "ledger.md",
     "memory.md",
@@ -18,5 +18,5 @@
     "reviews/",
     "sessions/"
   ],
-  "status": "released"
+  "status": "active"
 }

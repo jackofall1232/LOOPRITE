@@ -1,6 +1,47 @@
 # Prioritized TODOs
 
-## Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
+## Active — Android APK pass (maintainer brief 2026-07-05, branch `claude/looprite-android-apk-4mth8g`)
+
+Maintainer brief: evolve the repo into a self-contained **L00prite OS Android APK** — the
+Android device is the local control plane (no hosted L00prite server). A user sideloads the
+APK, adds provider keys (stored encrypted on-device), connects/clones a Git repo, enters a
+prompt, and L00prite runs the project end-to-end on the phone. Preserve all existing
+protocol functionality; build on `cli-os/` (gateway/dashboard/engine); providers: OpenAI,
+Codex, Anthropic (Fable/Sonnet), Gemini, **Venice AI (dedicated path)**; keep bridging and
+role routing (architect/writer/reviewer/advisor; Fable 5 = architect, Sonnet 5 = writer);
+open a PR when the prototype is complete and verified. This pass takes precedence over the
+previously queued dashboard Runs view (moved to Next, below).
+
+- [x] Recon: repo map (7-reader fan-out), environment feasibility probes.
+      Evidence so far: `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/l00prite`
+      succeeds from current source (PIE ELF, `/system/bin/linker64` interpreter, pure-Go
+      SQLite — no NDK/gomobile needed); a complete no-Google APK toolchain exists in this
+      build container (apt: aapt/zipalign/apksigner/dalvik-exchange; Maven Central:
+      robolectric android-all as compile-time android.jar, apksig) since dl.google.com is
+      proxy-blocked here.
+- [ ] `cli-os/docs/android-architecture.md` — deliverables 1–3: architecture plan,
+      feasibility decision (embed gateway as bundled PIE binary exec'd from
+      nativeLibraryDir + Java wrapper + WebView dashboard), phased roadmap, Android
+      platform adaptations (DNS resolver env hook, SSL_CERT_FILE CA bundle, /system/bin/sh,
+      go-git fallback for missing git binary, Keystore→LOOPRITE_MASTER_KEY secrets).
+- [ ] Go: Android enablement — `L00PRITE_DNS` resolver override; shell path resolution;
+      `gitx` seam (exec git default, pure-Go go-git when git absent); android/arm64 (+
+      android/amd64 emulator) build targets. `go test ./...` green.
+- [ ] Providers: `manifests/venice.json` (dedicated Venice path, openai-compat,
+      api.venice.ai) + `manifests/gemini.json` (OpenAI-compat endpoint); role profiles
+      `architect`/`writer`/`reviewer`/`advisor` with roleRanks defaults (fable-5 architect,
+      sonnet-5 writer). Tests.
+- [ ] `android/` app — minimal-dependency Java wrapper: foreground service exec of the
+      bundled gateway (`lib/arm64-v8a/libl00prite.so`), WebView on `http://127.0.0.1:8787`,
+      Android-Keystore-wrapped master key exported as `LOOPRITE_MASTER_KEY`, bundled CA
+      PEM via `SSL_CERT_FILE`, `LOOPRITE_HOME` in app files dir.
+- [ ] APK pipeline — `scripts/build-apk.sh` (no-Google local chain) + GitHub Actions
+      workflow using the real Android SDK for reproducible signed builds.
+- [ ] Verification: go test, validator zero FAIL, doctor HEALTHY, `apksigner verify`,
+      `aapt dump badging`, gateway e2e smoke incl. Venice manifest routing.
+- [ ] Ledger/todos/memory/failures updated at every unit boundary; release lock; PR.
+
+## Previous Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
 
 Maintainer brief: evolve the repo toward "L00prite OS" — an installable, vendor-neutral
 autonomous software-engineering application (add keys → connect repo → prompt → Start).

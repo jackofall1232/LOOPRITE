@@ -1,12 +1,12 @@
 {
   "schema_version": 2,
   "project_name": "l00prite",
-  "current_goal": "L00prite OS build pass (branch OS-APK): run engine mechanically embodying execute-loop.md, role-aware routing, /v1/runs* API, clone connect, cross-platform packaging — merged to main via PR #24; dashboard Runs view is the next unit",
+  "current_goal": "Android APK pass (branch claude/looprite-android-apk-4mth8g, maintainer brief 2026-07-05): evolve cli-os into a self-contained L00prite OS Android APK — local control plane, no hosted server; deliverables: architecture plan, embed-gateway feasibility decision, phased roadmap, smallest useful APK prototype (keys → repo → prompt → run), Venice AI provider, role routing (architect/writer/reviewer/advisor)",
   "current_phase": "planning",
-  "active_agent": null,
+  "active_agent": "claude",
   "last_agent": "claude",
-  "last_updated": "2026-07-05T20:17:23Z",
-  "status": "not_started",
+  "last_updated": "2026-07-05T21:24:23Z",
+  "status": "in_progress",
   "blocked": false,
   "blocker_reason": null,
   "active_event_id": null,
@@ -16,5 +16,5 @@
   "ci_status": "unknown",
   "execution_active": false,
   "execution_stop_reason": null,
-  "next_recommended_action": "start the dashboard Runs view (todos.md Active section, spec in cli-os/docs/os-architecture.md §4) on the freshly-restarted OS-APK branch"
+  "next_recommended_action": "write cli-os/docs/android-architecture.md (packaging decision: bundled android/arm64 PIE gateway binary as jniLib + Java wrapper + WebView; feasibility evidence already gathered: GOOS=android CGO_ENABLED=0 build succeeds, no-Google APK toolchain proven), then implement per its roadmap; dashboard Runs view from the previous pass remains queued after this maintainer-directed pass"
 }
