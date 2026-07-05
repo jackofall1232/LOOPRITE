@@ -1,0 +1,14 @@
+# Runtime data never belongs in git.
+.env
+*.db
+*.db-wal
+*.db-shm
+master.key
+ledger.jsonl
+/data/
+.cli-os-data/
+
+# Go build artifacts (the compiled binary).
+/l00prite
+/cli-os
+*.test

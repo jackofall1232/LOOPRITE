@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "project_name": "l00prite",
+  "current_goal": "L00prite OS build pass (branch OS-APK): run engine mechanically embodying execute-loop.md, role-aware routing, /v1/runs* API, clone connect, cross-platform packaging — merged to main via PR #24; dashboard Runs view is the next unit",
+  "current_phase": "planning",
+  "active_agent": null,
+  "last_agent": "claude",
+  "last_updated": "2026-07-05T20:17:23Z",
+  "status": "not_started",
+  "blocked": false,
+  "blocker_reason": null,
+  "active_event_id": null,
+  "last_event_processed": null,
+  "pending_event_count": 0,
+  "review_response_required": false,
+  "ci_status": "unknown",
+  "execution_active": false,
+  "execution_stop_reason": null,
+  "next_recommended_action": "start the dashboard Runs view (todos.md Active section, spec in cli-os/docs/os-architecture.md §4) on the freshly-restarted OS-APK branch"
+}

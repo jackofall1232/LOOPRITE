@@ -1,0 +1,59 @@
+{
+  "provider": "zhipu",
+  "display_name": "Zhipu AI / Z.ai (BigModel) — GLM family",
+  "adapter": "openai-compat",
+  "base_url": "https://api.z.ai/api/paas/v4",
+  "alt_base_urls": {
+    "openai_explicit": "https://api.z.ai/api/openai/v1",
+    "anthropic_compat": "https://api.z.ai/api/anthropic",
+    "mainland": "https://open.bigmodel.cn/api/paas/v4"
+  },
+  "endpoints": { "chat": "/chat/completions" },
+  "auth": {
+    "scheme": "bearer",
+    "header": "Authorization",
+    "notes": "OpenAI-compat path takes the RAW api key as the bearer token. The native SDK path instead mints a short-lived HS256 JWT from `{id}.{secret}` (legacy Zhipu scheme) -- not needed for the OpenAI-compat adapter."
+  },
+  "streaming": "openai-sse-chunks",
+  "tool_schema": "openai-function",
+  "notes": [
+    "GLM 5.2 is REAL: model id `glm-5.2` verified verbatim in the official Zhipu SDK (zai-org/z-ai-sdk-python).",
+    "OpenAI-style SSE chunks + [DONE]; thinking models add a GLM-specific choices[].delta.reasoning_content field (separate from content).",
+    "Supports inline server-side tools ({type:web_search}, retrieval, MCP toolservers) alongside OpenAI-style function tools.",
+    "Also exposes an Anthropic-Messages-compatible endpoint (drop-in for Claude Code) at the anthropic_compat base."
+  ],
+  "verification": {
+    "shape": "high",
+    "shape_source": "Zhipu official SDK zai-org/z-ai-sdk-python (README, examples, src)",
+    "pricing": "unconfirmed",
+    "pricing_source": "NONE fetched first-party -- see pricing_note",
+    "pricing_checked": "2026-07-04",
+    "pricing_note": "First-party confirmation attempted 2026-07-04 and FAILED: docs.z.ai, open.bigmodel.cn and z.ai/model-api all return HTTP 403 (org-policy egress denial + provider bot protection). A first-party-domain-restricted web search surfaced only GLM docs/blog pages (no pricing table). The previously-carried third-party glm-5.2 figures ($1.40/$4.40 in/out, $0.26 cache-read) were NULLED per the brief (do not carry pricing over from memory). All GLM prices remain null/unconfirmed. See docs/pricing-confirmation.md."
+  },
+  "models": [
+    {
+      "id": "glm-5.2",
+      "context": null, "max_output": null,
+      "capabilities": { "tools": true, "vision": false, "reasoning_effort": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null, "cache_read": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Flagship reasoning/agentic-coding model; supports reasoning_effort none..max. Prices + context are UNCONFIRMED: first-party pricing pages (z.ai / open.bigmodel.cn) were egress-blocked on 2026-07-04, so pricing is left null rather than guessed. Prior third-party figures were removed."
+    },
+    {
+      "id": "glm-5.1",
+      "context": null, "max_output": null,
+      "capabilities": { "tools": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Prior flagship; the model exposed via the Anthropic-compat endpoint for Claude Code."
+    },
+    {
+      "id": "glm-5v-turbo",
+      "context": null, "max_output": null,
+      "capabilities": { "tools": true, "vision": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Vision, speed-optimized turbo variant (GLM-V lineage)."
+    }
+  ]
+}

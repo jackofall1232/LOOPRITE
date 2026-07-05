@@ -1,0 +1,69 @@
+{
+  "provider": "anthropic",
+  "display_name": "Anthropic (Claude)",
+  "adapter": "native-messages",
+  "base_url": "https://api.anthropic.com",
+  "endpoints": { "chat": "/v1/messages" },
+  "auth": {
+    "scheme": "header",
+    "header": "x-api-key",
+    "extra_headers": { "anthropic-version": "2023-06-01" }
+  },
+  "streaming": "anthropic-sse-blocks",
+  "tool_schema": "anthropic-input-schema",
+  "notes": [
+    "system is a top-level field, not a message; max_tokens is REQUIRED.",
+    "tools are {name, description, input_schema}; tool_choice is {type: auto|any|tool|none, name?}.",
+    "SSE: message_start > content_block_start > content_block_delta(text/thinking/input_json) > content_block_stop > message_delta(stop_reason+usage) > message_stop; rebuild into OpenAI chunks + [DONE].",
+    "stop_reason map: end_turn->stop, max_tokens->length, tool_use->tool_calls, stop_sequence->stop, refusal->content_filter.",
+    "An OpenAI-compatible /v1/ base exists but is labeled test/eval-only, non-production -> use the native adapter.",
+    "prompt caching via cache_control{type:ephemeral,ttl?}; cache_read =0.1x input, 5m cache_write =1.25x, 1h cache_write =2x base input."
+  ],
+  "verification": {
+    "shape": "high",
+    "shape_source": "first-party docs (platform.claude.com), fetched 2026-07",
+    "pricing": "high",
+    "pricing_source": "first-party: https://platform.claude.com/docs/en/about-claude/pricing",
+    "pricing_checked": "2026-07-04",
+    "pricing_note": "Model pricing + long-context (1M) confirmed verbatim from the first-party pricing page on 2026-07-04. max_output values are model-card facts (not on the pricing page) and are carried unchanged from prior first-party docs, not fabricated."
+  },
+  "models": [
+    {
+      "id": "claude-fable-5",
+      "context": 1000000, "max_output": 128000,
+      "capabilities": { "tools": true, "vision": true, "streaming_usage": true, "prompt_cache": true },
+      "price_per_mtok": { "input": 10.00, "output": 50.00, "cache_write_5m": 12.50, "cache_write_1h": 20.00, "cache_read": 1.00 },
+      "price_confidence": "high",
+      "price_source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price_checked": "2026-07-04"
+    },
+    {
+      "id": "claude-opus-4-8",
+      "context": 1000000, "max_output": 128000,
+      "capabilities": { "tools": true, "vision": true, "streaming_usage": true, "prompt_cache": true },
+      "price_per_mtok": { "input": 5.00, "output": 25.00, "cache_write_5m": 6.25, "cache_write_1h": 10.00, "cache_read": 0.50 },
+      "price_confidence": "high",
+      "price_source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price_checked": "2026-07-04"
+    },
+    {
+      "id": "claude-sonnet-5",
+      "context": 1000000, "max_output": 128000,
+      "capabilities": { "tools": true, "vision": true, "streaming_usage": true, "prompt_cache": true },
+      "price_per_mtok": { "input": 3.00, "output": 15.00, "cache_write_5m": 3.75, "cache_write_1h": 6.00, "cache_read": 0.30 },
+      "price_confidence": "high",
+      "price_source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price_checked": "2026-07-04",
+      "notes": "Steady-state pricing $3/$15 per MTok. First-party intro pricing of $2/$10 per MTok (5m $2.50, 1h $4, read $0.20) is in effect through 2026-08-31, then reverts to these values on 2026-09-01. The manifest carries the steady-state rate; date-gating the intro rate in the meter is an unshipped follow-up (see docs/pricing-confirmation.md)."
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "context": 200000, "max_output": 64000,
+      "capabilities": { "tools": true, "vision": true, "streaming_usage": true, "prompt_cache": true },
+      "price_per_mtok": { "input": 1.00, "output": 5.00, "cache_write_5m": 1.25, "cache_write_1h": 2.00, "cache_read": 0.10 },
+      "price_confidence": "high",
+      "price_source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "price_checked": "2026-07-04"
+    }
+  ]
+}

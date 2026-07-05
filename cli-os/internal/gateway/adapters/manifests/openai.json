@@ -1,0 +1,47 @@
+{
+  "provider": "openai",
+  "display_name": "OpenAI",
+  "adapter": "openai-native",
+  "base_url": "https://api.openai.com/v1",
+  "endpoints": {
+    "chat": "/chat/completions",
+    "responses": "/responses",
+    "models": "/models"
+  },
+  "auth": {
+    "scheme": "bearer",
+    "header": "Authorization",
+    "optional_headers": ["OpenAI-Organization", "OpenAI-Project"]
+  },
+  "streaming": {
+    "chat_completions": "openai-sse-chunks",
+    "responses": "openai-responses-named-events"
+  },
+  "tool_schema": {
+    "chat_completions": "openai-function",
+    "responses": "openai-function-flat"
+  },
+  "notes": [
+    "chat/completions: SSE `data: {chat.completion.chunk}`, choices[].delta, tool args accumulate by index, terminates `data: [DONE]`; opt in to usage via stream_options.include_usage=true.",
+    "responses: NAMED SSE events (response.created ... response.output_text.delta ... response.completed), NO [DONE] sentinel; tools are FLATTENED {type:function,name,description,parameters,strict}.",
+    "Some newer models are Responses-only -> /v1/responses is a SECOND full stream+tool translator (v1/v2 scope decision Q4)."
+  ],
+  "verification": {
+    "shape": "high",
+    "shape_source": "OpenAI official OpenAPI spec (github.com/openai/openai-openapi)",
+    "pricing": "unconfirmed",
+    "pricing_source": "NONE fetched first-party -- see pricing_note",
+    "pricing_checked": "2026-07-04",
+    "pricing_note": "First-party confirmation attempted 2026-07-04 from a networked environment and FAILED: every official OpenAI domain is blocked. platform.openai.com/docs/pricing, openai.com/api/pricing/, developers.openai.com/api/docs/pricing and help.openai.com all return HTTP 403 (org-policy egress denial at the CONNECT layer + provider bot protection). Per the brief, pricing and concrete flagship model ids are left null rather than carried over from training-data memory. Do NOT backfill. See docs/pricing-confirmation.md."
+  },
+  "models": [
+    {
+      "id": "PENDING-first-party-confirmation",
+      "context": null, "max_output": null,
+      "capabilities": { "tools": true, "parallel_tools": true, "vision": true, "streaming_usage": "opt-in" },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Model ids + pricing intentionally left null. The API SHAPE is verified from OpenAI's own OpenAPI spec; concrete flagship model ids and prices need a first-party pricing-page fetch, which the 2026-07-04 pass could not reach (all official OpenAI domains 403). Do NOT backfill from training-data memory. Ids starting with 'PENDING' are filtered out of the routable catalog, so OpenAI contributes no routable models until confirmed."
+    }
+  ]
+}

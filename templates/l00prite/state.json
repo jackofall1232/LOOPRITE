@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "project_name": "replace-with-project-name",
+  "current_goal": "replace-with-current-goal",
+  "current_phase": "scaffolded",
+  "active_agent": null,
+  "last_agent": null,
+  "last_updated": null,
+  "status": "not_started",
+  "blocked": false,
+  "blocker_reason": null,
+  "active_event_id": null,
+  "last_event_processed": null,
+  "pending_event_count": 0,
+  "review_response_required": false,
+  "ci_status": "unknown",
+  "execution_active": false,
+  "execution_stop_reason": null,
+  "next_recommended_action": "review the generated blueprint and choose the first implementation step"
+}

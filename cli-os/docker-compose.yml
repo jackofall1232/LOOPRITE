@@ -1,0 +1,22 @@
+services:
+  cli-os:
+    build: .
+    image: l00prite-cli-os:1.0.0
+    container_name: l00prite-cli-os
+    restart: unless-stopped
+    ports:
+      - "8787:8787"          # OpenAI endpoint + dashboard
+    volumes:
+      - cli-os-data:/data     # keys (encrypted), db, ledger persist here
+    environment:
+      # Master key: omit to use the auto-generated keyfile in the volume, OR pin one here
+      # (base64 of 32 bytes) so it is not stored on the data volume:
+      # LOOPRITE_MASTER_KEY: "<base64-32-bytes>"
+      LOOPRITE_DEFAULT_DAILY_CAP: "10"
+      # Container binds 0.0.0.0 (see Dockerfile). For public exposure, terminate TLS at a
+      # reverse proxy in front of this service.
+    # For public TLS, mount certs and set:
+    #   LOOPRITE_TLS_CERT / LOOPRITE_TLS_KEY, and drop LOOPRITE_ALLOW_INSECURE_BIND.
+
+volumes:
+  cli-os-data:

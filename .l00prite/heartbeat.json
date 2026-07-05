@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "max_iterations": 20,
+  "current_iteration": 9,
+  "stop_conditions": [
+    "definition_of_done_met",
+    "blocked",
+    "human_review_required",
+    "max_iterations_reached"
+  ],
+  "human_review_gates": [
+    "before executing destructive operations",
+    "before changing .claude/commands/build-loop.md",
+    "before changing scripts/validate-l00prite.js",
+    "before declaring this release's Definition of Done met and merging to main"
+  ],
+  "last_run_time": "2026-07-04T09:00:00Z",
+  "completion_status": "in_progress",
+  "should_continue": false,
+  "pause_reason": "loop-maturity gap pass (doctor, failure/anti-pattern catalogs, Autonomous-Edit Denylist, no-progress telemetry) complete on branch claude/l00prite-gaps-analysis-hbv4ej with zero gated-file edits; awaiting maintainer review. Deferred gated work is queued as the v1.2 batch in todos.md.",
+  "execution": {
+    "enabled": false,
+    "preflight_confirmed": false,
+    "preflight_confirmed_at": null,
+    "preflight_confirmed_by": null,
+    "max_iterations": 25,
+    "current_iteration": 0,
+    "last_run_boundary": null,
+    "iterations_since_progress": 0,
+    "last_progress_iteration": null,
+    "no_progress_threshold": 3,
+    "run_boundaries": [
+      "definition_of_done_met",
+      "iteration_limit_reached",
+      "human_review_gate",
+      "destructive_operation_required",
+      "ambiguous_requirements",
+      "unfixable_failing_tests",
+      "missing_secrets_or_credentials",
+      "lock_lease_conflict",
+      "stop_signal"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+<svg width="640" height="200" viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">l00prite</title>
+  <desc id="desc">An infinity loop representing persistent, resumable memory for AI coding agents</desc>
+  <path d="M 120 100
+           C 120 60, 170 60, 200 100
+           C 230 140, 280 140, 280 100
+           C 280 60, 230 60, 200 100
+           C 170 140, 120 140, 120 100 Z"
+        fill="none" stroke="#6b6bff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="130" cy="100" r="7" fill="#6b6bff" />
+  <text x="320" y="118" font-family="'Courier New', Consolas, monospace" font-size="64"
+        font-weight="700" fill="#7d7dff">l00prite</text>
+</svg>

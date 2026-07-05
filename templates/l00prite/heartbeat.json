@@ -1,0 +1,43 @@
+{
+  "schema_version": 2,
+  "max_iterations": 10,
+  "current_iteration": 0,
+  "stop_conditions": [
+    "definition_of_done_met",
+    "blocked",
+    "human_review_required",
+    "max_iterations_reached"
+  ],
+  "human_review_gates": [
+    "before executing destructive operations",
+    "before changing architecture or security boundaries",
+    "before declaring completion"
+  ],
+  "last_run_time": null,
+  "completion_status": "not_started",
+  "should_continue": false,
+  "pause_reason": null,
+  "execution": {
+    "enabled": false,
+    "preflight_confirmed": false,
+    "preflight_confirmed_at": null,
+    "preflight_confirmed_by": null,
+    "max_iterations": 25,
+    "current_iteration": 0,
+    "last_run_boundary": null,
+    "iterations_since_progress": 0,
+    "last_progress_iteration": null,
+    "no_progress_threshold": 3,
+    "run_boundaries": [
+      "definition_of_done_met",
+      "iteration_limit_reached",
+      "human_review_gate",
+      "destructive_operation_required",
+      "ambiguous_requirements",
+      "unfixable_failing_tests",
+      "missing_secrets_or_credentials",
+      "lock_lease_conflict",
+      "stop_signal"
+    ]
+  }
+}

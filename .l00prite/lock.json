@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "lock_id": "lock-20260705-201723-claude-os-apk-merge-close",
+  "owner_agent": null,
+  "owner_session": null,
+  "acquired_at": "2026-07-05T20:17:23Z",
+  "expires_at": "2026-07-05T20:47:23Z",
+  "ttl_seconds": 1800,
+  "purpose": null,
+  "protected_paths": [
+    "ledger.md",
+    "memory.md",
+    "state.json",
+    "heartbeat.json",
+    "failures.md",
+    "todos.md",
+    "events/",
+    "reviews/",
+    "sessions/"
+  ],
+  "status": "released"
+}

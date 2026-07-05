@@ -1,0 +1,9 @@
+# CI workflow stub — filled in by the build loop, not by l00prite
+name: CI
+on:
+  workflow_dispatch:
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI not yet configured — filled in by the build loop"

@@ -1,0 +1,11 @@
+.git
+*.db
+*.db-wal
+*.db-shm
+master.key
+ledger.jsonl
+data
+.cli-os-data
+.env
+/l00prite
+/cli-os

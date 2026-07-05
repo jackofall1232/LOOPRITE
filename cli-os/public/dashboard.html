@@ -1,0 +1,1050 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>l00prite CLI-OS</title>
+<style>
+  :root{
+    --bg:#0B0F14; --panel:rgba(255,255,255,.035); --panel-2:rgba(255,255,255,.06);
+    --stroke:rgba(255,255,255,.08); --stroke-2:rgba(255,255,255,.15);
+    --text:#E7EDF5; --text-2:#9AA7B8; --text-3:#5E6B7C;
+    --accent:#4F8CFF; --accent-2:#7AA8FF; --accent-ink:#CFE0FF; --glow:rgba(79,140,255,.2);
+    --ok:#00C853; --warn:#FFB300; --err:#F44336; --run:#3D7EFF; --teal:#2DD4BF; --violet:#A78BFA;
+    --input-bg:rgba(0,0,0,.3); --input-bg-solid:#0A0E13;
+    --font-sans:"Inter","SF Pro Text",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:"SFMono-Regular","JetBrains Mono","Roboto Mono",ui-monospace,Menlo,Consolas,monospace;
+    --r-lg:18px; --r-md:13px; --r-sm:9px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  /* Form controls are always themed explicitly — text, caret, placeholder, dropdown options, and
+     autofill — so a field can never render its text in the same color as its background in either
+     color scheme (native control colors don't follow the page palette on their own). */
+  input,select,textarea{color:var(--text);caret-color:var(--text);}
+  input::placeholder,textarea::placeholder{color:var(--text-3);opacity:1;}
+  select option{background:var(--input-bg-solid);color:var(--text);}
+  input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{
+    -webkit-text-fill-color:var(--text);
+    -webkit-box-shadow:0 0 0 1000px var(--input-bg-solid) inset;}
+  body{
+    font-family:var(--font-sans); color:var(--text); line-height:1.45; letter-spacing:.1px;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+    background:
+      radial-gradient(1200px 620px at 10% -12%, rgba(79,140,255,.1), transparent 60%),
+      radial-gradient(1000px 520px at 102% -4%, rgba(45,212,191,.05), transparent 55%),
+      var(--bg);
+    background-attachment:fixed;
+  }
+  .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:0;}
+  .num{font-variant-numeric:tabular-nums;}
+  .ico{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;stroke-width:1.75;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+  a{color:inherit;}
+
+  .app{display:flex;min-height:100vh;}
+  .sidebar{position:sticky;top:0;align-self:flex-start;height:100vh;width:236px;flex:0 0 236px;
+    display:flex;flex-direction:column;padding:20px 14px;gap:4px;
+    background:linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.01));
+    border-right:1px solid var(--stroke);backdrop-filter:blur(18px);z-index:30;}
+  .brand{display:flex;align-items:center;gap:11px;padding:6px 8px 16px;}
+  .brand .logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#fff;font-size:18px;
+    background:radial-gradient(120% 120% at 30% 20%, rgba(79,140,255,.9), rgba(79,140,255,.35));box-shadow:0 6px 20px -6px var(--glow), inset 0 1px 0 rgba(255,255,255,.35);}
+  .brand .name{font-weight:680;font-size:15px;}
+  .brand .sub{font-size:10.5px;color:var(--text-3);letter-spacing:.14em;text-transform:uppercase;margin-top:1px;}
+  .nav-label{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-3);padding:14px 10px 6px;}
+  .nav{display:flex;flex-direction:column;gap:2px;}
+  .nav a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:11px;color:var(--text-2);text-decoration:none;font-size:13.5px;font-weight:500;cursor:pointer;transition:background .16s,color .16s;}
+  .nav a .ico{color:var(--text-3);width:17px;height:17px;}
+  .nav a:hover{background:rgba(255,255,255,.045);color:var(--text);}
+  .nav a:hover .ico{color:var(--text-2);}
+  .side-foot{margin-top:auto;padding-top:12px;}
+  .node-card{display:flex;align-items:center;gap:10px;padding:10px 11px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel);}
+  .node-card .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(0,200,83,.14);}
+  .node-card .t{font-size:12px;font-weight:600;}
+  .node-card .s{font-size:10.5px;color:var(--text-3);font-family:var(--font-mono);}
+
+  .main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;}
+  .topbar{position:sticky;top:0;z-index:25;display:flex;align-items:center;gap:14px;padding:14px 26px;
+    background:rgba(11,15,20,.72);border-bottom:1px solid var(--stroke);backdrop-filter:blur(16px);}
+  .top-title{font-size:15px;font-weight:650;}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+  .chip{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:11px;border:1px solid var(--stroke);background:var(--panel);font-size:12.5px;color:var(--text-2);font-weight:600;}
+  .chip .mono{color:var(--text);}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--stroke);background:var(--panel);color:var(--text);transition:transform .12s,border-color .15s,background .15s;}
+  .btn:hover{border-color:var(--stroke-2);background:var(--panel-2);}
+  .btn:active{transform:translateY(1px);}
+  .btn.primary{background:linear-gradient(180deg,#5a94ff,#3f7cff);border-color:rgba(79,140,255,.5);color:#fff;}
+  .btn.sm{padding:6px 10px;font-size:12px;}
+
+  .content{padding:22px 26px 46px;display:flex;flex-direction:column;gap:20px;max-width:1680px;width:100%;}
+  .page-head h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.3px;}
+  .page-head p{margin:5px 0 0;color:var(--text-2);font-size:13.5px;}
+
+  .card{background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.017));border:1px solid var(--stroke);border-radius:var(--r-lg);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 24px 48px -32px rgba(0,0,0,.7);backdrop-filter:blur(14px);}
+  .card-pad{padding:18px;}
+  .eyebrow{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);font-weight:600;}
+  .eyebrow .tick{width:6px;height:6px;border-radius:2px;background:var(--accent);box-shadow:0 0 10px var(--glow);}
+  .sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px;}
+  .sec-head h2{margin:0;font-size:15px;font-weight:650;}
+  .sec-head .meta{font-size:12px;color:var(--text-3);font-family:var(--font-mono);}
+
+  .hero{display:grid;grid-template-columns:1.1fr 2fr;gap:1px;overflow:hidden;position:relative;}
+  .hero .left,.hero .right{padding:22px 24px;}
+  .hero .left{background:linear-gradient(180deg, rgba(79,140,255,.06), rgba(79,140,255,.01));}
+  .status-big{display:flex;align-items:center;gap:12px;margin-top:14px;}
+  .pulse{position:relative;width:13px;height:13px;border-radius:50%;background:var(--ok);}
+  .pulse::before{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid rgba(0,200,83,.5);animation:ring 2.4s ease-out infinite;}
+  .pulse.warn{background:var(--warn);}.pulse.warn::before{border-color:rgba(255,179,0,.5);}
+  .pulse.err{background:var(--err);}.pulse.err::before{border-color:rgba(244,67,54,.5);}
+  @keyframes ring{0%{transform:scale(.6);opacity:.9}100%{transform:scale(1.7);opacity:0}}
+  .status-big .word{font-size:28px;font-weight:720;letter-spacing:-.5px;text-transform:capitalize;}
+  .hero .desc{color:var(--text-2);font-size:13px;margin-top:10px;}
+  .hero .desc b{color:var(--text);font-weight:650;}
+  .hstat{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--stroke);font-size:12.5px;}
+  .hstat:last-child{border-bottom:none;}
+  .hstat .k{color:var(--text-3);}
+  .hstat .v{color:var(--text);font-weight:600;}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+  .kpi .k-top{display:flex;align-items:center;gap:8px;color:var(--text-3);font-size:11.5px;font-weight:600;}
+  .kpi .k-top .ico{width:15px;height:15px;}
+  .kpi .k-val{display:flex;align-items:baseline;gap:6px;margin-top:10px;}
+  .kpi .k-val .n{font-size:27px;font-weight:700;letter-spacing:-.6px;font-variant-numeric:tabular-nums;}
+  .kpi .k-val .u{font-size:13px;color:var(--text-3);font-family:var(--font-mono);}
+  .kpi .k-foot{margin-top:8px;font-size:11.5px;color:var(--text-2);}
+
+  .grid-main{display:grid;grid-template-columns:minmax(0,1.9fr) minmax(300px,1fr);gap:20px;align-items:start;}
+  .col{display:flex;flex-direction:column;gap:20px;min-width:0;}
+
+  .prov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;}
+  .prov{padding:15px 15px 13px;}
+  .prov.off{opacity:.6;}
+  .prov .p-top{display:flex;align-items:center;gap:10px;}
+  .prov .p-logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:13px;font-weight:800;color:#0b0f14;background:#7AA8FF;}
+  .prov .p-name{font-size:13.5px;font-weight:650;}
+  .prov .p-model{font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);margin-top:1px;}
+  .prov .p-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:13px 0;}
+  .st .sl{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);}
+  .st .sv{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;margin-top:2px;}
+  .st .sv small{color:var(--text-3);font-size:10px;}
+  .st .sv.dim{color:var(--text-3);}
+  .prov .p-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:11px;border-top:1px solid var(--stroke);}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:650;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+  .pill .d{width:6px;height:6px;border-radius:50%;}
+  .pill.ok{color:#84f0b3;background:rgba(0,200,83,.12);border:1px solid rgba(0,200,83,.28);}.pill.ok .d{background:var(--ok);}
+  .pill.warn{color:#ffd27a;background:rgba(255,179,0,.12);border:1px solid rgba(255,179,0,.3);}.pill.warn .d{background:var(--warn);}
+  .pill.err{color:#ff9a92;background:rgba(244,67,54,.12);border:1px solid rgba(244,67,54,.32);}.pill.err .d{background:var(--err);}
+  .pill.idle{color:var(--text-2);background:rgba(255,255,255,.05);border:1px solid var(--stroke);}.pill.idle .d{background:var(--text-3);}
+  .pill.accent{color:var(--accent-ink);background:rgba(79,140,255,.14);border:1px solid rgba(79,140,255,.32);}.pill.accent .d{background:var(--accent);}
+
+  .cost-head{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px;}
+  .cost-stat{padding:12px 14px;border-radius:var(--r-md);border:1px solid var(--stroke);background:var(--panel);}
+  .cost-stat .l{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);}
+  .cost-stat .v{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.3px;margin-top:5px;}
+  .charts{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;}
+  .chart-block .ct{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .chart-block .ct .cn{font-size:12.5px;font-weight:600;}
+  .chart-block .ct .cm{font-size:11px;color:var(--text-3);font-family:var(--font-mono);}
+  .chart-wrap{overflow-x:auto;}
+  svg.chart{width:100%;height:auto;display:block;}
+  .bar-row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12px;}
+  .bar-row .bl{width:92px;flex:0 0 auto;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .bar-track{flex:1;height:9px;border-radius:5px;background:rgba(255,255,255,.07);overflow:hidden;}
+  .bar-track i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#3d7eff,#7aa8ff);}
+  .bar-row .bv{width:78px;text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text);}
+
+  .repo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
+  .repo{padding:16px;}
+  .repo .r-top{display:flex;align-items:center;gap:10px;}
+  .repo .r-ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;border:1px solid var(--stroke);background:var(--panel-2);color:var(--accent-2);}
+  .repo .r-name{font-size:14px;font-weight:650;}
+  .repo .r-sub{font-family:var(--font-mono);font-size:11px;color:var(--text-3);margin-top:2px;word-break:break-all;}
+  .repo .r-mem{margin-top:13px;display:flex;gap:6px;flex-wrap:wrap;}
+  .fresh{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap;}
+  .fresh.new{color:#84f0b3;background:rgba(0,200,83,.1);border:1px solid rgba(0,200,83,.24);}
+  .fresh.mid{color:var(--text-2);background:rgba(255,255,255,.05);border:1px solid var(--stroke);}
+  .fresh.stale{color:#ffd27a;background:rgba(255,179,0,.1);border:1px solid rgba(255,179,0,.26);}
+  .fresh.miss{color:var(--text-3);background:rgba(255,255,255,.03);border:1px dashed var(--stroke);}
+
+  .list .row{display:flex;align-items:center;gap:11px;padding:11px 4px;border-bottom:1px solid var(--stroke);}
+  .list .row:last-child{border-bottom:none;}
+  .list .r-ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;border:1px solid var(--stroke);}
+  .list .r-ic.ok{color:#84f0b3;background:rgba(0,200,83,.1);}
+  .list .r-ic.warn{color:#ffd27a;background:rgba(255,179,0,.1);}
+  .list .r-ic.err{color:#ff9a92;background:rgba(244,67,54,.1);}
+  .list .r-ic.info{color:var(--accent-2);background:rgba(79,140,255,.1);}
+  .list .r-main{flex:1;min-width:0;}
+  .list .r-t{font-size:12.5px;font-weight:550;line-height:1.35;}
+  .list .r-t b{font-weight:700;}
+  .list .r-meta{font-size:10.5px;color:var(--text-3);font-family:var(--font-mono);margin-top:3px;}
+  .list .r-right{font-size:11px;font-family:var(--font-mono);color:var(--text-2);white-space:nowrap;}
+
+  .empty{padding:26px 16px;text-align:center;color:var(--text-3);font-size:13px;border:1px dashed var(--stroke);border-radius:var(--r-md);background:rgba(255,255,255,.015);}
+  .empty b{color:var(--text-2);font-weight:650;}
+  .empty code{font-family:var(--font-mono);font-size:12px;background:rgba(255,255,255,.05);padding:1px 6px;border-radius:6px;color:var(--accent-ink);}
+
+  /* connect overlay */
+  .overlay{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:24px;background:rgba(6,9,13,.82);backdrop-filter:blur(6px);}
+  .overlay .box{width:100%;max-width:460px;}
+  .overlay input{width:100%;padding:11px 13px;border-radius:var(--r-md);background:var(--input-bg);border:1px solid var(--stroke);color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none;}
+  .overlay input:focus{border-color:rgba(79,140,255,.6);}
+  .note{margin-top:14px;padding:11px 13px;border-radius:var(--r-md);font-size:12.5px;border:1px solid var(--stroke);background:var(--panel);color:var(--text-2);}
+  .note.err{border-color:rgba(244,67,54,.34);background:rgba(244,67,54,.09);color:#ffb0a8;}
+  .note.ok{border-color:rgba(0,200,83,.32);background:rgba(0,200,83,.09);color:#9ff0bd;}
+  .note.warn{border-color:rgba(255,179,0,.32);background:rgba(255,179,0,.09);color:#ffdf9c;}
+  .hidden{display:none!important;}
+  .spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:var(--accent);animation:spin .7s linear infinite;display:inline-block;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* provider/repo management: card actions + modal + forms */
+  .p-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--stroke);}
+  .btn.tiny{padding:5px 9px;font-size:11.5px;border-radius:9px;}
+  .btn.danger{border-color:rgba(244,67,54,.4);color:#ff9a92;}
+  .btn.danger:hover{background:rgba(244,67,54,.1);border-color:rgba(244,67,54,.6);}
+  .modal{position:fixed;inset:0;z-index:120;display:grid;place-items:start center;padding:32px 20px;background:rgba(6,9,13,.82);backdrop-filter:blur(6px);overflow-y:auto;}
+  .modal .box{width:100%;max-width:520px;margin:auto;}
+  .modal h3{margin:12px 0 4px;font-size:19px;font-weight:700;letter-spacing:-.2px;}
+  .modal .sub{color:var(--text-2);font-size:13px;margin:4px 0 6px;}
+  .field{margin-top:14px;}
+  .field > label{display:block;font-size:11.5px;font-weight:600;color:var(--text-2);margin-bottom:6px;letter-spacing:.02em;}
+  .field label .opt{color:var(--text-3);font-weight:500;}
+  .field input[type=text],.field input[type=password],.field select,.field textarea{width:100%;padding:10px 12px;border-radius:var(--r-md);background:var(--input-bg);border:1px solid var(--stroke);color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none;}
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:rgba(79,140,255,.6);}
+  .field.check{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text-2);cursor:pointer;}
+  .field.check input{width:16px;height:16px;accent-color:var(--accent);}
+  .modal-actions{display:flex;gap:10px;margin-top:20px;align-items:center;}
+  .modal-actions .spacer{flex:1;}
+  .modelgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;max-height:290px;overflow-y:auto;}
+  .modelrow{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--stroke);border-radius:var(--r-sm);font-family:var(--font-mono);font-size:12px;cursor:pointer;}
+  .modelrow input{accent-color:var(--accent);flex:0 0 auto;}
+  .modelrow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  @media (max-width:560px){ .modelgrid{grid-template-columns:1fr;} .modal .box{max-width:none;} }
+
+  /* playground — prompt the models straight from the dashboard */
+  .play-select{padding:8px 10px;border-radius:10px;background:var(--input-bg);border:1px solid var(--stroke);color:var(--text);font-family:var(--font-mono);font-size:12px;outline:none;max-width:240px;}
+  .play-select:focus{border-color:rgba(79,140,255,.6);}
+  .chatlog{display:flex;flex-direction:column;gap:10px;max-height:420px;overflow-y:auto;padding:4px 2px;}
+  .msg{max-width:88%;padding:10px 13px;border-radius:var(--r-md);font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;}
+  .msg.user{align-self:flex-end;background:rgba(79,140,255,.14);border:1px solid rgba(79,140,255,.3);}
+  .msg.assistant{align-self:flex-start;background:var(--panel);border:1px solid var(--stroke);}
+  .msg.err{align-self:flex-start;background:rgba(244,67,54,.09);border:1px solid rgba(244,67,54,.34);color:#ffb0a8;}
+  .msg .m-meta{margin-top:7px;font-size:10.5px;color:var(--text-3);font-family:var(--font-mono);}
+  .chatbar{display:flex;gap:10px;margin-top:12px;align-items:flex-end;}
+  .chatbar textarea{flex:1;resize:vertical;min-height:46px;padding:11px 13px;border-radius:var(--r-md);background:var(--input-bg);border:1px solid var(--stroke);color:var(--text);font-family:var(--font-sans);font-size:13.5px;outline:none;}
+  .chatbar textarea:focus{border-color:rgba(79,140,255,.6);}
+  @media (max-width:680px){ .msg{max-width:100%;} .play-select{max-width:150px;} }
+
+  @media (max-width:1180px){ .grid-main{grid-template-columns:1fr;} .charts{grid-template-columns:1fr;} .hero{grid-template-columns:1fr;} }
+  @media (max-width:1000px){ .sidebar{display:none;} .kpi-grid{grid-template-columns:repeat(2,1fr);} .cost-head{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:680px){ .content{padding:16px;} .repo-grid,.prov-grid{grid-template-columns:1fr;} .kpi-grid{grid-template-columns:1fr 1fr;} .top-title{display:none;} }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#F5F7FB;--panel:rgba(10,20,40,.03);--panel-2:rgba(10,20,40,.05);--stroke:rgba(10,20,40,.11);--stroke-2:rgba(10,20,40,.2);--text:#0E1726;--text-2:#465064;--text-3:#7A8698;
+      --input-bg:#fff;--input-bg-solid:#fff;}
+    body{background:radial-gradient(1200px 620px at 10% -12%, rgba(79,140,255,.12), transparent 60%), var(--bg);}
+    .topbar{background:rgba(245,247,251,.8);}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><line x1="6" y1="4" x2="6" y2="15"/><circle cx="18" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><path d="M18 8.6a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><circle cx="7" cy="7.5" r=".7" fill="currentColor" stroke="none"/><circle cx="7" cy="16.5" r=".7" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/><path d="M4 11.5v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="7" y1="15" x2="10" y2="15"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3"/><path d="M17 6l2 2"/><path d="M15 8l1.5 1.5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5c0 4.6-3.2 8.6-7.5 9.8C7.7 19.6 4.5 15.6 4.5 11V6L12 3z"/><path d="M9 12l2.2 2.2L15.2 10"/></symbol>
+  <symbol id="i-logs" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2.4"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l9.5 16.5H2.5L12 3z"/><line x1="12" y1="10" x2="12" y2="14"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.6 5.6L20 9.3l-4 4 1 5.8L12 16l-5 3.1 1-5.8-4-4 5.4-.7L12 3z"/></symbol>
+  <symbol id="i-brackets" viewBox="0 0 24 24"><path d="M8 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H8"/><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H16"/></symbol>
+  <symbol id="i-inf" viewBox="0 0 24 24"><path d="M7 8.5c-2.2 0-3.7 1.6-3.7 3.5S4.8 15.5 7 15.5c3.4 0 6.6-7 10-7 2.2 0 3.7 1.6 3.7 3.5S19.2 15.5 17 15.5c-3.4 0-6.6-7-10-7z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.3l2.8 1.7"/></symbol>
+  <symbol id="i-fork" viewBox="0 0 24 24"><circle cx="6" cy="5.5" r="2.4"/><circle cx="18" cy="5.5" r="2.4"/><circle cx="12" cy="18.5" r="2.4"/><path d="M6 8v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V8"/><line x1="12" y1="13" x2="12" y2="16"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5c0 4.14-4.03 7.5-9 7.5-1.02 0-2-.14-2.92-.4L4.5 20l1.15-3.44C4.24 15.24 3.4 13.46 3.4 11.5 3.4 7.36 7.03 4 12 4s9 3.36 9 7.5z"/><line x1="8.5" y1="10.5" x2="15.5" y2="10.5"/><line x1="8.5" y1="13.5" x2="13" y2="13.5"/></symbol>
+</defs></svg>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">∞</div>
+      <div><div class="name">l00prite</div><div class="sub">CLI&#8209;OS</div></div>
+    </div>
+    <div class="nav-label">Workspace</div>
+    <nav class="nav">
+      <a data-goto="sec-top"><svg class="ico"><use href="#i-grid"/></svg><span>Overview</span></a>
+      <a data-goto="sec-play"><svg class="ico"><use href="#i-chat"/></svg><span>Playground</span></a>
+      <a data-goto="sec-providers"><svg class="ico"><use href="#i-server"/></svg><span>Providers</span></a>
+      <a data-goto="sec-cost"><svg class="ico"><use href="#i-card"/></svg><span>Costs</span></a>
+      <a data-goto="sec-repos"><svg class="ico"><use href="#i-branch"/></svg><span>Repositories</span></a>
+      <a data-goto="sec-activity"><svg class="ico"><use href="#i-logs"/></svg><span>Activity</span></a>
+      <a data-goto="sec-tokens"><svg class="ico"><use href="#i-key"/></svg><span>Tokens</span></a>
+    </nav>
+    <div class="side-foot">
+      <div class="node-card">
+        <span class="dot" id="foot-dot"></span>
+        <div style="min-width:0"><div class="t">l00prite CLI&#8209;OS</div><div class="s" id="foot-ver">—</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="top-title">Control plane</div>
+      <div class="top-right">
+        <span class="chip" id="principal-chip" style="display:none"></span>
+        <span class="chip" id="refresh-chip" style="display:none"><svg class="ico" style="width:14px;height:14px"><use href="#i-clock"/></svg><span id="refresh-ago">—</span></span>
+        <button class="btn sm" id="refresh-btn"><svg class="ico" style="width:15px;height:15px"><use href="#i-refresh"/></svg> Refresh</button>
+        <button class="btn sm" id="disconnect-btn" style="display:none">Disconnect</button>
+      </div>
+    </header>
+
+    <div class="content" id="content">
+      <div id="sec-top" class="page-head">
+        <h1 id="page-title">Control plane</h1>
+        <p id="page-sub">Connecting…</p>
+      </div>
+
+      <section class="card hero" id="hero"></section>
+
+      <section class="card card-pad" id="sec-play">
+        <div class="sec-head">
+          <div><div class="eyebrow"><span class="tick" style="background:var(--violet)"></span> Playground</div><h2 style="margin-top:8px">Prompt your models</h2></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            <select id="play-model" class="play-select" title="Model, provider/model pin, or auto profile"><option value="auto">auto</option></select>
+            <input type="text" id="play-model-custom" class="play-select hidden" placeholder="model id, e.g. glm-5.2" title="Sent as-is — for providers whose catalog isn't known">
+            <select id="play-repo" class="play-select" title="Inject a registered repo's .l00prite memory"><option value="">no repo memory</option></select>
+            <button class="btn sm" id="play-clear">Clear</button>
+          </div>
+        </div>
+        <div class="chatlog" id="play-log"></div>
+        <div class="chatbar">
+          <textarea id="play-input" rows="2" placeholder="Ask anything — it goes through the same gateway your coding tools use (Ctrl/⌘+Enter to send)"></textarea>
+          <button class="btn primary" id="play-send">Send</button>
+        </div>
+      </section>
+
+      <section id="sec-providers">
+        <div class="sec-head"><h2>Providers</h2>
+          <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
+            <span class="meta" id="providers-meta"></span>
+            <button class="btn sm primary" id="add-provider-btn" style="display:none"><svg class="ico" style="width:15px;height:15px"><use href="#i-server"/></svg> Add provider</button>
+          </div>
+        </div>
+        <div id="providers-body"></div>
+      </section>
+
+      <div class="grid-main">
+        <div class="col">
+          <section class="card card-pad" id="sec-cost">
+            <div class="sec-head"><div><div class="eyebrow"><span class="tick" style="background:var(--teal)"></span> Cost analytics</div><h2 style="margin-top:8px">Spend &amp; usage</h2></div><span class="meta" id="cost-meta"></span></div>
+            <div id="cost-body"></div>
+          </section>
+
+          <section id="sec-repos">
+            <div class="sec-head"><h2>Repositories &amp; memory</h2>
+              <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
+                <span class="meta" id="repos-meta"></span>
+                <button class="btn sm primary" id="add-repo-btn" style="display:none"><svg class="ico" style="width:15px;height:15px"><use href="#i-branch"/></svg> Register repo</button>
+              </div>
+            </div>
+            <div id="repos-body"></div>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card card-pad">
+            <div class="sec-head"><div class="eyebrow"><span class="tick" style="background:var(--warn)"></span> Alerts</div><span class="meta" id="alerts-meta"></span></div>
+            <div class="list" id="alerts-body"></div>
+          </section>
+
+          <section class="card card-pad" id="sec-activity">
+            <div class="sec-head"><div class="eyebrow"><span class="tick" style="background:var(--run)"></span> Recent activity</div><span class="meta">run ledger</span></div>
+            <div class="list" id="activity-body"></div>
+          </section>
+
+          <section class="card card-pad" id="sec-tokens">
+            <div class="sec-head"><div class="eyebrow"><span class="tick" style="background:var(--violet)"></span> Tokens</div><span class="meta" id="tokens-meta"></span></div>
+            <div class="list" id="tokens-body"></div>
+          </section>
+
+          <section class="card card-pad">
+            <div class="sec-head"><div class="eyebrow"><span class="tick"></span> Audit log</div><span class="meta">operator events</span></div>
+            <div class="list" id="audit-body"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="modal"><div class="box card card-pad" id="modal-body"></div></div>
+
+<div class="overlay hidden" id="overlay">
+  <div class="box card card-pad">
+    <div class="eyebrow"><span class="tick"></span> Connect</div>
+    <h1 style="margin:12px 0 6px;font-size:20px;font-weight:700">Enter a gateway token</h1>
+    <p style="color:var(--text-2);font-size:13.5px;margin:6px 0 14px">The dashboard reads live state through the same authenticated API every client uses. Paste a token
+      (or mint one with <span class="mono">l00prite token mint</span>). It's stored only in this browser.</p>
+    <input type="password" id="token-input" placeholder="l00p_…" autocomplete="off" spellcheck="false">
+    <div id="overlay-note"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;align-items:center">
+      <div style="flex:1"></div>
+      <button class="btn primary" id="token-save">Connect →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function(){
+  const TOKEN_KEY="l00prite_token";
+  const S={ token:null, summary:null, timer:null };
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const num = n => (n==null?0:Number(n)).toLocaleString(undefined,{maximumFractionDigits:0});
+  function usd(n){ n=Number(n||0); if(n>0 && n<0.01) return "$"+n.toFixed(4); return "$"+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function tok(n){ n=Number(n||0); if(n>=1e6) return (n/1e6).toFixed(1)+"M"; if(n>=1e3) return (n/1e3).toFixed(1)+"K"; return String(n); }
+  function ago(iso){ if(!iso) return "—"; const t=Date.parse(iso); if(isNaN(t)) return "—"; const s=Math.max(0,(Date.now()-t)/1000);
+    if(s<60) return Math.floor(s)+"s ago"; if(s<3600) return Math.floor(s/60)+"m ago"; if(s<86400) return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; }
+  function dur(sec){ sec=Math.max(0,Math.floor(sec||0)); const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60);
+    if(d>0) return d+"d "+h+"h"; if(h>0) return h+"h "+m+"m"; if(m>0) return m+"m"; return sec+"s"; }
+
+  async function fetchSummary(){
+    const res = await fetch("/v1/dashboard/summary",{headers:{authorization:"Bearer "+S.token}});
+    if(res.status===401) return {unauthorized:true};
+    if(!res.ok) return {error:"HTTP "+res.status};
+    return {data: await res.json()};
+  }
+
+  function showOverlay(msg){
+    $("overlay").classList.remove("hidden");
+    $("overlay-note").innerHTML = msg ? `<div class="note err">${esc(msg)}</div>` : "";
+    const inp=$("token-input"); inp.value=""; inp.focus();
+  }
+  function hideOverlay(){ $("overlay").classList.add("hidden"); }
+
+  async function refresh(){
+    if(!S.token){ showOverlay(); return; }
+    const btn=$("refresh-btn"); const old=btn.innerHTML; btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Loading`;
+    const r = await fetchSummary();
+    btn.disabled=false; btn.innerHTML=old;
+    if(r.unauthorized){ S.token=null; try{localStorage.removeItem(TOKEN_KEY);}catch(e){} showOverlay("That token was rejected. Enter a valid gateway token."); return; }
+    if(r.error){ $("page-sub").textContent = "Could not load state ("+r.error+")."; return; }
+    hideOverlay();
+    S.summary=r.data; render();
+    loadModels();
+  }
+
+  function render(){
+    const d=S.summary; if(!d) return;
+    $("disconnect-btn").style.display="";
+    $("add-provider-btn").style.display="";
+    $("add-repo-btn").style.display="";
+    // header
+    const providersOnline=(d.system&&d.system.providers_healthy)||0, providersTotal=(d.system&&d.system.providers_total)||0;
+    const repos=(d.repos||[]).length, spendToday=(d.spend&&d.spend.today_committed_usd)||0;
+    $("page-title").textContent="Control plane";
+    $("page-sub").textContent = `${repos} ${repos===1?"repository":"repositories"} · ${providersOnline}/${providersTotal} providers healthy · ${usd(spendToday)} spent today`;
+    // principal + refresh chips
+    if(d.principal){ $("principal-chip").style.display=""; $("principal-chip").innerHTML=`<svg class="ico" style="width:14px;height:14px"><use href="#i-key"/></svg> project <span class="mono">${esc(d.principal.project||"?")}</span>`; }
+    $("refresh-chip").style.display=""; $("refresh-ago").textContent = "updated "+ago(d.generated_at);
+    $("foot-ver").textContent = "v"+(d.version||"?")+" · self-hosted";
+    const st=(d.system&&d.system.status)||"ok"; $("foot-dot").style.background = st==="ok"?"var(--ok)":"var(--warn)";
+
+    renderHero(d); renderProviders(d); renderCost(d); renderRepos(d); renderAlerts(d); renderActivity(d); renderTokens(d); renderAudit(d);
+    renderPlayRepos(d); renderChat();
+  }
+
+  function renderHero(d){
+    const sys=d.system||{}, up=d.uptime||{};
+    const status = sys.status==="ok" ? {w:sys.status_label||"Operational",c:""} : {w:sys.status_label||"Degraded",c:"warn"};
+    const uptimeTxt = up.tracked ? dur(up.seconds) : "not tracked";
+    const vault = sys.vault_initialized ? `<span class="pill ok"><span class="d"></span>initialized</span>` : `<span class="pill warn"><span class="d"></span>not set</span>`;
+    const bridge = sys.bridge ? (sys.bridge.enabled?`on · ≤${sys.bridge.max_hops} hops`:"off") : "—";
+    $("hero").innerHTML = `
+      <div class="left">
+        <div class="eyebrow"><span class="tick"></span> System health</div>
+        <div class="status-big"><span class="pulse ${status.c}"></span><span class="word">${status.w}</span></div>
+        <div class="desc"><b>${sys.providers_healthy||0}</b> of <b>${sys.providers_total||0}</b> providers healthy · <b>${sys.circuit_open||0}</b> circuit${(sys.circuit_open===1)?"":"s"} open</div>
+        <div style="margin-top:16px">
+          <div class="hstat"><span class="k">Uptime</span><span class="v mono">${uptimeTxt}</span></div>
+          <div class="hstat"><span class="k">Vault</span><span class="v">${vault}</span></div>
+          <div class="hstat"><span class="k">Database</span><span class="v">${sys.db_ok?`<span class="pill ok"><span class="d"></span>ok</span>`:`<span class="pill err"><span class="d"></span>error</span>`}</span></div>
+          <div class="hstat"><span class="k">Bridging</span><span class="v mono">${esc(bridge)}</span></div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="kpi-grid">
+          ${kpi("i-branch","Repositories", num((d.repos||[]).length), "", (d.repos||[]).length===0?"none registered":"with .l00prite memory")}
+          ${kpi("i-server","Providers healthy", num(d.system.providers_healthy), "/ "+num(d.system.providers_total), d.system.providers_enabled+" enabled")}
+          ${kpi("i-key","Active tokens", num((d.tokens||{}).active), "", ((d.tokens||{}).revoked||0)+" revoked")}
+          ${kpi("i-card","Spent today", usd((d.spend||{}).today_committed_usd), "", capFoot(d))}
+        </div>
+      </div>`;
+  }
+  function kpi(icon,label,n,u,foot){ return `<div class="kpi"><div class="k-top"><svg class="ico"><use href="#${icon}"/></svg> ${esc(label)}</div>
+    <div class="k-val"><span class="n">${esc(n)}</span>${u?`<span class="u">${esc(u)}</span>`:""}</div><div class="k-foot">${esc(foot)}</div></div>`; }
+  function capFoot(d){ const sp=d.spend||{}; const bp=sp.by_project||[]; let cap=0; bp.forEach(p=>cap+=Number(p.cap_usd||0));
+    if(bp.length===0) cap = Number(sp.default_daily_cap_usd||0)*0; return cap>0? "cap "+usd(cap)+" across projects" : (sp.has_pricing_gaps?"some costs unpriced":"per-project caps"); }
+
+  function renderProviders(d){
+    const provs=d.providers||[];
+    $("providers-meta").textContent = provs.length? provs.length+" configured" : "";
+    if(!provs.length){ $("providers-body").innerHTML = `<div class="empty"><b>No providers configured.</b> The gateway can't route any requests until you add one.<div style="margin-top:12px"><button class="btn primary sm" data-action="add">Add a provider</button></div></div>`; return; }
+    $("providers-body").innerHTML = `<div class="prov-grid">${provs.map(provCard).join("")}</div>`;
+  }
+  function provCard(p){
+    const t=p.today||{};
+    let stat, cls="";
+    if(p.circuit_open){ stat=`<span class="pill err"><span class="d"></span>circuit open</span>`; }
+    else if(!p.enabled){ stat=`<span class="pill idle"><span class="d"></span>disabled</span>`; cls="off"; }
+    else if(!p.has_key){ stat=`<span class="pill warn"><span class="d"></span>no key</span>`; }
+    else{ stat=`<span class="pill ok"><span class="d"></span>ready</span>`; }
+    const initials=(p.name||"?").slice(0,2).toUpperCase();
+    const model=(p.models&&p.models[0])|| p.adapter;
+    const dis=(p.disabled_models||[]).length;
+    const modelNote = dis>0 ? `${esc(model)} · ${dis} model${dis===1?"":"s"} off` : esc(model);
+    const reqs=t.requests||0;
+    const errPill = (t.errors>0)?`<span class="pill warn" title="requests not OK today"><span class="d"></span>${t.errors} err</span>`:"";
+    const costCell = reqs>0 ? (usd(t.cost_usd)+(t.cost_unconfirmed?` <small title="price unconfirmed">?</small>`:"")) : `<span class="dim">$0.00</span>`;
+    // verified = a real request has succeeded with the current key; unverified until then (or after a rotation).
+    const vPill = p.verified
+      ? `<span class="pill ok" title="a real request has succeeded with the current key"><span class="d"></span>verified</span>`
+      : `<span class="pill idle" title="no successful request yet with the current key"><span class="d"></span>unverified</span>`;
+    const nm=esc(p.name);
+    const rotateBtn = p.adapter!=="mock" ? `<button class="btn tiny" data-action="rotate" data-provider="${nm}">Rotate key</button>` : "";
+    const modelsBtn = (p.models&&p.models.length) ? `<button class="btn tiny" data-action="models" data-provider="${nm}">Models</button>` : "";
+    const toggleBtn = `<button class="btn tiny" data-action="${p.enabled?"disable":"enable"}" data-provider="${nm}">${p.enabled?"Disable":"Enable"}</button>`;
+    const defaultBtn = p.is_default ? "" : `<button class="btn tiny" data-action="default" data-provider="${nm}">Set default</button>`;
+    return `<article class="card prov ${cls}">
+      <div class="p-top"><div class="p-logo">${esc(initials)}</div>
+        <div style="min-width:0"><div class="p-name">${esc(p.name)}${p.is_default?` <svg class="ico" style="width:12px;height:12px;color:var(--accent-2);display:inline;vertical-align:-1px" title="default"><use href="#i-star"/></svg>`:""}</div>
+          <div class="p-model">${modelNote}</div></div>
+        <span style="margin-left:auto">${stat}</span></div>
+      <div class="p-stats">
+        <div class="st"><div class="sl">Today cost</div><div class="sv">${costCell}</div></div>
+        <div class="st"><div class="sl">Requests</div><div class="sv">${num(reqs)}</div></div>
+        <div class="st"><div class="sl">Tokens (in/out)</div><div class="sv">${tok(t.prompt_tokens)}<small>/</small>${tok(t.completion_tokens)}</div></div>
+        <div class="st"><div class="sl">Latency</div><div class="sv dim" title="not tracked historically">—</div></div>
+      </div>
+      <div class="p-foot">
+        <span class="pill idle"><svg class="ico" style="width:12px;height:12px"><use href="#i-shield"/></svg> ${p.has_key?"key vaulted":(p.adapter==="mock"?"no key needed":"no key")}</span>
+        ${vPill}
+        ${errPill}
+        <span class="pill idle" style="margin-left:auto" title="adapter">${esc(p.adapter)}</span>
+      </div>
+      <div class="p-actions">
+        ${rotateBtn}${modelsBtn}${toggleBtn}${defaultBtn}
+        <button class="btn tiny danger" style="margin-left:auto" data-action="remove" data-provider="${nm}">Remove</button>
+      </div>
+    </article>`;
+  }
+
+  function renderCost(d){
+    const sp=d.spend||{}; $("cost-meta").textContent = "UTC day "+esc(sp.day||"");
+    const hist=sp.history||[], byProv=sp.by_provider_today||[];
+    const totalToday=Number(sp.today_committed_usd||0), reserved=Number(sp.today_reserved_usd||0);
+    let capTotal=0; (sp.by_project||[]).forEach(p=>capTotal+=Number(p.cap_usd||0));
+    const noData = hist.length===0 && byProv.length===0 && totalToday===0;
+    let html = `<div class="cost-head">
+        <div class="cost-stat"><div class="l">Committed today</div><div class="v">${usd(totalToday)}</div></div>
+        <div class="cost-stat"><div class="l">Reserved (in-flight)</div><div class="v">${usd(reserved)}</div></div>
+        <div class="cost-stat"><div class="l">Caps (sum)</div><div class="v">${capTotal>0?usd(capTotal):"—"}</div></div>
+        <div class="cost-stat"><div class="l">Pricing</div><div class="v" style="font-size:15px">${sp.has_pricing_gaps?`<span style="color:var(--warn)">some unpriced</span>`:"confirmed"}</div></div>
+      </div>`;
+    if(noData){ html += `<div class="empty"><b>No spend recorded yet.</b> Cost appears here after the first request through <code>/v1/chat/completions</code>.</div>`; $("cost-body").innerHTML=html; return; }
+    html += `<div class="charts">
+      <div class="chart-block"><div class="ct"><span class="cn">Spend over time</span><span class="cm">last ${hist.length} day${hist.length===1?"":"s"} (UTC)</span></div><div class="chart-wrap">${sparkline(hist)}</div></div>
+      <div class="chart-block"><div class="ct"><span class="cn">Cost by provider</span><span class="cm">today</span></div>${provBars(byProv)}</div>
+    </div>`;
+    $("cost-body").innerHTML=html;
+  }
+  function sparkline(hist){
+    if(!hist.length) return `<div class="empty">No history.</div>`;
+    const W=560,H=150,pad=22; const vals=hist.map(h=>Number(h.cost_usd||0)); const max=Math.max(0.0001,...vals);
+    const n=hist.length; const x=i=> n===1? W/2 : pad + i*(W-2*pad)/(n-1); const y=v=> H-18 - (v/max)*(H-36);
+    const pts=vals.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const area=`${x(0).toFixed(1)},${(H-18).toFixed(1)} `+pts+` ${x(n-1).toFixed(1)},${(H-18).toFixed(1)}`;
+    const last=hist[n-1];
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Daily spend, max ${usd(max)}">
+      <defs><linearGradient id="ar" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4F8CFF" stop-opacity=".35"/><stop offset="100%" stop-color="#4F8CFF" stop-opacity="0"/></linearGradient></defs>
+      <line x1="${pad}" y1="${H-18}" x2="${W-pad}" y2="${H-18}" stroke="rgba(255,255,255,.1)"/>
+      <text x="2" y="16" fill="#5E6B7C" font-size="10" font-family="monospace">${esc(usd(max))}</text>
+      <polygon points="${area}" fill="url(#ar)"/>
+      <polyline points="${pts}" fill="none" stroke="#4F8CFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${x(n-1).toFixed(1)}" cy="${y(vals[n-1]).toFixed(1)}" r="4" fill="#0B0F14" stroke="#7AA8FF" stroke-width="2.5"/>
+      <text x="${(W-pad)}" y="${H-4}" fill="#5E6B7C" font-size="9" font-family="monospace" text-anchor="end">${esc(last.day)} · ${esc(usd(last.cost_usd))}</text>
+    </svg>`;
+  }
+  function provBars(byProv){
+    if(!byProv.length) return `<div class="empty">No provider spend today.</div>`;
+    const max=Math.max(...byProv.map(p=>Number(p.cost_usd||0)),0.0001);
+    return `<div style="margin-top:4px">`+byProv.slice().sort((a,b)=>b.cost_usd-a.cost_usd).map(p=>{
+      const w=Math.max(2,Math.round(Number(p.cost_usd||0)/max*100));
+      return `<div class="bar-row"><span class="bl" title="${esc(p.provider)}">${esc(p.provider)}</span><span class="bar-track"><i style="width:${w}%"></i></span><span class="bv">${esc(usd(p.cost_usd))}${p.cost_unconfirmed?"?":""}</span></div>`;
+    }).join("")+`</div>`;
+  }
+
+  function renderRepos(d){
+    const repos=d.repos||[]; $("repos-meta").textContent = repos.length? repos.length+" registered":"";
+    if(!repos.length){ $("repos-body").innerHTML=`<div class="empty"><b>No repositories registered.</b> Connect one so its <code>.l00prite</code> memory is injected into requests.<div style="margin-top:12px"><button class="btn primary sm" data-action="repo-add">Register a repository</button></div></div>`; return; }
+    $("repos-body").innerHTML=`<div class="repo-grid">${repos.map(repoCard).join("")}</div>`;
+  }
+  function repoCard(r){
+    const m=r.memory||{}; const files=m.files||[];
+    let badges;
+    if(m.status==="no_memory_dir"||m.status==="empty"){ badges=`<span class="fresh miss">no .l00prite memory</span>`; }
+    else{
+      badges = files.map(f=>{
+        if(!f.present) return `<span class="fresh miss" title="${esc(f.name)} absent">${esc(f.name.replace(/\.md$/,""))}</span>`;
+        const cls = f.stale?"stale":"new";
+        return `<span class="fresh ${cls}" title="${esc(f.name)} · ${esc(f.as_of||"")}">${esc(f.name.replace(/\.md$/,""))} · ${f.stale?"stale":ago(f.as_of)}</span>`;
+      }).join("");
+    }
+    const statusPill = m.stale_count>0 ? `<span class="pill warn"><span class="d"></span>${m.stale_count} stale</span>` : (m.present_count>0?`<span class="pill ok"><span class="d"></span>fresh</span>`:`<span class="pill idle"><span class="d"></span>empty</span>`);
+    return `<article class="card repo">
+      <div class="r-top"><div class="r-ic"><svg class="ico"><use href="#i-brackets"/></svg></div>
+        <div style="min-width:0"><div class="r-name">${esc(r.id)}</div><div class="r-sub">project ${esc(r.project)}</div></div>
+        <span style="margin-left:auto">${statusPill}</span></div>
+      <div class="r-sub" style="margin-top:10px">${esc(r.root)}</div>
+      <div class="r-mem">${badges}</div>
+      <div class="p-actions"><button class="btn tiny danger" style="margin-left:auto" data-action="repo-remove" data-repo="${esc(r.id)}">Remove</button></div>
+    </article>`;
+  }
+
+  function renderAlerts(d){
+    const a=d.alerts||[]; $("alerts-meta").textContent = a.length? a.length+" active":"";
+    if(!a.length){ $("alerts-body").innerHTML=`<div class="empty" style="padding:18px">Nothing needs attention. ✓</div>`; return; }
+    const icon={error:"i-alert",warn:"i-alert",info:"i-shield"};
+    $("alerts-body").innerHTML = a.map(x=>{
+      const lvl = x.level==="error"?"err":(x.level==="warn"?"warn":"info");
+      return `<div class="row"><div class="r-ic ${lvl}"><svg class="ico" style="width:15px;height:15px"><use href="#${icon[x.level]||"i-alert"}"/></svg></div>
+        <div class="r-main"><div class="r-t">${esc(x.message)}</div></div></div>`;
+    }).join("");
+  }
+
+  function renderActivity(d){
+    const act=d.activity||[];
+    if(!act.length){ $("activity-body").innerHTML=`<div class="empty" style="padding:18px">No requests yet. Activity appears after the first call through the gateway.</div>`; return; }
+    const map={ok:{c:"ok",i:"i-check"}, error:{c:"err",i:"i-alert"}, error_midstream:{c:"err",i:"i-alert"}};
+    $("activity-body").innerHTML = act.map(a=>{
+      const kind = a.outcome==="ok"?map.ok : (String(a.outcome||"").startsWith("denied")?{c:"warn",i:"i-shield"}:(map[a.outcome]||{c:"warn",i:"i-alert"}));
+      const route = (a.provider||"—")+(a.model?" · "+a.model:"");
+      const cost = a.cost_usd!=null ? usd(a.cost_usd)+(a.cost_unconfirmed?"?":"") : "—";
+      return `<div class="row"><div class="r-ic ${kind.c}"><svg class="ico" style="width:15px;height:15px"><use href="#${kind.i}"/></svg></div>
+        <div class="r-main"><div class="r-t mono">${esc(route)}</div><div class="r-meta">${esc(a.outcome)}${a.project?" · "+esc(a.project):""} · ${ago(a.ts)}</div></div>
+        <div class="r-right">${esc(cost)}</div></div>`;
+    }).join("");
+  }
+
+  function renderTokens(d){
+    const t=d.tokens||{}; const list=t.list||[];
+    $("tokens-meta").textContent = (t.active||0)+" active · "+(t.revoked||0)+" revoked";
+    if(!list.length){ $("tokens-body").innerHTML=`<div class="empty" style="padding:18px">No tokens minted.</div>`; return; }
+    $("tokens-body").innerHTML = list.slice(0,8).map(x=>`
+      <div class="row"><div class="r-ic ${x.revoked?"err":"info"}"><svg class="ico" style="width:15px;height:15px"><use href="#i-key"/></svg></div>
+        <div class="r-main"><div class="r-t mono">${esc(x.id)}</div><div class="r-meta">project ${esc(x.project)}${x.repo?" · repo "+esc(x.repo):""} · ${ago(x.created_at)}${x.expires_at?" · exp "+esc(String(x.expires_at).slice(0,10)):""}</div></div>
+        <div class="r-right">${x.revoked?`<span class="pill err"><span class="d"></span>revoked</span>`:`<span class="pill ok"><span class="d"></span>active</span>`}</div></div>`).join("");
+  }
+
+  function renderAudit(d){
+    const au=d.audit||[];
+    if(!au.length){ $("audit-body").innerHTML=`<div class="empty" style="padding:18px">No operator events recorded.</div>`; return; }
+    $("audit-body").innerHTML = au.map(x=>`
+      <div class="row"><div class="r-ic info"><svg class="ico" style="width:15px;height:15px"><use href="#i-logs"/></svg></div>
+        <div class="r-main"><div class="r-t mono">${esc(x.action)}${x.detail?` <span style="color:var(--text-3)">${esc(String(x.detail).slice(0,40))}</span>`:""}</div><div class="r-meta">${esc(x.actor||"—")} · ${ago(x.ts)}</div></div></div>`).join("");
+  }
+
+  // ---- provider management (Part E) ----
+  // Every call carries the same Bearer token the dashboard already uses — the management endpoints share
+  // the exact auth of every other data endpoint. A key is never sent back by the server, so it never
+  // appears here; the UI only ever submits a NEW key to replace a stored one.
+  async function api(method, path, body){
+    const opt = {method, headers:{authorization:"Bearer "+S.token}};
+    if(body!==undefined){ opt.headers["content-type"]="application/json"; opt.body=JSON.stringify(body); }
+    let res, data=null;
+    try{ res = await fetch(path, opt); }catch(e){ return {res:{ok:false,status:0}, data:{error:{message:"Network error — is the gateway reachable?"}}}; }
+    try{ data = await res.json(); }catch(e){}
+    return {res, data};
+  }
+  // Normalize every error shape the API returns into a human string: /v1/providers/test replies with a
+  // plain-string `error`, the OpenAI-style endpoints reply with `{error:{message}}` (an object), and
+  // validation failures carry a `detail`. Without this, an object `error` would render "[object Object]".
+  function mErr(data, fallback){
+    if(data){
+      if(typeof data.error==="string" && data.error) return data.error;
+      if(data.error && data.error.message) return data.error.message;
+      if(data.detail) return data.detail;
+    }
+    return fallback||"Something went wrong.";
+  }
+  function findProvider(name){ return ((S.summary&&S.summary.providers)||[]).find(p=>p.name===name); }
+  function openModal(html){ $("modal-body").innerHTML=html; $("modal").classList.remove("hidden"); }
+  function closeModal(){ $("modal").classList.add("hidden"); $("modal-body").innerHTML=""; }
+  async function afterMutation(){ closeModal(); await refresh(); }
+  function busy(btn,label){ btn.dataset.old=btn.innerHTML; btn.disabled=true; btn.innerHTML=`<span class="spin"></span> ${esc(label)}`; }
+  function unbusy(btn,label){ btn.disabled=false; btn.innerHTML=label||btn.dataset.old||""; }
+
+  function add(){
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Add provider</div>
+      <h3>Add a provider</h3>
+      <div class="sub">The key is validated with a real call, stored encrypted in the vault, and marked <b>unverified</b> until its first successful request.</div>
+      <div class="field"><label>Adapter type</label>
+        <select id="m-adapter">
+          <option value="native-messages">Anthropic (native /v1/messages)</option>
+          <option value="openai-compat">OpenAI-compatible (OpenAI, GLM, DeepSeek, Groq, …)</option>
+        </select></div>
+      <div class="field"><label>Provider name</label><input type="text" id="m-name" placeholder="anthropic"></div>
+      <div class="field" id="m-modelwrap"><label>Model to test <span class="opt" id="m-modelhint">— optional</span></label><input type="text" id="m-model" placeholder="auto (first known model)"></div>
+      <div class="field" id="m-keywrap"><label>API key</label><input type="password" id="m-key" placeholder="sk-…" autocomplete="off"></div>
+      <div class="field" id="m-basewrap"><label>Base URL <span class="opt" id="m-basehint"></span></label><input type="text" id="m-base"></div>
+      <label class="field check"><input type="checkbox" id="m-default" checked> Make this the default provider</label>
+      <label class="field check" id="m-skipwrap"><input type="checkbox" id="m-skip"> Add without validating <span class="opt">— advanced, offline</span></label>
+      <div id="m-note"></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn" id="m-validate">Validate key</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="m-add" disabled>Add provider</button>
+      </div>`);
+    const g=id=>document.getElementById(id);
+    const adapterSel=g("m-adapter"), nameIn=g("m-name"), baseIn=g("m-base"), baseHint=g("m-basehint");
+    const validateBtn=g("m-validate"), addBtn=g("m-add"), skip=g("m-skip"), note=g("m-note");
+    let epoch=0;
+    const D={"native-messages":{name:"anthropic",base:"https://api.anthropic.com",hint:"— default shown; edit if self-hosting",
+               mHint:"— optional; a known model is picked",mPh:"auto (first known model)"},
+             "openai-compat":{name:"openai",base:"",hint:"— required, e.g. https://api.openai.com/v1",
+               // OpenAI-compatible endpoints usually have no built-in catalog here, so validation
+               // needs a concrete model id — labeling it "optional" would dead-end the flow.
+               mHint:"— usually required (no built-in catalog), e.g. gpt-4o",mPh:"e.g. gpt-4o"}};
+    function resetV(){ epoch++; const gate=!skip.checked; addBtn.disabled=gate; if(gate) note.innerHTML=""; }
+    function sync(){
+      const d=D[adapterSel.value];
+      if(!nameIn.dataset.touched) nameIn.value=d.name;
+      baseIn.value=d.base; baseHint.textContent=d.hint;
+      g("m-modelhint").textContent=d.mHint; g("m-model").placeholder=d.mPh;
+      resetV();
+    }
+    function body(){ return {name:nameIn.value.trim(), adapter:adapterSel.value, base_url:baseIn.value.trim(), api_key:g("m-key").value, model:g("m-model").value.trim()}; }
+    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; resetV(); };
+    [baseIn,g("m-key"),g("m-model")].forEach(el=>el.oninput=resetV);
+    adapterSel.onchange=sync;
+    skip.onchange=()=>{ if(skip.checked){ addBtn.disabled=false; note.innerHTML=`<div class="note warn">Skipping validation — a bad key will only fail on the first real request.</div>`; } else resetV(); };
+    validateBtn.onclick=async()=>{
+      const b=body(); if(!b.name){ note.innerHTML=`<div class="note err">Give the provider a name.</div>`; return; }
+      if(!b.api_key){ note.innerHTML=`<div class="note err">Enter an API key to validate.</div>`; return; }
+      const my=epoch; busy(validateBtn,"Testing…");
+      const {res,data}=await api("POST","/v1/providers/test",b);
+      unbusy(validateBtn,"Validate key"); if(my!==epoch) return;
+      if(res.ok && data && data.ok){ addBtn.disabled=false; note.innerHTML=`<div class="note ok"><b>Key works.</b>${data.model_used?` Model <span class="mono">${esc(data.model_used)}</span>.`:""}</div>`; }
+      else { addBtn.disabled=true; note.innerHTML=`<div class="note err"><b>Validation failed:</b> ${esc(mErr(data,"the provider rejected the call"))}</div>`; }
+    };
+    addBtn.onclick=async()=>{
+      const b=body(); b.default=g("m-default").checked; b.skip_validation=skip.checked;
+      if(!b.name){ note.innerHTML=`<div class="note err">Give the provider a name.</div>`; return; }
+      busy(addBtn,"Adding…");
+      const {res,data}=await api("POST","/v1/providers",b);
+      if(!res.ok){ unbusy(addBtn,"Add provider"); note.innerHTML=`<div class="note err">${esc((data&&data.detail)||mErr(data,"Could not add the provider."))}</div>`; return; }
+      afterMutation();
+    };
+    sync();
+  }
+
+  function rotate(name){
+    const p=findProvider(name)||{name};
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Rotate key</div>
+      <h3>Rotate the key for <span class="mono">${esc(name)}</span></h3>
+      <div class="sub"><b>The old key is permanently overwritten in the vault</b> and can't be recovered. The provider keeps its settings and history but is marked <b>unverified</b> until its next successful request.</div>
+      <div class="field"><label>New API key</label><input type="password" id="r-key" placeholder="sk-…" autocomplete="off"></div>
+      <div class="field"><label>Model to test <span class="opt">— optional</span></label><input type="text" id="r-model" placeholder="auto (first known model)"></div>
+      <label class="field check"><input type="checkbox" id="r-skip"> Rotate without validating <span class="opt">— advanced, offline</span></label>
+      <div id="r-note"></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn" id="r-validate">Validate key</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="r-rotate">Rotate key</button>
+      </div>`);
+    const g=id=>document.getElementById(id);
+    const keyIn=g("r-key"), modelIn=g("r-model"), skip=g("r-skip"), note=g("r-note"), vBtn=g("r-validate"), rBtn=g("r-rotate");
+    let epoch=0; keyIn.oninput=()=>{epoch++;};
+    vBtn.onclick=async()=>{
+      if(!keyIn.value){ note.innerHTML=`<div class="note err">Enter the new key to validate.</div>`; return; }
+      const my=++epoch; busy(vBtn,"Testing…");
+      const {res,data}=await api("POST","/v1/providers/test",{name, adapter:p.adapter, base_url:p.base_url, api_key:keyIn.value, model:modelIn.value.trim()});
+      unbusy(vBtn,"Validate key"); if(my!==epoch) return;
+      if(res.ok && data && data.ok){ note.innerHTML=`<div class="note ok"><b>Key works.</b>${data.model_used?` Model <span class="mono">${esc(data.model_used)}</span>.`:""}</div>`; }
+      else note.innerHTML=`<div class="note err"><b>Validation failed:</b> ${esc(mErr(data,"the provider rejected the call"))}</div>`;
+    };
+    rBtn.onclick=async()=>{
+      if(!keyIn.value){ note.innerHTML=`<div class="note err">Enter a new API key.</div>`; return; }
+      busy(rBtn,"Rotating…");
+      const {res,data}=await api("POST","/v1/providers/rotate",{name, api_key:keyIn.value, model:modelIn.value.trim(), skip_validation:skip.checked});
+      if(!res.ok){ unbusy(rBtn,"Rotate key"); note.innerHTML=`<div class="note err">${esc((data&&data.detail)||mErr(data,"Could not rotate the key."))}</div>`; return; }
+      afterMutation();
+    };
+  }
+
+  function editModels(name){
+    const p=findProvider(name); if(!p) return;
+    const models=p.models||[]; const disabled=new Set(p.disabled_models||[]);
+    if(!models.length){ openModal(`<div class="eyebrow"><span class="tick"></span> Models</div><h3>Models for <span class="mono">${esc(name)}</span></h3><div class="note">This provider's model catalog isn't known (a custom endpoint), so there's nothing to select — it forwards whatever model your client requests.</div><div class="modal-actions"><div class="spacer"></div><button class="btn" data-close>Close</button></div>`); return; }
+    const rows=models.map(m=>`<label class="modelrow"><input type="checkbox" data-model="${esc(m)}" ${disabled.has(m)?"":"checked"}><span title="${esc(m)}">${esc(m)}</span></label>`).join("");
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Models</div>
+      <h3>Models for <span class="mono">${esc(name)}</span></h3>
+      <div class="sub">Uncheck a model to stop the gateway advertising or auto-routing to it. Disabling every model leaves this provider unable to serve bare or auto-routed requests.</div>
+      <div class="modelgrid" id="mg">${rows}</div>
+      <div id="mm-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="mm-save">Save selection</button></div>`);
+    document.getElementById("mm-save").onclick=async()=>{
+      const dis=[...document.querySelectorAll('#mg input[type=checkbox]')].filter(c=>!c.checked).map(c=>c.dataset.model);
+      const btn=document.getElementById("mm-save"); busy(btn,"Saving…");
+      const {res,data}=await api("POST","/v1/providers/models",{name, disabled_models:dis});
+      if(!res.ok){ unbusy(btn,"Save selection"); document.getElementById("mm-note").innerHTML=`<div class="note err">${esc(mErr(data,"Could not save the selection."))}</div>`; return; }
+      afterMutation();
+    };
+  }
+
+  function confirmRemove(name){
+    const p=findProvider(name)||{name};
+    const warns=(p.removal&&p.removal.warnings)||[];
+    const warnHtml = warns.length
+      ? warns.map(w=>`<div class="note ${w.level==="error"?"err":"warn"}">${esc(w.message)}</div>`).join("")
+      : `<div class="note warn">This permanently deletes the provider and its stored key.</div>`;
+    openModal(`
+      <div class="eyebrow"><span class="tick" style="background:var(--err)"></span> Remove provider</div>
+      <h3>Remove <span class="mono">${esc(name)}</span></h3>
+      <div class="sub">This is permanent: the stored key is erased from the vault and the provider stops serving requests immediately.</div>
+      ${warnHtml}
+      <div class="field"><label>Type <span class="mono">${esc(name)}</span> to confirm</label><input type="text" id="rm-confirm" autocomplete="off" placeholder="${esc(name)}"></div>
+      <div id="rm-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn danger" id="rm-go" disabled>Remove provider</button></div>`);
+    const inp=document.getElementById("rm-confirm"), go=document.getElementById("rm-go");
+    inp.oninput=()=>{ go.disabled = inp.value!==name; };
+    inp.focus();
+    go.onclick=async()=>{
+      busy(go,"Removing…");
+      const {res,data}=await api("POST","/v1/providers/remove",{name, confirm:inp.value});
+      if(!res.ok){ unbusy(go,"Remove provider"); document.getElementById("rm-note").innerHTML=`<div class="note err">${esc(mErr(data,"Could not remove the provider."))}</div>`; return; }
+      afterMutation();
+    };
+  }
+
+  async function toggleProvider(name, enable){ await api("POST","/v1/providers/update",{name, enabled:enable}); refresh(); }
+  async function makeDefault(name){ await api("POST","/v1/providers/update",{name, default:true}); refresh(); }
+
+  function handleProviderAction(action, name){
+    if(action==="add") return add();
+    if(action==="rotate") return rotate(name);
+    if(action==="models") return editModels(name);
+    if(action==="remove") return confirmRemove(name);
+    if(action==="enable") return toggleProvider(name,true);
+    if(action==="disable") return toggleProvider(name,false);
+    if(action==="default") return makeDefault(name);
+  }
+
+  // ---- repository management ----
+  // Registering a repo points the gateway at a path on ITS OWN filesystem; the server verifies the
+  // directory exists before storing anything, so a typo fails right here in the modal.
+  function addRepo(){
+    const project=(S.summary&&S.summary.principal&&S.summary.principal.project)||"default";
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Register repository</div>
+      <h3>Connect a repository</h3>
+      <div class="sub">Point the gateway at a repo on <b>the machine running the gateway</b>. Requests that name this
+        repo (the <span class="mono">x-l00prite-repo</span> header, a repo-scoped token, or the Playground's repo picker)
+        get its <span class="mono">.l00prite</span> memory injected.</div>
+      <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-id" placeholder="myrepo" autocomplete="off"></div>
+      <div class="field"><label>Path on the gateway host</label><input type="text" id="rp-root" placeholder="/home/you/projects/myrepo" autocomplete="off"></div>
+      <div class="field"><label>Project <span class="opt">— only same-project tokens can use a repo; this token's project is <span class="mono">${esc(project)}</span></span></label>
+        <input type="text" id="rp-project" value="${esc(project)}" autocomplete="off"></div>
+      <div id="rp-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Register</button></div>`);
+    const idIn=document.getElementById("rp-id"), rootIn=document.getElementById("rp-root");
+    const note=document.getElementById("rp-note"), btn=document.getElementById("rp-add");
+    idIn.focus();
+    btn.onclick=async()=>{
+      const id=idIn.value.trim(), root=rootIn.value.trim(), project=document.getElementById("rp-project").value.trim();
+      if(!id){ note.innerHTML=`<div class="note err">Give the repo a short id.</div>`; return; }
+      if(!root){ note.innerHTML=`<div class="note err">Enter the repo's path on the gateway host.</div>`; return; }
+      busy(btn,"Registering…");
+      const {res,data}=await api("POST","/v1/repos",{id, root, project});
+      if(!res.ok){ unbusy(btn,"Register"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not register the repo."))}</div>`; return; }
+      const mem=(data&&data.memory)||{};
+      if(!mem.present_count){
+        // Registered fine, but be honest that there's no memory to inject yet. The repo is already
+        // stored server-side, so refresh the list/picker NOW — any way the user dismisses this
+        // modal (Done, Esc, backdrop, Cancel) must leave the UI consistent.
+        unbusy(btn,"Register");
+        note.innerHTML=`<div class="note warn"><b>Registered.</b> No <span class="mono">.l00prite</span> memory found in that folder yet — requests work, and memory is injected as soon as the folder exists.</div>`;
+        btn.textContent="Done"; btn.onclick=()=>closeModal();
+        refresh();
+        return;
+      }
+      afterMutation();
+    };
+  }
+  function removeRepo(id){
+    const scoped=((S.summary&&S.summary.tokens&&S.summary.tokens.list)||[]).filter(x=>!x.revoked&&x.repo===id).length;
+    const scopedWarn=scoped>0?`<div class="note warn"><b>${scoped} active token${scoped===1?" is":"s are"} scoped to this repo.</b> Requests using ${scoped===1?"it":"them"} — and any request naming this repo — will fail with “not registered” until the repo is registered again.</div>`:"";
+    openModal(`
+      <div class="eyebrow"><span class="tick" style="background:var(--err)"></span> Remove repository</div>
+      <h3>Remove <span class="mono">${esc(id)}</span></h3>
+      <div class="sub">This only unregisters the repo from the gateway — <b>nothing on disk is touched</b>. Requests
+        naming it simply stop getting its memory injected.</div>
+      ${scopedWarn}
+      <div id="rr-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn danger" id="rr-go">Remove repo</button></div>`);
+    document.getElementById("rr-go").onclick=async(e)=>{
+      busy(e.target,"Removing…");
+      const {res,data}=await api("POST","/v1/repos/remove",{id});
+      if(!res.ok){ unbusy(e.target,"Remove repo"); document.getElementById("rr-note").innerHTML=`<div class="note err">${esc(mErr(data,"Could not remove the repo."))}</div>`; return; }
+      afterMutation();
+    };
+  }
+
+  // ---- playground ----
+  // A place to prompt the models: same token, same /v1/chat/completions the coding tools use, so a
+  // reply here proves the whole path (auth → route → provider → metering) and shows up in Activity.
+  const chat=[]; let sending=false, chatGen=0, renderedChatLen=-1;
+  function chatMessages(){ return chat.filter(m=>m.role==="user"||m.role==="assistant").map(m=>({role:m.role,content:m.content})); }
+  function renderChat(){
+    const log=$("play-log"); if(!log) return;
+    // The conversation only ever grows or is cleared, so an unchanged length means unchanged
+    // content — skip the innerHTML rebuild entirely so the 20s auto-refresh can't wipe an
+    // in-progress text selection or yank the scroll position.
+    if(chat.length===renderedChatLen) return;
+    const grew=chat.length>renderedChatLen;
+    renderedChatLen=chat.length;
+    if(!chat.length){
+      log.innerHTML=`<div class="empty" style="padding:18px">Send a prompt to try your gateway. <b>auto</b> picks the best provider for the task; pick a repo to inject its <code>.l00prite</code> memory. Cost lands in Activity below.</div>`;
+      return;
+    }
+    log.innerHTML=chat.map(m=>{
+      if(m.role==="error") return `<div class="msg err">${esc(m.content)}</div>`;
+      const meta=m.meta?`<div class="m-meta">${esc(m.meta.model||"")}${m.meta.pt!=null?` · ${esc(String(m.meta.pt))} in / ${esc(String(m.meta.ct==null?"?":m.meta.ct))} out`:""}</div>`:"";
+      return `<div class="msg ${m.role==="user"?"user":"assistant"}">${esc(m.content)}${meta}</div>`;
+    }).join("");
+    if(grew) log.scrollTop=log.scrollHeight;
+  }
+  let playRepoSig=null;
+  function renderPlayRepos(d){
+    const sel=$("play-repo"); if(!sel) return;
+    const principal=d.principal||{};
+    // Offer only repos this token can actually use: /v1/chat/completions rejects (403) a repo
+    // whose project differs from the token's, and a repo-scoped token may only name its own repo.
+    let repos=(d.repos||[]).filter(r=>r.project===principal.project);
+    if(principal.repo) repos=repos.filter(r=>r.id===principal.repo);
+    const sig=repos.map(r=>r.id).join(",");
+    if(sig===playRepoSig) return; // unchanged — don't rebuild (an open dropdown would snap shut)
+    playRepoSig=sig;
+    const cur=sel.value;
+    sel.innerHTML=`<option value="">no repo memory</option>`+repos.map(r=>`<option value="${esc(r.id)}">repo: ${esc(r.id)}</option>`).join("");
+    if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
+    else if(principal.repo) sel.value=principal.repo; // token is scoped to one repo — preselect it
+  }
+  let playModelSig=null;
+  async function loadModels(){
+    const sel=$("play-model"); if(!sel) return;
+    let data=null;
+    try{ const res=await fetch("/v1/models"); if(!res.ok) return; data=await res.json(); }catch(e){ return; }
+    const ids=((data&&data.data)||[]).map(m=>m&&m.id).filter(Boolean);
+    const autos=ids.filter(i=>i==="auto"||i.indexOf("auto:")===0).sort((a,b)=>a==="auto"?-1:(b==="auto"?1:a.localeCompare(b)));
+    const bare=[...new Set(ids.filter(i=>autos.indexOf(i)<0 && i.indexOf("/")<0))];
+    const pinned=[...new Set(ids.filter(i=>autos.indexOf(i)<0 && i.indexOf("/")>=0))];
+    const sig=autos.join(",")+"|"+bare.join(",")+"|"+pinned.join(",");
+    if(sig===playModelSig) return; // catalog unchanged — don't rebuild (an open dropdown would snap shut)
+    playModelSig=sig;
+    const cur=sel.value||"auto";
+    const opt=i=>`<option value="${esc(i)}">${esc(i)}</option>`;
+    sel.innerHTML =
+      `<optgroup label="Auto routing">${(autos.length?autos:["auto"]).map(opt).join("")}</optgroup>`+
+      (bare.length?`<optgroup label="Models">${bare.map(opt).join("")}</optgroup>`:"")+
+      (pinned.length?`<optgroup label="Pinned provider/model">${pinned.map(opt).join("")}</optgroup>`:"")+
+      // custom endpoints forward whatever model the client requests, so their models never appear
+      // in the catalog — the free-form entry keeps them promptable from the Playground too.
+      `<optgroup label="Custom"><option value="__custom">custom model…</option></optgroup>`;
+    sel.value=[...sel.options].some(o=>o.value===cur)?cur:"auto";
+    syncCustomModel();
+  }
+  function syncCustomModel(){
+    const sel=$("play-model"), inp=$("play-model-custom");
+    if(sel&&inp) inp.classList.toggle("hidden", sel.value!=="__custom");
+  }
+  function playModel(){
+    const v=$("play-model").value;
+    if(v!=="__custom") return v||"auto";
+    return $("play-model-custom").value.trim()||"auto";
+  }
+  async function playSend(){
+    if(sending || !S.token) return;
+    const inp=$("play-input"); const text=inp.value.trim(); if(!text) return;
+    const model=playModel(), repo=$("play-repo").value;
+    // CLI-registered repo ids aren't charset-restricted; a non-ASCII id would make fetch() itself
+    // throw on the header and surface as a misleading "network error" — catch it up front.
+    if(repo && !/^[\x21-\x7E]+$/.test(repo)){
+      chat.push({role:"error",content:`Repo id "${repo}" contains characters that can't travel in an HTTP header. Re-register it with a simpler id (letters, digits, ".", "-", "_").`});
+      renderChat(); return;
+    }
+    chat.push({role:"user",content:text}); renderChat(); inp.value="";
+    sending=true; const btn=$("play-send"); busy(btn,"Sending…");
+    const gen=chatGen; // if the user clears the conversation mid-flight, drop this reply
+    const headers={authorization:"Bearer "+S.token,"content-type":"application/json"};
+    if(repo) headers["x-l00prite-repo"]=repo;
+    let res=null, data=null;
+    try{ res=await fetch("/v1/chat/completions",{method:"POST",headers,body:JSON.stringify({model, messages:chatMessages()})}); }catch(e){}
+    if(res){ try{ data=await res.json(); }catch(e){} }
+    sending=false; unbusy(btn,"Send");
+    if(gen!==chatGen) return; // conversation was cleared while in flight — a stale reply would poison the new one
+    if(!res || !res.ok){
+      chat.push({role:"error",content:mErr(data, res?("The request failed (HTTP "+res.status+").") : "Network error — is the gateway reachable?")});
+      renderChat(); return;
+    }
+    const msg=(data&&data.choices&&data.choices[0]&&data.choices[0].message)||{};
+    let content=msg.content;
+    if(Array.isArray(content)) content=content.map(p=>(p&&p.text)||"").join("");
+    const u=(data&&data.usage)||{};
+    chat.push({role:"assistant",content:String(content==null?"":content),
+      meta:{model:(data&&data.model)||model, pt:u.prompt_tokens, ct:u.completion_tokens}});
+    renderChat();
+  }
+
+  // ---- events ----
+  $("refresh-btn").onclick=refresh;
+  $("add-provider-btn").onclick=()=>add();
+  $("add-repo-btn").onclick=()=>addRepo();
+  $("providers-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(b){ handleProviderAction(b.dataset.action, b.dataset.provider); } });
+  $("repos-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(!b) return;
+    if(b.dataset.action==="repo-add") addRepo();
+    if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo); });
+  $("play-send").onclick=playSend;
+  $("play-model").onchange=syncCustomModel;
+  $("play-clear").onclick=()=>{ chat.length=0; chatGen++; renderChat(); };
+  $("play-input").addEventListener("keydown",e=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); playSend(); } });
+  renderChat();
+  $("modal").addEventListener("click",e=>{ if(e.target===$("modal") || (e.target.closest&&e.target.closest("[data-close]"))) closeModal(); });
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("modal").classList.contains("hidden")) closeModal(); });
+  $("disconnect-btn").onclick=()=>{ S.token=null; try{localStorage.removeItem(TOKEN_KEY);}catch(e){} $("disconnect-btn").style.display="none"; showOverlay(); };
+  $("token-save").onclick=()=>{ const v=$("token-input").value.trim(); if(!v){ showOverlay("Enter a token."); return; } S.token=v; try{localStorage.setItem(TOKEN_KEY,v);}catch(e){} refresh(); };
+  $("token-input").addEventListener("keydown",e=>{ if(e.key==="Enter") $("token-save").click(); });
+  document.querySelectorAll("[data-goto]").forEach(a=>a.onclick=()=>{ const el=$(a.dataset.goto); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); });
+
+  // auto-refresh every 20s while a token is set and the tab is visible
+  setInterval(()=>{ if(S.token && S.summary && document.visibilityState==="visible") refresh(); }, 20000);
+
+  // ---- boot ----
+  try{ S.token = localStorage.getItem(TOKEN_KEY); }catch(e){}
+  if(S.token) refresh(); else showOverlay();
+})();
+</script>
+</body>
+</html>

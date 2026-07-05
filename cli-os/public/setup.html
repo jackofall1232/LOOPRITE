@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>l00prite CLI-OS — Setup</title>
+<style>
+  :root{
+    --bg:#0B0F14; --panel:rgba(255,255,255,.04); --panel-2:rgba(255,255,255,.06);
+    --stroke:rgba(255,255,255,.09); --stroke-2:rgba(255,255,255,.16);
+    --text:#E7EDF5; --text-2:#9AA7B8; --text-3:#5E6B7C;
+    --accent:#4F8CFF; --accent-2:#7AA8FF; --accent-ink:#CFE0FF; --glow:rgba(79,140,255,.20);
+    --ok:#00C853; --warn:#FFB300; --err:#F44336;
+    --input-bg:rgba(0,0,0,.25); --input-bg-focus:rgba(0,0,0,.35); --input-bg-solid:#0A0E13;
+    --font-sans:"Inter","SF Pro Text",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:"SFMono-Regular","JetBrains Mono","Roboto Mono",ui-monospace,Menlo,Consolas,monospace;
+    --r-lg:18px; --r-md:12px; --r-sm:9px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--font-sans); color:var(--text); line-height:1.5; letter-spacing:.1px;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+    background:
+      radial-gradient(1100px 560px at 12% -10%, rgba(79,140,255,.13), transparent 60%),
+      radial-gradient(900px 500px at 100% -6%, rgba(45,212,191,.06), transparent 55%),
+      var(--bg);
+    background-attachment:fixed;
+    display:flex; align-items:flex-start; justify-content:center; padding:40px 20px 60px;
+  }
+  .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:0;}
+  .wrap{width:100%;max-width:680px;}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:22px;}
+  .brand .logo{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;
+    background:radial-gradient(120% 120% at 30% 20%, rgba(79,140,255,.95), rgba(79,140,255,.4));
+    box-shadow:0 6px 22px -6px var(--glow), inset 0 1px 0 rgba(255,255,255,.35);color:#fff;font-weight:800;font-size:19px;}
+  .brand .name{font-weight:700;font-size:17px;letter-spacing:.2px;}
+  .brand .sub{font-size:11px;color:var(--text-3);letter-spacing:.16em;text-transform:uppercase;}
+
+  /* stepper */
+  .stepper{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;}
+  .stepper .s{flex:1 1 auto;min-width:70px;height:5px;border-radius:4px;background:rgba(255,255,255,.08);position:relative;overflow:hidden;}
+  .stepper .s.done{background:var(--ok);}
+  .stepper .s.active{background:linear-gradient(90deg,var(--accent),var(--accent-2));}
+
+  .card{background:linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+    border:1px solid var(--stroke);border-radius:var(--r-lg);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 24px 60px -34px rgba(0,0,0,.8);
+    padding:26px 26px 24px;}
+  .eyebrow{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);font-weight:700;}
+  .eyebrow .tick{width:6px;height:6px;border-radius:2px;background:var(--accent);box-shadow:0 0 10px var(--glow);}
+  h1{margin:12px 0 6px;font-size:22px;font-weight:720;letter-spacing:-.3px;}
+  h2{margin:0 0 4px;font-size:18px;font-weight:680;letter-spacing:-.2px;}
+  p{margin:8px 0;color:var(--text-2);font-size:14px;}
+  p.tight{margin:6px 0;}
+  .muted{color:var(--text-3);font-size:12.5px;}
+  label{display:block;font-size:12px;font-weight:600;color:var(--text-2);margin:16px 0 6px;letter-spacing:.02em;}
+  label .opt{color:var(--text-3);font-weight:500;text-transform:none;letter-spacing:0;}
+  input[type=text],input[type=password],input[type=number],select,textarea{
+    width:100%;padding:11px 13px;border-radius:var(--r-md);background:var(--input-bg);
+    border:1px solid var(--stroke);color:var(--text);font-family:var(--font-sans);font-size:14px;outline:none;
+    transition:border-color .15s, background .15s;}
+  input:focus,select:focus,textarea:focus{border-color:rgba(79,140,255,.6);background:var(--input-bg-focus);}
+  input::placeholder,textarea::placeholder{color:var(--text-3);opacity:1;}
+  /* Native dropdown options and autofilled values don't follow the page palette on their own —
+     pin them so a field can never render its text in the same color as its background. */
+  input,select,textarea{caret-color:var(--text);}
+  select option{background:var(--input-bg-solid);color:var(--text);}
+  input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{
+    -webkit-text-fill-color:var(--text);
+    -webkit-box-shadow:0 0 0 1000px var(--input-bg-solid) inset;}
+  .mono-in{font-family:var(--font-mono);}
+  .row{display:flex;gap:12px;flex-wrap:wrap;}
+  .row > div{flex:1 1 200px;min-width:0;}
+  .check{display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13px;color:var(--text-2);cursor:pointer;}
+  .check input{width:16px;height:16px;accent-color:var(--accent);}
+  .radios{display:flex;flex-direction:column;gap:10px;margin-top:12px;}
+  .radio{display:flex;gap:11px;align-items:flex-start;padding:13px 14px;border:1px solid var(--stroke);border-radius:var(--r-md);cursor:pointer;transition:border-color .15s,background .15s;}
+  .radio:hover{border-color:var(--stroke-2);}
+  .radio.sel{border-color:rgba(79,140,255,.55);background:rgba(79,140,255,.07);}
+  .radio input{margin-top:2px;accent-color:var(--accent);}
+  .radio .rt{font-size:13.5px;font-weight:650;}
+  .radio .rd{font-size:12px;color:var(--text-3);margin-top:2px;}
+
+  .actions{display:flex;gap:10px;margin-top:24px;align-items:center;}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;font-size:14px;font-weight:650;cursor:pointer;
+    border:1px solid var(--stroke);background:var(--panel);color:var(--text);transition:transform .12s,border-color .15s,background .15s;}
+  .btn:hover{border-color:var(--stroke-2);background:var(--panel-2);}
+  .btn:active{transform:translateY(1px);}
+  .btn.primary{background:linear-gradient(180deg,#5a94ff,#3f7cff);border-color:rgba(79,140,255,.5);color:#fff;box-shadow:0 8px 22px -10px var(--glow);}
+  .btn.primary:hover{background:linear-gradient(180deg,#6ba0ff,#4d86ff);}
+  .btn[disabled]{opacity:.5;cursor:not-allowed;transform:none;}
+  .btn.ghost{background:none;border-color:transparent;color:var(--text-3);}
+  .btn.ghost:hover{color:var(--text);background:var(--panel);}
+  .spacer{flex:1;}
+
+  .note{margin-top:16px;padding:12px 14px;border-radius:var(--r-md);font-size:13px;border:1px solid var(--stroke);background:var(--panel);color:var(--text-2);}
+  .note.ok{border-color:rgba(0,200,83,.32);background:rgba(0,200,83,.09);color:#9ff0bd;}
+  .note.warn{border-color:rgba(255,179,0,.32);background:rgba(255,179,0,.09);color:#ffdf9c;}
+  .note.err{border-color:rgba(244,67,54,.34);background:rgba(244,67,54,.09);color:#ffb0a8;}
+  .note b{color:inherit;}
+  .kv{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid var(--stroke);font-size:13px;}
+  .kv:last-child{border-bottom:none;}
+  .kv .k{color:var(--text-3);}
+  .kv .v{color:var(--text);text-align:right;word-break:break-all;}
+  .codeblock{position:relative;margin-top:12px;}
+  pre{margin:0;padding:14px 44px 14px 14px;border-radius:var(--r-md);background:rgba(0,0,0,.4);border:1px solid var(--stroke);
+    color:#cfe0ff;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;overflow-x:auto;white-space:pre;}
+  .copy{position:absolute;top:8px;right:8px;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:650;cursor:pointer;
+    border:1px solid var(--stroke);background:var(--panel-2);color:var(--text-2);}
+  .copy:hover{color:var(--text);border-color:var(--stroke-2);}
+  .tokenbox{display:flex;gap:8px;align-items:center;margin-top:10px;}
+  .tokenbox input{font-family:var(--font-mono);font-size:13px;}
+  .hidden{display:none!important;}
+  .spin{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin .7s linear infinite;display:inline-block;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .foot{margin-top:18px;text-align:center;font-size:11.5px;color:var(--text-3);}
+  @media (prefers-color-scheme:light){
+    :root{--bg:#F5F7FB;--panel:rgba(10,20,40,.03);--panel-2:rgba(10,20,40,.05);--stroke:rgba(10,20,40,.12);--stroke-2:rgba(10,20,40,.22);
+      --text:#0E1726;--text-2:#465064;--text-3:#7A8698;
+      --input-bg:#fff;--input-bg-focus:#fff;--input-bg-solid:#fff;}
+    body{background:radial-gradient(1100px 560px at 12% -10%, rgba(79,140,255,.14), transparent 60%), var(--bg);}
+    pre{background:#0d1420;color:#cfe0ff;}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="logo">∞</div>
+    <div><div class="name">l00prite CLI-OS</div><div class="sub">First-run setup</div></div>
+  </div>
+
+  <div class="stepper" id="stepper"></div>
+
+  <div class="card" id="card"><div class="muted">Loading setup…</div></div>
+
+  <div class="foot">Nothing here is fabricated — every step writes real state the CLI can also read.
+    Prefer the terminal? <span class="mono">l00prite init · provider add · token mint · serve</span> does the same.</div>
+</div>
+
+<script>
+"use strict";
+(function(){
+  // ---- step model ----
+  const STEPS = ["welcome","vault","provider","network","token","done"];
+  const LABELS = {welcome:"Welcome",vault:"Vault",provider:"Provider",network:"Network",token:"Token",done:"Done"};
+  const state = { status:null, provider:null, token:null };
+  let current = "welcome";
+
+  const card = document.getElementById("card");
+  const stepperEl = document.getElementById("stepper");
+
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  async function api(method, path, body){
+    const opt = {method, headers:{}};
+    if(body!==undefined){ opt.headers["content-type"]="application/json"; opt.body=JSON.stringify(body); }
+    const res = await fetch(path, opt);
+    let data=null; try{ data = await res.json(); }catch(e){}
+    return {res, data};
+  }
+  function errMsg(data, fallback){
+    if(data && data.error && data.error.message) return data.error.message;
+    if(data && data.detail) return data.detail;
+    if(data && data.error && typeof data.error==="string") return data.error;
+    return fallback || "Something went wrong.";
+  }
+
+  function renderStepper(){
+    const idx = STEPS.indexOf(current);
+    stepperEl.innerHTML = STEPS.map((s,i)=>{
+      const cls = i<idx ? "s done" : (i===idx ? "s active" : "s");
+      return `<div class="${cls}" title="${LABELS[s]}"></div>`;
+    }).join("");
+  }
+
+  async function loadStatus(){
+    const {res, data} = await api("GET","/v1/setup/status");
+    if(!res.ok){ card.innerHTML = `<div class="note err">Could not reach the setup API (${res.status}).</div>`; return; }
+    state.status = data;
+    if(data.setup_complete){ return renderAlreadyDone(); }
+    // Resume at the earliest incomplete step, but never before welcome on a fresh load.
+    if(current==="welcome"){ /* stay on welcome first */ }
+    else { current = data.next_step==="done" ? "done" : data.next_step; }
+    render();
+  }
+
+  function goto(step){ current = step; render(); }
+
+  function render(){
+    renderStepper();
+    ({welcome:renderWelcome, vault:renderVault, provider:renderProvider, network:renderNetwork, token:renderToken, done:renderDone}[current])();
+  }
+
+  // ---- steps ----
+  function renderWelcome(){
+    card.innerHTML = `
+      <div class="eyebrow"><span class="tick"></span> Control plane setup</div>
+      <h1>Let's get your gateway running</h1>
+      <p>l00prite CLI-OS is a self-hosted control plane for AI coding: one OpenAI-compatible endpoint,
+         your provider keys kept server-side in an encrypted vault, explainable routing, repo memory,
+         real per-project cost tracking, and a run ledger.</p>
+      <p>This wizard walks through everything a working gateway needs — no terminal required. Each step
+         writes the same state the CLI would, so you can mix the browser and the CLI freely afterward.</p>
+      <div class="actions">
+        <div class="spacer"></div>
+        <button class="btn primary" id="go">Get started →</button>
+      </div>`;
+    document.getElementById("go").onclick = ()=>goto("vault");
+  }
+
+  function renderVault(){
+    const already = state.status && state.status.vault_initialized;
+    if(already){
+      card.innerHTML = `
+        <div class="eyebrow"><span class="tick"></span> Step 1 · Vault</div>
+        <h1>Vault already initialized</h1>
+        <p>A master key is already present, so provider keys can be encrypted at rest. Nothing to do here.</p>
+        <div class="actions"><button class="btn ghost" id="back">← Back</button><div class="spacer"></div>
+          <button class="btn primary" id="next">Continue →</button></div>`;
+      document.getElementById("back").onclick=()=>goto("welcome");
+      document.getElementById("next").onclick=()=>goto("provider");
+      return;
+    }
+    card.innerHTML = `
+      <div class="eyebrow"><span class="tick"></span> Step 1 · Vault</div>
+      <h1>Create the master key</h1>
+      <p>The master key encrypts every provider API key at rest (AES-256-GCM) so your keys never sit in
+         plaintext on disk. It lives server-side only and is never shown in this UI.</p>
+      <div class="radios" id="modes">
+        <label class="radio sel"><input type="radio" name="vmode" value="generate" checked>
+          <div><div class="rt">Generate one for me <span class="muted">(recommended)</span></div>
+          <div class="rd">A fresh 32-byte key is created and written to the data dir with 0600 permissions.</div></div></label>
+        <label class="radio"><input type="radio" name="vmode" value="own">
+          <div><div class="rt">Provide my own key</div>
+          <div class="rd">Paste a base64-encoded 32-byte key (e.g. to reuse an existing vault).</div></div></label>
+      </div>
+      <div id="ownwrap" class="hidden">
+        <label>Master key <span class="opt">— base64 of 32 bytes</span></label>
+        <input type="password" id="mkey" class="mono-in" placeholder="base64…" autocomplete="off">
+      </div>
+      <div id="vnote"></div>
+      <div class="actions"><button class="btn ghost" id="back">← Back</button><div class="spacer"></div>
+        <button class="btn primary" id="init">Initialize vault →</button></div>`;
+    const radios = card.querySelectorAll('input[name=vmode]');
+    const ownwrap = document.getElementById("ownwrap");
+    radios.forEach(r=>r.onchange=()=>{
+      card.querySelectorAll('.radio').forEach(el=>el.classList.remove('sel'));
+      r.closest('.radio').classList.add('sel');
+      ownwrap.classList.toggle('hidden', r.value!=='own');
+    });
+    document.getElementById("back").onclick=()=>goto("welcome");
+    document.getElementById("init").onclick=async(e)=>{
+      const btn=e.target; const note=document.getElementById("vnote");
+      const mode=[...radios].find(r=>r.checked).value;
+      const body={}; if(mode==="own"){ const k=document.getElementById("mkey").value.trim(); if(!k){ note.innerHTML=`<div class="note err">Enter a base64 key or switch to “generate”.</div>`; return;} body.master_key=k; }
+      btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Initializing…`;
+      const {res,data}=await api("POST","/v1/setup/vault",body);
+      btn.disabled=false; btn.innerHTML="Initialize vault →";
+      if(!res.ok){ note.innerHTML=`<div class="note err">${esc(errMsg(data,"Could not initialize the vault."))}</div>`; return; }
+      state.status.vault_initialized=true;
+      goto("provider");
+    };
+  }
+
+  function renderProvider(){
+    card.innerHTML = `
+      <div class="eyebrow"><span class="tick"></span> Step 2 · Provider</div>
+      <h1>Add your first provider</h1>
+      <p>Pick an upstream and give it a key. We'll <b>validate the key with a real call</b> before saving
+         it — a bad key fails here, not on your first request.</p>
+      <label>Adapter type</label>
+      <select id="adapter">
+        <option value="native-messages">Anthropic (native /v1/messages)</option>
+        <option value="openai-compat">OpenAI-compatible (OpenAI, GLM, DeepSeek, Groq, Gemini-compat, …)</option>
+      </select>
+      <div class="row">
+        <div><label>Provider name</label><input type="text" id="pname" class="mono-in" placeholder="anthropic"></div>
+        <div id="modelwrap"><label>Model to test <span class="opt" id="modelhint">— optional</span></label><input type="text" id="pmodel" class="mono-in" placeholder="auto (first known model)"></div>
+      </div>
+      <div id="keywrap"><label>API key</label><input type="password" id="pkey" class="mono-in" placeholder="sk-…" autocomplete="off"></div>
+      <div id="basewrap"><label>Base URL <span class="opt" id="basehint"></span></label><input type="text" id="pbase" class="mono-in" placeholder=""></div>
+      <label class="check"><input type="checkbox" id="pdefault" checked> Make this the default provider</label>
+      <label class="check"><input type="checkbox" id="pskip"> Add without validating <span class="muted">(advanced — offline/air-gapped)</span></label>
+      <div id="pnote"></div>
+      <div class="actions">
+        <button class="btn ghost" id="back">← Back</button>
+        <button class="btn" id="validate">Validate key</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="add" disabled>Add provider →</button>
+      </div>`;
+    const adapterSel=document.getElementById("adapter");
+    const nameIn=document.getElementById("pname"), baseIn=document.getElementById("pbase"), baseHint=document.getElementById("basehint");
+    const validateBtn=document.getElementById("validate"), addBtn=document.getElementById("add"), skip=document.getElementById("pskip");
+    const note=document.getElementById("pnote");
+    let validated=false, epoch=0;
+
+    const DEFAULTS={"native-messages":{name:"anthropic",base:"https://api.anthropic.com",baseHint:"— default shown; edit if self-hosting",
+                      mHint:"— optional; a known model is picked",mPh:"auto (first known model)"},
+                    "openai-compat":{name:"openai",base:"",baseHint:"— required, e.g. https://api.openai.com/v1",
+                      // OpenAI-compatible endpoints usually have no built-in catalog here, so
+                      // validation needs a concrete model id — "optional" would dead-end the flow.
+                      mHint:"— usually required (no built-in catalog), e.g. gpt-4o",mPh:"e.g. gpt-4o"}};
+    function syncAdapter(){
+      const d=DEFAULTS[adapterSel.value];
+      if(!nameIn.dataset.touched) nameIn.value=d.name;
+      baseIn.value=d.base; baseHint.textContent=d.baseHint;
+      document.getElementById("modelhint").textContent=d.mHint;
+      document.getElementById("pmodel").placeholder=d.mPh;
+      resetValidation();
+    }
+    function resetValidation(){ epoch++; validated=false; addBtn.disabled = !skip.checked; if(!skip.checked) note.innerHTML=""; }
+    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; resetValidation(); };
+    [baseIn,document.getElementById("pkey"),document.getElementById("pmodel")].forEach(el=>el.oninput=resetValidation);
+    adapterSel.onchange=syncAdapter;
+    skip.onchange=()=>{ if(skip.checked){ addBtn.disabled=false; note.innerHTML=`<div class="note warn">Skipping validation — the provider is stored as-is; a bad key will only fail on the first real request.</div>`; } else { resetValidation(); note.innerHTML=""; } };
+
+    function formBody(){
+      return {name:nameIn.value.trim(), adapter:adapterSel.value, base_url:baseIn.value.trim(),
+              api_key:document.getElementById("pkey").value, model:document.getElementById("pmodel").value.trim()};
+    }
+    validateBtn.onclick=async()=>{
+      const b=formBody();
+      if(!b.name){ note.innerHTML=`<div class="note err">Give the provider a name.</div>`; return; }
+      if(!b.api_key){ note.innerHTML=`<div class="note err">Enter an API key to validate.</div>`; return; }
+      validateBtn.disabled=true; validateBtn.innerHTML=`<span class="spin"></span> Testing…`;
+      const myEpoch=epoch; // snapshot: if the form changes during the call, discard this (stale) result
+      const {res,data}=await api("POST","/v1/setup/provider/test",b);
+      validateBtn.disabled=false; validateBtn.innerHTML="Validate key";
+      if(myEpoch!==epoch){ return; } // form edited mid-validation — ignore; the key changed
+      if(res.ok && data && data.ok){ validated=true; addBtn.disabled=false;
+        note.innerHTML=`<div class="note ok"><b>Key works.</b> A real call succeeded${data.model_used?` (model <span class="mono">${esc(data.model_used)}</span>)`:""}.</div>`;
+      } else { validated=false; addBtn.disabled=true;
+        note.innerHTML=`<div class="note err"><b>Validation failed:</b> ${esc((data&&data.error)||errMsg(data,"the provider rejected the call"))}</div>`;
+      }
+    };
+    addBtn.onclick=async()=>{
+      const b=formBody(); b.default=document.getElementById("pdefault").checked;
+      // Only the explicit advanced checkbox skips validation. Otherwise the SERVER re-validates the
+      // actual submitted key on add — so a stale client "validated" flag can never store a bad key.
+      b.skip_validation = skip.checked;
+      if(!b.name){ note.innerHTML=`<div class="note err">Give the provider a name.</div>`; return; }
+      addBtn.disabled=true; addBtn.innerHTML=`<span class="spin"></span> Adding…`;
+      const {res,data}=await api("POST","/v1/setup/provider",b);
+      addBtn.disabled=false; addBtn.innerHTML="Add provider →";
+      if(!res.ok){ note.innerHTML=`<div class="note err">${esc((data&&data.detail)||errMsg(data,"Could not add the provider."))}</div>`; addBtn.disabled=true; return; }
+      state.provider=data.provider;
+      goto("network");
+    };
+    document.getElementById("back").onclick=()=>goto("vault");
+    syncAdapter();
+  }
+
+  function renderNetwork(){
+    const n = state.status.network || {};
+    let banner="";
+    if(n.tls){ banner=`<div class="note ok"><b>TLS is on.</b> Traffic to this gateway is encrypted.</div>`; }
+    else if(n.loopback){ banner=`<div class="note ok"><b>Loopback bind (${esc(n.host)}).</b> Only this machine can reach the gateway — safe for local use, no TLS needed.</div>`; }
+    else if(n.exposed){ banner=`<div class="note warn"><b>Heads up — exposed without TLS.</b> This gateway is bound to a non-loopback address (<span class="mono">${esc(n.host)}</span>) with no TLS. Tokens and traffic travel in the clear. This is fine <b>only</b> behind a trusted private network (e.g. Tailscale) or a TLS-terminating reverse proxy. To add TLS, set <span class="mono">LOOPRITE_TLS_CERT</span> + <span class="mono">LOOPRITE_TLS_KEY</span> and restart.</div>`; }
+    else { banner=`<div class="note">Bound to <span class="mono">${esc(n.host)}</span>.</div>`; }
+    card.innerHTML = `
+      <div class="eyebrow"><span class="tick"></span> Step 3 · Network</div>
+      <h1>How this gateway is reachable</h1>
+      <p>l00prite refuses to bind a public address without TLS, so you're on a safe footing already.
+         Here's exactly where it's listening.</p>
+      <div style="margin-top:14px">
+        <div class="kv"><span class="k">Bind host</span><span class="v mono">${esc(n.host||"?")}</span></div>
+        <div class="kv"><span class="k">Port</span><span class="v mono">${esc(n.port||"?")}</span></div>
+        <div class="kv"><span class="k">Scheme</span><span class="v mono">${esc(n.scheme||"http")}</span></div>
+        <div class="kv"><span class="k">Exposure</span><span class="v">${n.tls?"TLS":(n.loopback?"loopback only":"non-loopback"+(n.allow_insecure?" (insecure bind allowed)":""))}</span></div>
+      </div>
+      ${banner}
+      <div class="actions"><button class="btn ghost" id="back">← Back</button><div class="spacer"></div>
+        <button class="btn primary" id="next">Looks good →</button></div>`;
+    document.getElementById("back").onclick=()=>goto("provider");
+    document.getElementById("next").onclick=()=>goto("token");
+  }
+
+  function renderToken(){
+    card.innerHTML = `
+      <div class="eyebrow"><span class="tick"></span> Step 4 · Token</div>
+      <h1>Mint your first token</h1>
+      <p>Clients authenticate with an opaque gateway token (not your provider keys). It's scoped to a
+         project and can be revoked anytime. <b>It's shown once</b> — copy it on the next screen.</p>
+      <div class="row">
+        <div><label>Project</label><input type="text" id="tproject" class="mono-in" value="default" placeholder="default"></div>
+        <div><label>Expires <span class="opt">— days, 0 = never</span></label><input type="number" id="texpires" class="mono-in" value="0" min="0"></div>
+      </div>
+      <label>Repo <span class="opt">— optional, scopes the token to one registered repo</span></label>
+      <input type="text" id="trepo" class="mono-in" placeholder="(none)">
+      <div id="tnote"></div>
+      <div class="actions"><button class="btn ghost" id="back">← Back</button><div class="spacer"></div>
+        <button class="btn primary" id="mint">Mint token →</button></div>`;
+    document.getElementById("back").onclick=()=>goto("network");
+    document.getElementById("mint").onclick=async(e)=>{
+      const btn=e.target, note=document.getElementById("tnote");
+      const project=document.getElementById("tproject").value.trim();
+      if(!project){ note.innerHTML=`<div class="note err">A project name is required.</div>`; return; }
+      const body={project}; const repo=document.getElementById("trepo").value.trim(); if(repo) body.repo=repo;
+      const exp=parseInt(document.getElementById("texpires").value,10); if(!isNaN(exp)&&exp>0) body.expires_days=exp;
+      btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Minting…`;
+      const {res,data}=await api("POST","/v1/setup/token",body);
+      btn.disabled=false; btn.innerHTML="Mint token →";
+      if(!res.ok){ note.innerHTML=`<div class="note err">${esc(errMsg(data,"Could not mint the token."))}</div>`; return; }
+      state.token=data; goto("done");
+    };
+  }
+
+  function renderDone(){
+    const n = state.status.network || {};
+    const base = n.base_url || (location.origin+"/v1");
+    const tok = state.token ? state.token.token : "(your token)";
+    const curl = `curl ${base}/chat/completions \\
+  -H "authorization: Bearer ${tok}" \\
+  -H "content-type: application/json" \\
+  -d '{"model":"auto","messages":[{"role":"user","content":"hello"}]}'`;
+    const cc = `# Codex CLI / Aider / any OpenAI-compatible tool:
+export OPENAI_BASE_URL="${base}"
+export OPENAI_API_KEY="${tok}"`;
+    card.innerHTML = `
+      <div class="eyebrow"><span class="tick" style="background:var(--ok)"></span> Setup complete</div>
+      <h1>Your gateway is live 🎉</h1>
+      <p>A provider is configured and your token is minted. Point any OpenAI-compatible tool at the
+         endpoint below.</p>
+      <div style="margin-top:8px">
+        <div class="kv"><span class="k">Base URL</span><span class="v mono">${esc(base)}</span></div>
+        <div class="kv"><span class="k">Chat endpoint</span><span class="v mono">${esc(n.chat_url||base+"/chat/completions")}</span></div>
+        ${state.provider?`<div class="kv"><span class="k">Provider</span><span class="v mono">${esc(state.provider.name)} · ${esc(state.provider.adapter)}${state.provider.is_default?" · default":""}</span></div>`:""}
+        ${state.token?`<div class="kv"><span class="k">Token id</span><span class="v mono">${esc(state.token.id)} · project ${esc(state.token.project)}</span></div>`:""}
+      </div>
+      ${state.token?`<div class="note warn"><b>Copy your token now — it won't be shown again.</b></div>
+      <div class="tokenbox"><input type="text" id="tokval" class="mono-in" readonly value="${esc(tok)}"><button class="btn" id="copytok">Copy</button></div>`:""}
+      <label style="margin-top:22px">Try it — curl</label>
+      <div class="codeblock"><pre id="curl">${esc(curl)}</pre><button class="copy" data-for="curl">Copy</button></div>
+      <label style="margin-top:16px">Or wire up a tool</label>
+      <div class="codeblock"><pre id="cc">${esc(cc)}</pre><button class="copy" data-for="cc">Copy</button></div>
+      <div class="actions"><div class="spacer"></div>
+        <button class="btn primary" id="dash">Open dashboard →</button></div>`;
+    card.querySelectorAll(".copy").forEach(b=>b.onclick=()=>copy(document.getElementById(b.dataset.for).textContent,b));
+    const ct=document.getElementById("copytok"); if(ct) ct.onclick=()=>copy(tok,ct);
+    document.getElementById("dash").onclick=()=>{
+      // Hand the freshly-minted token to the dashboard so it shows real data immediately.
+      if(state.token && state.token.token){ try{ localStorage.setItem("l00prite_token", state.token.token); }catch(e){} }
+      location.href="/";
+    };
+  }
+
+  function renderAlreadyDone(){
+    current="done"; renderStepper();
+    card.innerHTML = `
+      <div class="eyebrow"><span class="tick" style="background:var(--ok)"></span> Already configured</div>
+      <h1>Setup is already complete</h1>
+      <p>This gateway is configured — the setup endpoints are disabled. Head to the dashboard, or use the
+         CLI (<span class="mono">l00prite provider add</span>, <span class="mono">token mint</span>) to make changes.</p>
+      <div class="actions"><div class="spacer"></div><button class="btn primary" id="dash">Open dashboard →</button></div>`;
+    document.getElementById("dash").onclick=()=>location.href="/";
+  }
+
+  function copy(text,btn){
+    const done=()=>{ const o=btn.textContent; btn.textContent="Copied ✓"; setTimeout(()=>btn.textContent=o,1400); };
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done,done); }
+    else { const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch(e){} ta.remove(); done(); }
+  }
+
+  loadStatus();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "description": "Machine-readable manifest of how each AI coding agent discovers a l00prite project. Entries with a non-null adapter_template ship a file from templates/adapters/; entries with null adapter_template are covered by a generated file (generated_from) or natively by AGENTS.md. Consumed by scripts/validate-l00prite.js.",
+  "vendors": [
+    {
+      "id": "agents-md-standard",
+      "tool": "AGENTS.md open standard — OpenAI Codex, Cursor, GitHub Copilot coding agent/CLI/VS Code, Windsurf, Zed, Jules, Factory, Amp, opencode, Devin, Warp, Roo Code, JetBrains Junie, and others",
+      "context_file": "AGENTS.md",
+      "reads_agents_md": "yes",
+      "adapter_template": null,
+      "generated_from": "templates/AGENTS.md.template",
+      "target_path": "AGENTS.md",
+      "required_strings": [".l00prite", "lock.json", "untrusted", ".l00prite/prompts"],
+      "notes": "Generated per-project in Planning Mode. Keep combined AGENTS.md content well under 32 KiB — OpenAI Codex caps it (project_doc_max_bytes, default 32 KiB) and silently truncates beyond."
+    },
+    {
+      "id": "claude-code",
+      "tool": "Claude Code",
+      "context_file": "CLAUDE.md",
+      "reads_agents_md": "no",
+      "adapter_template": null,
+      "generated_from": "templates/CLAUDE.md.template",
+      "target_path": "CLAUDE.md",
+      "required_strings": ["lock.json", ".l00prite/prompts"],
+      "notes": "Claude Code reads CLAUDE.md, not AGENTS.md. The template's fixed 'l00prite Protocol' section is Claude's adapter; .claude/prompts/ mirrors .l00prite/prompts/ byte-for-byte."
+    },
+    {
+      "id": "gemini-cli",
+      "tool": "Google Gemini CLI",
+      "context_file": "GEMINI.md",
+      "reads_agents_md": "configurable",
+      "adapter_template": "templates/adapters/GEMINI.md",
+      "generated_from": null,
+      "target_path": "GEMINI.md",
+      "required_strings": ["AGENTS.md", ".l00prite", "lock.json", "untrusted", ".l00prite/prompts"],
+      "notes": "Default context file is GEMINI.md; the adapter @AGENTS.md-imports the full standard file. Users can instead set {\"context\": {\"fileName\": [\"AGENTS.md\", \"GEMINI.md\"]}} in .gemini/settings.json — l00prite documents that snippet but never ships settings files."
+    },
+    {
+      "id": "qwen-code",
+      "tool": "Qwen Code",
+      "context_file": "QWEN.md",
+      "reads_agents_md": "configurable",
+      "adapter_template": "templates/adapters/QWEN.md",
+      "generated_from": null,
+      "target_path": "QWEN.md",
+      "required_strings": ["AGENTS.md", ".l00prite", "lock.json", "untrusted", ".l00prite/prompts"],
+      "notes": "Gemini CLI fork; reads QWEN.md by default and supports the same @file imports and settings override (.qwen/settings.json)."
+    },
+    {
+      "id": "github-copilot",
+      "tool": "GitHub Copilot — chat, code review, coding agent, CLI",
+      "context_file": ".github/copilot-instructions.md",
+      "reads_agents_md": "yes",
+      "adapter_template": "templates/adapters/copilot-instructions.md",
+      "generated_from": null,
+      "target_path": ".github/copilot-instructions.md",
+      "required_strings": ["AGENTS.md", ".l00prite", "lock.json", "untrusted", ".l00prite/prompts"],
+      "notes": "The coding agent/CLI/VS Code read AGENTS.md natively; when both files exist, both are used. This adapter covers surfaces that read only copilot-instructions.md, and stays self-sufficient because (a) some surfaces cannot open other files and (b) Zed ranks this file ABOVE AGENTS.md in its first-match priority list."
+    },
+    {
+      "id": "cursor",
+      "tool": "Cursor",
+      "context_file": ".cursor/rules/*.mdc",
+      "reads_agents_md": "yes",
+      "adapter_template": "templates/adapters/l00prite.mdc",
+      "generated_from": null,
+      "target_path": ".cursor/rules/l00prite.mdc",
+      "required_strings": ["AGENTS.md", ".l00prite", "lock.json", "untrusted", ".l00prite/prompts", "alwaysApply"],
+      "notes": "MDC frontmatter with description + alwaysApply: true — guarantees injection even where AGENTS.md support is disabled. Cursor loads root AGENTS.md alongside .cursor/rules; adapters stay short so double-loading is cheap. .mdc remains supported in Cursor 2.2+ (new rules default to .cursor/rules/<name>/RULE.md folders)."
+    },
+    {
+      "id": "windsurf",
+      "tool": "Windsurf (Devin Desktop)",
+      "context_file": ".windsurf/rules/*.md",
+      "reads_agents_md": "yes",
+      "adapter_template": "templates/adapters/windsurf-l00prite.md",
+      "generated_from": null,
+      "target_path": ".windsurf/rules/l00prite.md",
+      "required_strings": ["AGENTS.md", ".l00prite", "lock.json", "untrusted", ".l00prite/prompts", "always_on"],
+      "notes": "Frontmatter trigger: always_on. Documented limits: ~6,000 characters per rules file, ~12,000 combined; content beyond is silently truncated — the validator warns above 5,500. Newer builds prefer .devin/rules/ with .windsurf/rules/ as a still-read fallback."
+    },
+    {
+      "id": "aider",
+      "tool": "Aider",
+      "context_file": "CONVENTIONS.md",
+      "reads_agents_md": "configurable",
+      "adapter_template": "templates/adapters/CONVENTIONS.md",
+      "generated_from": null,
+      "target_path": "CONVENTIONS.md",
+      "required_strings": ["AGENTS.md", ".l00prite", "lock.json", "untrusted", ".l00prite/prompts"],
+      "notes": "Not auto-loaded: users pass --read CONVENTIONS.md --read AGENTS.md or set read: [AGENTS.md, CONVENTIONS.md] in their own .aider.conf.yml. l00prite deliberately ships no .aider.conf.yml — repo-root config silently overrides same-named keys in a user's home config, and common .aider* gitignore patterns would swallow it."
+    },
+    {
+      "id": "zed",
+      "tool": "Zed",
+      "context_file": ".rules (first match wins: .rules, .cursorrules, .windsurfrules, .clinerules, .github/copilot-instructions.md, AGENT.md, AGENTS.md, CLAUDE.md, GEMINI.md — root only)",
+      "reads_agents_md": "yes",
+      "adapter_template": null,
+      "generated_from": null,
+      "target_path": null,
+      "required_strings": [],
+      "notes": "Covered without an adapter: the only file l00prite ships that outranks AGENTS.md in Zed's list is .github/copilot-instructions.md, which is self-sufficient by design."
+    },
+    {
+      "id": "opencode",
+      "tool": "opencode",
+      "context_file": "AGENTS.md",
+      "reads_agents_md": "yes",
+      "adapter_template": null,
+      "generated_from": null,
+      "target_path": null,
+      "required_strings": [],
+      "notes": "Reads project-root AGENTS.md natively (preferred over CLAUDE.md); no adapter needed."
+    }
+  ]
+}
