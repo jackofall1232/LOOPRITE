@@ -622,3 +622,59 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none.
 - **Lock:** lock-20260705-201723 acquired for this entry plus the `state.json`/`todos.md`
   writes above; released immediately after.
+
+### Run 2026-07-05T21:24:23Z — Claude (Fable 5), branch claude/looprite-android-apk-4mth8g — unit 1: recon + Android architecture
+- **Goal:** Start the Android APK pass (maintainer brief 2026-07-05): recon the full repo +
+  build environment, decide the Android packaging strategy, and write the architecture
+  plan / feasibility decision / phased roadmap (deliverables 1–3).
+- **Triggering event:** Maintainer brief — evolve the repo into a self-contained L00prite
+  OS Android APK (device = local control plane; no hosted server).
+- **Decision:** Packaging Option A chosen — cross-compile the existing Go gateway to an
+  android/arm64 PIE binary, ship it as lib/arm64-v8a/libl00prite.so, exec from
+  nativeLibraryDir under a thin no-AndroidX Java wrapper (foreground service + WebView on
+  http://127.0.0.1:8787). gomobile, Termux-dependence, and native rewrites rejected — see
+  cli-os/docs/android-architecture.md §2.
+- **Completed work:** 7-reader parallel recon of every cli-os subsystem + protocol layer;
+  environment feasibility probes; no-Google APK toolchain proven end-to-end (signed v2+v3
+  hello-world APK with WebView activity + service + native-lib payload, built from apt
+  aapt/zipalign/apksigner/dalvik-exchange + android-framework-res + Maven Central
+  robolectric android-all); Venice AI pricing verified first-party (docs mirror,
+  2026-07-05); wrote cli-os/docs/android-architecture.md (plan, feasibility evidence,
+  G1–G11 gap analysis, provider/role expansion, security model, dual build pipeline,
+  Phase 0–3 roadmap); blueprint.md Android section.
+- **Changed files:** cli-os/docs/android-architecture.md (new), .l00prite/blueprint.md,
+  .l00prite/{lock,state,todos} (session start, prior commit 7936abd).
+- **Tests run / Verification:**
+  - `command: GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: PIE ELF aarch64, interpreter /system/bin/linker64, pure-Go
+    SQLite — no NDK/gomobile needed` · 2026-07-05T21:19Z.
+  - `command: apksigner verify --verbose signed.apk (toolchain POC, scratchpad)` ·
+    `exit_code: 0` · `summary: v2=true v3=true; aapt dump badging shows launchable
+    activity + service + native-code arm64-v8a` · 2026-07-05T21:30Z.
+  - `command: curl https://dl.google.com/... via agent proxy` · `exit_code: 56` ·
+    `summary: dl.google.com CONNECT 403 — Google-hosted SDK/AGP unavailable in this build
+    container; motivated the no-Google local chain + real-SDK CI dual pipeline` ·
+    2026-07-05T21:18Z.
+- **Response drafted/sent:** none — design unit; the PR at pass end is the response.
+- **Event status:** n/a (no event).
+- **Failures:** none blocking. Recorded for reuse: dl.google.com and maven.google.com
+  (301→dl.google.com) are proxy-blocked here; curl.se and api.venice.ai and
+  docs.venice.ai also blocked; Venice docs reachable via their public GitHub docs mirror.
+- **Decisions:** (1) gitx seam with pure-Go go-git fallback instead of bundling a static
+  git binary (self-contained, keeps exec-git byte-identical on desktop). (2) Master key
+  via Android-Keystore-wrapped LOOPRITE_MASTER_KEY env, never a key file on flash.
+  (3) New optional LOOPRITE_SETUP_SECRET gate closes the loopback first-run setup race
+  unique to multi-app devices. (4) dist.sh untouched; android builds live in
+  scripts/build-apk.sh + CI workflow (workflow addition = denylisted path, deliberately
+  shipped via human-reviewed PR).
+- **Confidence:** High on feasibility (both pillars proven by direct experiment before
+  design commit); medium on Venice capability metadata (pricing first-party-verified,
+  context/tools flags to be marked at source-supported confidence in the manifest).
+- **Next action:** implement per android-architecture.md §4/§5/§7 — three parallel writer
+  units (Go platform enablement; providers/roles; android app + build pipeline), each
+  reviewed by the architect and committed separately.
+- **Do-not-retry notes:** do not attempt Android SDK/AGP/NDK downloads from Google hosts
+  in this environment; do not fetch docs.venice.ai directly (use the GitHub docs mirror).
+- **Lock:** lock-20260705-212423-claude-android-apk-pass held (acquired at session start
+  after prior lock showed released; expires 2026-07-06T01:24:23Z — refresh before expiry
+  per LOCKING.md rule 7).
