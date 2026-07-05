@@ -192,7 +192,7 @@ same policy: Fable 5 architects, Sonnet 5 writes. Cross-provider bridging
 
 Two independent ways to produce the APK; both consume the same `android/` sources:
 
-1. **`scripts/build-apk.sh` — hermetic, no Google downloads.** Go cross-compile
+1. **`cli-os/scripts/build-apk.sh` (sibling of `dist.sh`) — hermetic, no Google downloads.** Go cross-compile
    (`android/arm64` + `android/x86_64` for emulators) → binaries placed as
    `lib/<abi>/libl00prite.so` → `aapt package` against `android-framework-res` →
    `javac --release 8` against the Robolectric `android-all` jar → `dalvik-exchange
@@ -245,7 +245,7 @@ change to the two review-gated files (`.claude/commands/build-loop.md`,
 | Protocol validator | `node scripts/validate-l00prite.js` → zero FAIL |
 | Repo health | `node scripts/l00prite-doctor.js .` → HEALTHY (post lock-release) |
 | Android binary is a valid Android PIE | `file` output: ELF aarch64 PIE, interpreter `/system/bin/linker64` |
-| APK builds + signs locally with no Google downloads | `scripts/build-apk.sh` → `apksigner verify --verbose` (v2+v3 true) |
+| APK builds + signs locally with no Google downloads | `cli-os/scripts/build-apk.sh` → `apksigner verify --verbose` (v2+v3 true) |
 | APK manifest sane | `aapt dump badging` — launchable activity, service, INTERNET permission, `native-code: 'arm64-v8a'` |
 | Gateway e2e smoke (same code the APK runs) | linux build: wizard-latch + provider add (mock) + playground round-trip + venice/gemini manifest routing visible in `/v1/models` + `route plan auto:writer` |
 | CI workflow builds the APK with the real SDK | GitHub Actions run on the PR |
