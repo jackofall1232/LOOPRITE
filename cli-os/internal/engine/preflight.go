@@ -8,10 +8,10 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
 )
 
@@ -28,22 +28,24 @@ var perActionPermissions = []string{
 }
 
 // checkGitReady verifies the target is a git repo with at least one commit and a clean
-// worktree — read-only; the run branch itself is created at arming time.
-func checkGitReady(root string) []string {
+// worktree — read-only; the run branch itself is created at arming time. It goes through the
+// engine's gitx seam (exec git, or the pure-Go go-git fallback when no git binary is on PATH —
+// see docs/android-architecture.md §4 G4), so this can only ever report a genuine "not a git
+// repository" / "dirty tree" problem — never "git is not installed": with go-git compiled in,
+// some implementation can always at least read repository state.
+func checkGitReady(git gitx.Client, root string) []string {
+	git = gitOrDetect(git)
 	var blockers []string
-	if _, err := exec.LookPath("git"); err != nil {
-		return []string{"git is not installed on the gateway host"}
-	}
-	if out, err := exec.Command("git", "-C", root, "rev-parse", "--verify", "HEAD").CombinedOutput(); err != nil {
-		blockers = append(blockers, "repository has no commits (or is not a git repository): "+strings.TrimSpace(string(out)))
+	if _, err := git.RevParseHead(root); err != nil {
+		blockers = append(blockers, "repository has no commits (or is not a git repository): "+err.Error())
 		return blockers
 	}
-	out, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput()
+	out, err := git.StatusPorcelain(root)
 	if err != nil {
-		blockers = append(blockers, "git status failed: "+strings.TrimSpace(string(out)))
+		blockers = append(blockers, "git status failed: "+err.Error())
 		return blockers
 	}
-	if dirty := dirtyPathsOutsideL00prite(string(out)); len(dirty) > 0 {
+	if dirty := dirtyPathsOutsideL00prite(out); len(dirty) > 0 {
 		blockers = append(blockers, "working tree has uncommitted changes outside .l00prite/ (commit or stash them before starting an autonomous run): "+strings.Join(dirty, ", "))
 	}
 	return blockers
@@ -283,7 +285,7 @@ func (e *Engine) BuildPreflight(run *Run) (*Preflight, error) {
 		}
 	}
 
-	pf.Blockers = append(pf.Blockers, checkGitReady(run.RepoRoot)...)
+	pf.Blockers = append(pf.Blockers, checkGitReady(e.Git, run.RepoRoot)...)
 	return e.finishPreflight(run, pf, snap, true)
 }
 

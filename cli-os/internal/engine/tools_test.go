@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
 )
 
 // ---- helpers ----
@@ -253,10 +255,14 @@ func TestBranchAndCommit(t *testing.T) {
 		t.Skip("git not available")
 	}
 
+	// nil client defaults to gitx.Detect() (exercised throughout this test); a git client is also
+	// passed explicitly in a couple of calls below to prove both spellings work identically.
+	git := gitx.Detect()
+
 	// no commits -> "repository has no commits"
 	empty := t.TempDir()
 	initGitRepo(t, empty)
-	if err := EnsureRunBranch(empty, "l00prite/run-x"); err == nil || !strings.Contains(err.Error(), "no commits") {
+	if err := EnsureRunBranch(nil, empty, "l00prite/run-x"); err == nil || !strings.Contains(err.Error(), "no commits") {
 		t.Fatalf("expected no-commits error, got %v", err)
 	}
 
@@ -268,14 +274,14 @@ func TestBranchAndCommit(t *testing.T) {
 
 	// dirty tree -> "working tree is not clean"
 	writeFileRaw(t, filepath.Join(dir, "dirty.txt"), "x")
-	if err := EnsureRunBranch(dir, "l00prite/run-x"); err == nil || !strings.Contains(err.Error(), "not clean") {
+	if err := EnsureRunBranch(git, dir, "l00prite/run-x"); err == nil || !strings.Contains(err.Error(), "not clean") {
 		t.Fatalf("expected not-clean error, got %v", err)
 	}
 
 	// clean it, then succeed and create the branch
 	gitRun(t, dir, "add", "-A")
 	gitRun(t, dir, "commit", "-m", "add dirty")
-	if err := EnsureRunBranch(dir, "l00prite/run-x"); err != nil {
+	if err := EnsureRunBranch(git, dir, "l00prite/run-x"); err != nil {
 		t.Fatalf("EnsureRunBranch on clean tree: %v", err)
 	}
 	cur := strings.TrimSpace(gitRun(t, dir, "rev-parse", "--abbrev-ref", "HEAD"))
@@ -285,13 +291,13 @@ func TestBranchAndCommit(t *testing.T) {
 
 	// CommitUnit round-trip
 	writeFileRaw(t, filepath.Join(dir, "new.go"), "package x\n")
-	hash, err := CommitUnit(dir, "add new.go")
+	hash, err := CommitUnit(nil, dir, "add new.go")
 	if err != nil || hash == "" {
 		t.Fatalf("CommitUnit: hash=%q err=%v", hash, err)
 	}
 
 	// nothing to commit -> ("", nil)
-	hash2, err := CommitUnit(dir, "noop")
+	hash2, err := CommitUnit(git, dir, "noop")
 	if err != nil || hash2 != "" {
 		t.Fatalf("CommitUnit noop should be (\"\", nil), got hash=%q err=%v", hash2, err)
 	}

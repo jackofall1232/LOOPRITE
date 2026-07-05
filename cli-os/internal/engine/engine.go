@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
 )
 
@@ -19,6 +20,10 @@ import (
 type Engine struct {
 	Store  *Store
 	Caller ModelCaller
+	// Git is the gitx seam (exec-git, or the pure-Go go-git fallback when no git binary is on
+	// PATH — see docs/android-architecture.md §4 G4) every git operation this engine performs
+	// goes through. New defaults it to gitx.Detect().
+	Git gitx.Client
 
 	// LeaseTTLSec is the .l00prite lock TTL for an armed run (refreshed each iteration).
 	LeaseTTLSec int
@@ -44,7 +49,7 @@ type approvalSignal struct {
 // New builds an Engine with protocol-sane defaults.
 func New(store *Store, caller ModelCaller) *Engine {
 	return &Engine{
-		Store: store, Caller: caller,
+		Store: store, Caller: caller, Git: gitx.Detect(),
 		LeaseTTLSec: 1800, IterationTimeout: 20 * time.Minute, MaxToolCalls: 40,
 		active: map[string]*runHandle{},
 	}
@@ -94,7 +99,7 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 	}
 
 	branch := runBranch(run.ID)
-	if err := EnsureRunBranch(run.RepoRoot, branch); err != nil {
+	if err := EnsureRunBranch(e.Git, run.RepoRoot, branch); err != nil {
 		_ = f.ReleaseLock(run.ID)
 		return fmt.Errorf("%w: %v", ErrBadState, err)
 	}
@@ -341,7 +346,7 @@ func (e *Engine) iterate(ctx context.Context, run *Run, f Files) iterOutcome {
 	})
 
 	// --- execute: coder tool-loop ---
-	tb := &Toolbox{Root: run.RepoRoot, Denylist: ParseDenylist(snap.Constraints), Allowlist: run.Config.CommandAllowlist, Branch: run.Branch}
+	tb := &Toolbox{Root: run.RepoRoot, Denylist: ParseDenylist(snap.Constraints), Allowlist: run.Config.CommandAllowlist, Branch: run.Branch, Git: e.Git}
 	blocked, boundary := e.runCoder(ictx, run, f, tb, plan, sel)
 	if boundary != "" {
 		return iterOutcome{boundary: boundary, summary: blocked}
@@ -370,7 +375,7 @@ func (e *Engine) iterate(ctx context.Context, run *Run, f Files) iterOutcome {
 
 	// --- review (quality-sensitive objectives only) ---
 	if plan.Review {
-		diff, _ := CurrentDiff(run.RepoRoot, 60000)
+		diff, _ := CurrentDiff(e.Git, run.RepoRoot, 60000)
 		if strings.TrimSpace(diff) != "" {
 			rvReq := BuildReviewerReq(ModelForRole(plan, RoleReview), sel.Description, diff)
 			rvTurn, rerr := e.callRole(ictx, run, RoleReview, rvReq, false, false)
@@ -391,7 +396,7 @@ func (e *Engine) iterate(ctx context.Context, run *Run, f Files) iterOutcome {
 	// "nothing to commit" (hash=="", cerr==nil, a legitimate no-op for a docs-only/investigation
 	// unit) — it means real changes are sitting uncommitted with no record on the run branch, so
 	// it must stop for a human rather than being reported as a successfully progressed unit.
-	hash, cerr := CommitUnit(run.RepoRoot, "l00prite-os: "+truncate(sel.Description, 72))
+	hash, cerr := CommitUnit(e.Git, run.RepoRoot, "l00prite-os: "+truncate(sel.Description, 72))
 	if cerr != nil {
 		return iterOutcome{boundary: BoundaryHumanReview, summary: fmt.Sprintf("unit %q finished but committing its changes failed: %s", sel.Description, cerr.Error())}
 	}
