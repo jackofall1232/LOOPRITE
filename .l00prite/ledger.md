@@ -678,3 +678,56 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Lock:** lock-20260705-212423-claude-android-apk-pass held (acquired at session start
   after prior lock showed released; expires 2026-07-06T01:24:23Z — refresh before expiry
   per LOCKING.md rule 7).
+
+### Run 2026-07-05T22:05:00Z — Claude (Fable 5 architect + Sonnet 5 writer), branch claude/looprite-android-apk-4mth8g — unit 2: Android app + APK pipeline
+- **Goal:** Implement android-architecture.md §3/§7: the android/ wrapper app (Java,
+  no-AndroidX), the hermetic no-Google build script, and the real-SDK CI workflow.
+- **Triggering event:** Unit 1 (architecture) committed; parallel writer dispatch.
+- **Decision:** Written by a Sonnet 5 writer agent to the architect's spec; reviewed
+  line-by-line by the architect (Fable 5) before commit.
+- **Completed work:** android/{AndroidManifest.xml,README.md,res/values/strings.xml,
+  res/xml/network_security_config.xml,src/com/l00prite/os/{MainActivity,GatewayService,
+  Keys}.java}; cli-os/scripts/build-apk.sh; .github/workflows/android-apk.yml;
+  .gitignore entry for cli-os/dist-android/. Writer deviations accepted by the architect:
+  ACCESS_NETWORK_STATE permission (required for LinkProperties DNS discovery, G1),
+  allowBackup=false (keeps the wrapped vault key out of Android Auto Backup),
+  android/amd64 emulator ABI skipped as best-effort (genuine Go toolchain limit:
+  android/amd64 requires external cgo linking — arm64 does not; both pipelines degrade
+  identically and pick the ABI back up automatically if a future Go adds internal
+  linking). Architect fixes on review: session-specific scratchpad path stripped from
+  build-apk.sh (replaced with a cache-glob under ~/.cache/l00prite-apk, cache seeded);
+  dist-android/ gitignored.
+- **Changed files:** android/** (new), cli-os/scripts/build-apk.sh (new),
+  .github/workflows/android-apk.yml (new — NOTE: matches the Autonomous-Edit Denylist
+  glob .github/workflows/**; shipped deliberately via this human-reviewed PR, flagged in
+  the PR description), .gitignore.
+- **Tests run / Verification:**
+  - `command: bash cli-os/scripts/build-apk.sh v0-verify3 (writer run, isolated worktree
+    of dc38b74 because the Go tree was concurrently mid-edit by unit 3)` · `exit_code: 0`
+    · `summary: signed APK produced; apksigner verify v2=true v3=true; badging shows
+    com.l00prite.os / launchable MainActivity / INTERNET / native-code arm64-v8a;
+    lib/arm64-v8a/libl00prite.so Stored (11.9MB PIE aarch64, /system/bin/linker64);
+    assets/cacert.pem present (146 Mozilla certs, built only from
+    /usr/share/ca-certificates/mozilla, never the proxy-tainted system store)` ·
+    2026-07-05T21:58Z.
+  - `command: python3 yaml.safe_load(android-apk.yml) + bash -n on run blocks` ·
+    `exit_code: 0` · `summary: workflow parses; CI run itself pending first PR run` ·
+    2026-07-05T21:59Z.
+  - `command: bash -n cli-os/scripts/build-apk.sh (post architect edit)` · `exit_code: 0`
+    · `summary: syntax clean after cache-glob refactor` · 2026-07-05T22:04Z.
+- **Response drafted/sent:** none.
+- **Event status:** n/a.
+- **Failures:** android/amd64 cross-build impossible without NDK (external-cgo-linking
+  requirement) — recorded as a known limitation, NOT retried; do not burn time on
+  -linkmode/-tags workarounds (all confirmed ineffective).
+- **Decisions:** master key wrapped by Android Keystore, injected via LOOPRITE_MASTER_KEY
+  env only (never a file on flash); setup secret in plain app-private prefs is an
+  accepted trade-off (dies at setup-latch time); WebView load deferred behind /healthz
+  poll; full APK rebuild against the final merged tree is owed in the verification pass.
+- **Confidence:** High for everything executed here; medium for the CI workflow until its
+  first real Actions run (sdkmanager/d8 paths are standard but unexecuted from this
+  sandbox).
+- **Next action:** review + commit units 3 (Go platform enablement) and 4
+  (providers/roles) when their writers finish; then integrated verification.
+- **Do-not-retry notes:** see Failures (android/amd64).
+- **Lock:** lock-20260705-212423-claude-android-apk-pass still held.

@@ -1,0 +1,186 @@
+name: android-apk
+
+# Builds and verifies the L00prite OS Android wrapper APK with the REAL Android SDK
+# (GitHub-hosted ubuntu-latest runners ship ANDROID_HOME preinstalled), as a
+# reproducibility check alongside the hermetic, no-Google-downloads local pipeline in
+# cli-os/scripts/build-apk.sh (see cli-os/docs/android-architecture.md section 7).
+#
+# This is a debug-signed build only, with an ephemeral job-local keystore. Release
+# signing is an explicit Phase 3 ceremony (see android-architecture.md section 8) — this
+# workflow deliberately never reads a signing key from repository secrets.
+
+"on":
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & verify APK (real Android SDK)
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_PLATFORM: android-34
+      ANDROID_BUILD_TOOLS: 34.0.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli-os/go.mod
+          cache: true
+          cache-dependency-path: cli-os/go.sum
+
+      - name: go test ./...
+        working-directory: cli-os
+        run: go test ./...
+
+      - name: Validate l00prite protocol
+        run: node scripts/validate-l00prite.js
+
+      - name: Install Android SDK platform + build-tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}"
+
+      - name: Build + sign + verify the APK
+        run: |
+          set -euo pipefail
+
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          ANDROID_JAR="$ANDROID_HOME/platforms/$ANDROID_PLATFORM/android.jar"
+          AAPT="$BUILD_TOOLS/aapt"
+          D8="$BUILD_TOOLS/d8"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+
+          ANDROID_DIR="$GITHUB_WORKSPACE/android"
+          WORK="$RUNNER_TEMP/apk-build"
+          OUT="$RUNNER_TEMP/apk-out"
+          rm -rf "$WORK" "$OUT"
+          mkdir -p "$WORK/assets" "$WORK/lib/arm64-v8a" "$WORK/lib/x86_64" "$WORK/classes" "$WORK/dex" "$OUT"
+
+          PACKAGE="com.l00prite.os"
+          VERSION="$(git -C "$GITHUB_WORKSPACE" describe --tags --always --dirty 2>/dev/null || echo dev)"
+          VERSION_CODE="$(date +%s)"
+          APK_NAME="l00prite-os-${VERSION}.apk"
+          echo "Building $APK_NAME (versionCode $VERSION_CODE) with Android SDK $ANDROID_PLATFORM / build-tools $ANDROID_BUILD_TOOLS"
+
+          # --- CA bundle: Mozilla roots only, same rule as build-apk.sh (never the system
+          #     trust store, which may carry locally-injected CAs on some hosts). ---------
+          CACERT="$WORK/assets/cacert.pem"
+          : > "$CACERT"
+          count=0
+          for f in /usr/share/ca-certificates/mozilla/*.crt; do
+            [ -s "$f" ] || { echo "error: missing/zero-byte $f" >&2; exit 1; }
+            cat "$f" >> "$CACERT"
+            count=$((count + 1))
+          done
+          begin_count="$(grep -c 'BEGIN CERTIFICATE' "$CACERT")"
+          [ "$begin_count" -gt 100 ] || { echo "error: only $begin_count certs in cacert.pem" >&2; exit 1; }
+          echo "CA bundle: $count files, $begin_count certificates"
+
+          # --- Go cross-builds (same flags/intent as build-apk.sh) -----------------------
+          LDFLAGS="-s -w -X 'github.com/jackofall1232/l00prite/cli-os/internal/gateway.Version=$VERSION'"
+          ( cd "$GITHUB_WORKSPACE/cli-os" && CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
+              go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/lib/arm64-v8a/libl00prite.so" ./cmd/l00prite )
+          file "$WORK/lib/arm64-v8a/libl00prite.so"
+
+          # android/amd64 needs external (cgo) linking on this Go toolchain and there is no
+          # NDK cross C toolchain wired up here; best-effort, matching build-apk.sh exactly,
+          # so both pipelines degrade identically instead of one silently masking the gap.
+          HAVE_X86_64=0
+          AMD64_LOG="$WORK/android-amd64-build.log"
+          if ( cd "$GITHUB_WORKSPACE/cli-os" && CGO_ENABLED=0 GOOS=android GOARCH=amd64 \
+                 go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/lib/x86_64/libl00prite.so" ./cmd/l00prite \
+               ) >"$AMD64_LOG" 2>&1; then
+            file "$WORK/lib/x86_64/libl00prite.so"
+            HAVE_X86_64=1
+          elif grep -q "requires external (cgo) linking" "$AMD64_LOG"; then
+            echo "SKIPPED android/amd64 (known Go/android limitation): $(cat "$AMD64_LOG")"
+            rm -rf "$WORK/lib/x86_64"
+          else
+            echo "error: android/amd64 build failed unexpectedly:" >&2
+            cat "$AMD64_LOG" >&2
+            exit 1
+          fi
+
+          # --- aapt package (real android.jar as the -I framework resources source) ------
+          "$AAPT" package -f \
+            -M "$ANDROID_DIR/AndroidManifest.xml" \
+            -S "$ANDROID_DIR/res" \
+            -A "$WORK/assets" \
+            -I "$ANDROID_JAR" \
+            -F "$WORK/base.apk" \
+            --version-code "$VERSION_CODE" \
+            --version-name "$VERSION"
+
+          # --- javac against the real android.jar -----------------------------------------
+          JAVA_FILES=()
+          while IFS= read -r -d '' f; do JAVA_FILES+=("$f"); done \
+            < <(find "$ANDROID_DIR/src" -name '*.java' -print0)
+          javac --release 8 -classpath "$ANDROID_JAR" -d "$WORK/classes" "${JAVA_FILES[@]}"
+
+          # --- d8 (build-tools' current dexer, replaces dx/dalvik-exchange) --------------
+          CLASS_FILES=()
+          while IFS= read -r -d '' f; do CLASS_FILES+=("$f"); done \
+            < <(find "$WORK/classes" -name '*.class' -print0)
+          "$D8" --min-api 26 --output "$WORK/dex" "${CLASS_FILES[@]}"
+
+          # --- assemble: classes.dex (deflated) + lib/**/*.so (STORED) -------------------
+          SO_ENTRIES=(lib/arm64-v8a/libl00prite.so)
+          [ "$HAVE_X86_64" -eq 1 ] && SO_ENTRIES+=(lib/x86_64/libl00prite.so)
+          cp "$WORK/base.apk" "$WORK/work.apk"
+          cp "$WORK/dex/classes.dex" "$WORK/classes.dex"
+          ( cd "$WORK" && zip -q work.apk classes.dex )
+          ( cd "$WORK" && zip -q -0 work.apk "${SO_ENTRIES[@]}" )
+          unzip -lv "$WORK/work.apk"
+
+          "$ZIPALIGN" -f 4 "$WORK/work.apk" "$WORK/aligned.apk"
+          "$ZIPALIGN" -c -v 4 "$WORK/aligned.apk" >/dev/null
+
+          # --- ephemeral debug keystore: job-local temp dir, NEVER the repo working tree --
+          KEYSTORE="$RUNNER_TEMP/ci-debug.keystore"
+          keytool -genkeypair -v \
+            -keystore "$KEYSTORE" -alias l00priteci \
+            -storepass android -keypass android \
+            -keyalg RSA -keysize 2048 -validity 1 \
+            -dname "CN=L00prite CI Debug"
+
+          SIGNED_APK="$OUT/$APK_NAME"
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE" --ks-key-alias l00priteci \
+            --ks-pass pass:android --key-pass pass:android \
+            --min-sdk-version 26 \
+            --out "$SIGNED_APK" "$WORK/aligned.apk"
+
+          echo "== apksigner verify =="
+          VERIFY_OUT="$("$APKSIGNER" verify --verbose "$SIGNED_APK")"
+          echo "$VERIFY_OUT"
+          echo "$VERIFY_OUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" \
+            || { echo "error: v2 signature verification failed" >&2; exit 1; }
+
+          echo "== aapt dump badging =="
+          BADGING_OUT="$("$AAPT" dump badging "$SIGNED_APK")"
+          echo "$BADGING_OUT"
+          echo "$BADGING_OUT" | grep -q "package: name='$PACKAGE'"
+          echo "$BADGING_OUT" | grep -q "launchable-activity: name='${PACKAGE}.MainActivity'"
+          echo "$BADGING_OUT" | grep -q "uses-permission: name='android.permission.INTERNET'"
+          echo "$BADGING_OUT" | grep -q "native-code: .*'arm64-v8a'"
+
+          ( cd "$OUT" && sha256sum "$APK_NAME" > SHA256SUMS )
+          echo "== done: $SIGNED_APK =="
+          du -h "$SIGNED_APK"
+          cat "$OUT/SHA256SUMS"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: l00prite-os-apk
+          path: |
+            ${{ runner.temp }}/apk-out/*.apk
+            ${{ runner.temp }}/apk-out/SHA256SUMS
+          if-no-files-found: error
