@@ -306,8 +306,10 @@ func TestAutoCodeProfileRequiresTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve code profile: %v", err)
 	}
-	if profile.Preference != "balanced" || len(profile.Require) != 1 || profile.Require[0] != "tools" {
-		t.Fatalf("built-in code profile must be balanced + require tools, got %+v", profile)
+	// "quality" (not "balanced") since the 2026-07-05 role-policy pass: the writing role must route
+	// by roleRanks.code ("Sonnet 5 writes"), not by a cost blend — see config.go defaults().
+	if profile.Preference != "quality" || len(profile.Require) != 1 || profile.Require[0] != "tools" {
+		t.Fatalf("built-in code profile must be quality + require tools, got %+v", profile)
 	}
 	tooled := adapters.Candidate{Provider: "p", Model: "hastools", Capabilities: map[string]any{"tools": true}}
 	toolless := adapters.Candidate{Provider: "p", Model: "notools", Capabilities: map[string]any{"tools": false}}
@@ -567,5 +569,249 @@ func TestEnvelopeNeutralizesUnicodeWhitespaceCloser(t *testing.T) {
 	// whitespace before the tag name too
 	if out := neutralizeClosers("a</"+string(rune(0xa0))+"memory>b", []string{"memory"}); !strings.Contains(out, "&lt;/memory&gt;") {
 		t.Fatalf("leading-NBSP closer not neutralized: %q", out)
+	}
+}
+
+// ---- role profiles (architect/writer) over anthropic + venice ----
+
+var anthropicVeniceProviders = []ProviderInfo{
+	{Name: "anthropic", Enabled: true, IsDefault: true},
+	{Name: "venice", Enabled: true, IsDefault: false},
+}
+
+// TestWriterRoleRankOrdersSonnetFirst isolates the roleRanks.writer TABLE itself via scoreCandidates
+// directly (whitebox, same style as TestCostSortRespectsPriceTier) rather than a full Pick() run.
+//
+// The seeded rank is deliberately 97, not 96: selectAuto's role-rank merge (routerauto.go) gives
+// every candidate ABSENT from the role map its qualityRanks value as a fallback rather than a
+// neutral default, and anthropic/claude-opus-4-8's qualityRanks entry is 96 — an exact tie with a
+// 96-ranked Sonnet would fall to lessByQuality's alphabetical tiebreak, under which
+// "claude-opus-4-8" < "claude-sonnet-5" hands the writing role to Opus by accident. Opus is
+// therefore INCLUDED in this candidate set on purpose, so this test breaks if the fallback-tie
+// hazard is ever reintroduced.
+func TestWriterRoleRankOrdersSonnetFirst(t *testing.T) {
+	cfg := cfgWith(t, nil)
+	ranks := cfg.Routing.RoleRanks["writer"]
+	if len(ranks) == 0 {
+		t.Fatalf("roleRanks.writer must be seeded")
+	}
+	cands := []scored{
+		{Candidate: adapters.Candidate{Provider: "anthropic", Model: "claude-sonnet-5"}},
+		{Candidate: adapters.Candidate{Provider: "anthropic", Model: "claude-opus-4-8"}},
+		{Candidate: adapters.Candidate{Provider: "anthropic", Model: "claude-fable-5"}},
+		{Candidate: adapters.Candidate{Provider: "venice", Model: "claude-sonnet-5"}},
+		{Candidate: adapters.Candidate{Provider: "venice", Model: "qwen3-coder-480b-a35b-instruct-turbo"}},
+		{Candidate: adapters.Candidate{Provider: "venice", Model: "openai-gpt-52-codex"}},
+	}
+	got := scoreCandidates(cands, "quality", Requirements{}, ranks)
+	if got[0].Provider != "anthropic" || got[0].Model != "claude-sonnet-5" {
+		t.Fatalf("roleRanks.writer must rank anthropic/claude-sonnet-5 first among writer-mapped candidates (even with opus's qualityRanks fallback of 96 in play), got %s/%s (quality %d)",
+			got[0].Provider, got[0].Model, got[0].quality)
+	}
+	if got[0].quality != 97 {
+		t.Fatalf("roleRanks.writer[anthropic/claude-sonnet-5] want 97 (must exceed opus's 96 qualityRanks fallback) got %d", got[0].quality)
+	}
+}
+
+// TestAutoWriterQualityPicksSonnet asserts the shipped policy end-to-end: the built-in
+// "auto:writer" profile is Preference "quality" ranked by roleRanks.writer, so the full router
+// routes a tools-capable request to anthropic/claude-sonnet-5 — "Sonnet 5 does the bulk writing" —
+// rather than letting a cost blend hand the writing role to the cheapest tools-capable catalog
+// entry (which is exactly what happened when this profile was "balanced": with Venice's
+// first-party pricing loaded, venice/qwen3-coder-480b-a35b-instruct-turbo out-blended Sonnet).
+// Cost control belongs to the PEP caps and the cheap/balanced profiles, not the role policy —
+// see the profile comment in config.go defaults().
+func TestAutoWriterQualityPicksSonnet(t *testing.T) {
+	cfg := cfgWith(t, nil)
+	req := mk("auto:writer", map[string]any{"tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "f", "parameters": map[string]any{}}}}})
+	r, err := Pick(anthropicVeniceProviders, map[string]string{}, req, "", cfg)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if r.Decision["rank_source"] != "roleRanks.writer" {
+		t.Fatalf("rank_source want roleRanks.writer, got %v", r.Decision["rank_source"])
+	}
+	if r.Provider+"/"+r.Model != "anthropic/claude-sonnet-5" {
+		t.Fatalf("auto:writer (quality, roleRanks.writer) want anthropic/claude-sonnet-5 got %s/%s", r.Provider, r.Model)
+	}
+	// Determinism check, matching TestAutoDeterministic's style.
+	r2, err := Pick(anthropicVeniceProviders, map[string]string{}, req, "", cfg)
+	if err != nil {
+		t.Fatalf("pick (2nd): %v", err)
+	}
+	if r.Provider+"/"+r.Model != r2.Provider+"/"+r2.Model {
+		t.Fatalf("auto:writer selection must be deterministic")
+	}
+	// venice/qwen3-coder-480b-a35b-instruct-turbo must still be a capable, ranked candidate (not
+	// capability-rejected) — it simply ranks below Sonnet, it is not excluded.
+	foundQwenCandidate := false
+	for _, c := range candidates(r) {
+		if asStr(asMap(c)["target"]) == "venice/qwen3-coder-480b-a35b-instruct-turbo" {
+			foundQwenCandidate = true
+		}
+	}
+	if !foundQwenCandidate {
+		t.Fatalf("venice/qwen3-coder-480b-a35b-instruct-turbo must be a candidate (present, ranked, just not the winner)")
+	}
+}
+
+func TestAutoWriterExcludesToollessVeniceModels(t *testing.T) {
+	// Capability fail-closed filtering: venice models that do NOT declare tools:true (e.g.
+	// venice-uncensored-1-2, which carries no capabilities at all) must be rejected outright by
+	// auto:writer's "require tools" profile constraint — working as intended, not a bug.
+	cfg := cfgWith(t, nil)
+	req := mk("auto:writer", map[string]any{"tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "f", "parameters": map[string]any{}}}}})
+	r, err := Pick(anthropicVeniceProviders, map[string]string{}, req, "", cfg)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	foundRejected := false
+	for _, x := range asArr(r.Decision["rejected"]) {
+		xm := asMap(x)
+		if asStr(xm["target"]) == "venice/venice-uncensored-1-2" {
+			foundRejected = true
+			hasToolReason := false
+			for _, reason := range asArr(xm["reasons"]) {
+				if strings.Contains(strings.ToLower(asStr(reason)), "tool") {
+					hasToolReason = true
+				}
+			}
+			if !hasToolReason {
+				t.Fatalf("venice/venice-uncensored-1-2 rejection reasons must mention tools, got %v", xm["reasons"])
+			}
+		}
+	}
+	if !foundRejected {
+		t.Fatalf("venice/venice-uncensored-1-2 (no tools capability) must be rejected from a tools-required auto:writer request")
+	}
+}
+
+func TestAutoArchitectProfilePrefersFable(t *testing.T) {
+	// auto:architect is a pure "quality" preference ranked by roleRanks.architect (seeded default:
+	// Fable 5 first, no tools requirement). anthropic/claude-fable-5 (98) must outrank every venice
+	// candidate, including venice's own resold claude-fable-5 (90).
+	cfg := cfgWith(t, nil)
+	r, err := Pick(anthropicVeniceProviders, map[string]string{}, mk("auto:architect", nil), "", cfg)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if r.Provider+"/"+r.Model != "anthropic/claude-fable-5" {
+		t.Fatalf("auto:architect want anthropic/claude-fable-5 (rank 98) got %s/%s", r.Provider, r.Model)
+	}
+	if r.Decision["rank_source"] != "roleRanks.architect" {
+		t.Fatalf("rank_source want roleRanks.architect, got %v", r.Decision["rank_source"])
+	}
+}
+
+func TestAutoReviewerProfilePrefersOpus(t *testing.T) {
+	// auto:reviewer is "quality" preference (unlike writer/advisor's "balanced"), so it ranks purely
+	// by roleRanks.reviewer with no cost blending: anthropic/claude-opus-4-8 (96) must win outright.
+	cfg := cfgWith(t, nil)
+	r, err := Pick(anthropicVeniceProviders, map[string]string{}, mk("auto:reviewer", nil), "", cfg)
+	if err != nil {
+		t.Fatalf("pick reviewer: %v", err)
+	}
+	if r.Provider+"/"+r.Model != "anthropic/claude-opus-4-8" {
+		t.Fatalf("auto:reviewer want anthropic/claude-opus-4-8 (rank 96) got %s/%s", r.Provider, r.Model)
+	}
+	if r.Decision["rank_source"] != "roleRanks.reviewer" {
+		t.Fatalf("rank_source want roleRanks.reviewer, got %v", r.Decision["rank_source"])
+	}
+}
+
+// TestAdvisorRoleRankOrdersFableFirst isolates the roleRanks.advisor TABLE itself via scoreCandidates
+// directly (whitebox — see the FINDING documented on TestWriterRoleRankOrdersSonnetFirst above: a
+// full router-level "quality" pick using rankMap:"advisor" would actually go to
+// anthropic/claude-opus-4-8, not Fable 5, because advisor's own ceiling (92) sits BELOW opus's
+// qualityRanks fallback (96) once opus is a candidate — an even more direct instance of the same
+// per-model qualityRanks-fallback interaction, worth the architect's attention). The shipped
+// "auto:advisor" profile is "balanced" (see TestAutoAdvisorBalancedPicksCheapModel below).
+func TestAdvisorRoleRankOrdersFableFirst(t *testing.T) {
+	cfg := cfgWith(t, nil)
+	ranks := cfg.Routing.RoleRanks["advisor"]
+	if len(ranks) == 0 {
+		t.Fatalf("roleRanks.advisor must be seeded")
+	}
+	cands := []scored{
+		{Candidate: adapters.Candidate{Provider: "anthropic", Model: "claude-fable-5"}},
+		{Candidate: adapters.Candidate{Provider: "anthropic", Model: "claude-sonnet-5"}},
+		{Candidate: adapters.Candidate{Provider: "venice", Model: "claude-sonnet-5"}},
+		{Candidate: adapters.Candidate{Provider: "venice", Model: "minimax-m27"}},
+		{Candidate: adapters.Candidate{Provider: "zhipu", Model: "glm-5.1"}},
+	}
+	got := scoreCandidates(cands, "quality", Requirements{}, ranks)
+	if got[0].Provider != "anthropic" || got[0].Model != "claude-fable-5" {
+		t.Fatalf("roleRanks.advisor must rank anthropic/claude-fable-5 first among advisor-mapped candidates, got %s/%s (quality %d)",
+			got[0].Provider, got[0].Model, got[0].quality)
+	}
+	if got[0].quality != 92 {
+		t.Fatalf("roleRanks.advisor[anthropic/claude-fable-5] want 92 got %d", got[0].quality)
+	}
+}
+
+// TestAutoAdvisorBalancedPicksCheapModel documents the actual behavior of the built-in "auto:advisor"
+// profile (Preference: "balanced", no tools requirement — the widest candidate pool of all four role
+// profiles). Same blended-cost dynamic as auto:writer (see
+// TestAutoWriterBalancedPicksCheapestCapableModel): the cheapest well-performing candidate can win
+// over the roleRanks.advisor-topped anthropic/claude-fable-5.
+func TestAutoAdvisorBalancedPicksCheapModel(t *testing.T) {
+	cfg := cfgWith(t, nil)
+	r, err := Pick(anthropicVeniceProviders, map[string]string{}, mk("auto:advisor", nil), "", cfg)
+	if err != nil {
+		t.Fatalf("pick advisor: %v", err)
+	}
+	if r.Decision["rank_source"] != "roleRanks.advisor" {
+		t.Fatalf("rank_source want roleRanks.advisor, got %v", r.Decision["rank_source"])
+	}
+	if r.Provider+"/"+r.Model != "venice/qwen3-coder-480b-a35b-instruct-turbo" {
+		t.Fatalf("auto:advisor (balanced) want venice/qwen3-coder-480b-a35b-instruct-turbo (blended cost+quality winner) got %s/%s — "+
+			"if this changed, re-derive by hand before assuming a bug", r.Provider, r.Model)
+	}
+	foundFableCandidate := false
+	for _, c := range candidates(r) {
+		if asStr(asMap(c)["target"]) == "anthropic/claude-fable-5" {
+			foundFableCandidate = true
+			if numToInt(asMap(c)["quality"]) != 92 {
+				t.Fatalf("anthropic/claude-fable-5 quality want 92 got %v", asMap(c)["quality"])
+			}
+		}
+	}
+	if !foundFableCandidate {
+		t.Fatalf("anthropic/claude-fable-5 must be a candidate (present, ranked, just not the blended winner)")
+	}
+}
+
+// TestBareModelIDCollisionResolvesByProviderOrder documents (does not change) router.go Rule 3's
+// behavior when two enabled providers' manifests both own the same bare model id (anthropic and
+// venice both publish "claude-sonnet-5"): resolution is FIRST-MATCH in the `providers` slice order
+// passed to Pick, not "prefer the default provider" and not "prefer the native provider" — those only
+// apply via Rule 4 (default provider) / Rule 5 (fallback), which run AFTER Rule 3. Whoever is listed
+// earlier in the enabled provider list wins, provided it serves the model and its breaker isn't open.
+func TestBareModelIDCollisionResolvesByProviderOrder(t *testing.T) {
+	cfg := cfgWith(t, nil)
+	req := map[string]any{"model": "claude-sonnet-5", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+
+	// anthropic listed first -> anthropic owns the bare id.
+	r, err := Pick([]ProviderInfo{
+		{Name: "anthropic", Enabled: true, IsDefault: false},
+		{Name: "venice", Enabled: true, IsDefault: false},
+	}, map[string]string{}, req, "", cfg)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if r.Provider != "anthropic" || r.Decision["rule_id"] != "model_owner" {
+		t.Fatalf("want anthropic/model_owner when anthropic is listed first, got %s/%v", r.Provider, r.Decision["rule_id"])
+	}
+
+	// venice listed first -> venice owns the bare id instead, even though anthropic is IsDefault.
+	r, err = Pick([]ProviderInfo{
+		{Name: "venice", Enabled: true, IsDefault: false},
+		{Name: "anthropic", Enabled: true, IsDefault: true},
+	}, map[string]string{}, req, "", cfg)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if r.Provider != "venice" || r.Decision["rule_id"] != "model_owner" {
+		t.Fatalf("want venice/model_owner when venice is listed first (list order, not default-provider preference), got %s/%v", r.Provider, r.Decision["rule_id"])
 	}
 }

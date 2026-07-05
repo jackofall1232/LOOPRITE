@@ -731,3 +731,104 @@ Append one entry per agent run. Do not overwrite prior runs.
   (providers/roles) when their writers finish; then integrated verification.
 - **Do-not-retry notes:** see Failures (android/amd64).
 - **Lock:** lock-20260705-212423-claude-android-apk-pass still held.
+
+### Run 2026-07-05T22:25:00Z — Claude (Fable 5 architect + Sonnet 5 writer), branch claude/looprite-android-apk-4mth8g — unit 3: Go Android platform enablement
+- **Goal:** Implement android-architecture.md §4 gaps G1/G3/G4/G7/G8 in the Go gateway/engine,
+  additively (desktop byte-identical when new envs unset and git exists).
+- **Triggering event:** Unit 1 spec committed; parallel writer dispatch.
+- **Decision:** Written by a Sonnet 5 writer agent to the architect's spec; diffs reviewed by
+  the architect before commit.
+- **Completed work:** (G1) internal/util/resolver.go — LOOPRITE_DNS resolver override +
+  android-no-resolv.conf fallback (8.8.8.8/1.1.1.1), installed first thing in main();
+  (G3) engine shellPath() sh→/bin/sh→/system/bin/sh; (G8) util.ScrubSecretEnv strips
+  LOOPRITE_MASTER_KEY/LOOPRITE_SETUP_SECRET from every child-process env; (G4) new
+  internal/gitx seam — exec-git impl (byte-identical legacy behavior, commit-identity
+  fallback retry) + pure-Go go-git v5.18.0 fallback when no git binary (https/local clone,
+  status, checkout -B, add, commit, DiffHead as an honestly-labeled status summary, Raw →
+  ErrRawUnsupported) — wired through engine preflight/tools/StartRun and /v1/repos/clone;
+  (G7) LOOPRITE_SETUP_SECRET gate: x-l00prite-setup-secret header (constant-time) required
+  on the 4 mutating setup endpoints when set, setup.html reads ?ss= once, strips it from
+  the address bar, never persists it.
+- **Changed files:** cmd/l00prite/main.go; go.mod/go.sum (go-git v5.18.0 pinned — v5.19+
+  requires go>=1.25, this module holds go 1.24); internal/util/{resolver,env}(+tests);
+  internal/gitx/* (new, +tests); internal/engine/{engine,exec,preflight,tools}(+tools_test);
+  internal/gateway/{repos_clone,setup}.go; internal/server/setup_test.go; public/setup.html.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go test ./...` · `exit_code: 0` · `summary: all packages ok,
+    incl. new gitx suite (both impls), setup-secret gate tests, resolver tests` ·
+    2026-07-05T22:24Z.
+  - `command: cd cli-os && go vet ./...` · `exit_code: 0` · `summary: clean` · 22:24Z.
+  - `command: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: go-git stays pure Go; android build intact` · 22:24Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS,
+    0 FAIL` · 2026-07-05T22:25Z.
+- **Response drafted/sent:** none.
+- **Event status:** n/a.
+- **Failures:** noted for reuse: go-git v5.19.1 (latest) requires go >= 1.25 — pinned
+  v5.18.0 + compatible transitives to hold the module at go 1.24; do not bump go-git
+  without bumping the toolchain. Test gotcha: a present-but-EMPTY GIT_AUTHOR_NAME env var
+  defeats -c user.name fallback (git treats it as authoritative) — tests must unset, not
+  empty.
+- **Decisions:** (1) the old "git is not installed on the gateway host" pre-flight blocker
+  is gone — with go-git compiled in, some implementation always exists; remaining blockers
+  (no commits / dirty tree) unchanged. (2) exec commit gains a one-shot identity-fallback
+  retry (l00prite-os/l00prite-os@localhost) — a desktop run without gitconfig now proceeds
+  under the fallback identity instead of dying at human_review_gate; on-device runs would
+  otherwise be impossible. (3) gogit DiffHead is a labeled file-status summary, never a
+  faked unified diff.
+- **Confidence:** High — every unit has direct tests, both impls exercised, desktop paths
+  byte-preserved by construction (exec impl ports the exact strings/flags/env).
+- **Next action:** commit unit 4 (providers/roles), then integrated e2e + APK rebuild.
+- **Do-not-retry notes:** see Failures.
+- **Lock:** lock-20260705-212423-claude-android-apk-pass still held.
+
+### Run 2026-07-05T22:30:00Z — Claude (Fable 5 architect + Sonnet 5 writer), branch claude/looprite-android-apk-4mth8g — unit 4: Venice/Gemini providers + role routing
+- **Goal:** Implement android-architecture.md §5: dedicated Venice AI manifest path, Gemini
+  manifest, architect/writer/reviewer/advisor role profiles with seeded roleRanks.
+- **Triggering event:** Unit 1 spec committed; parallel writer dispatch.
+- **Decision:** Written by a Sonnet 5 writer agent; reviewed by the architect, who made one
+  policy correction before commit (below).
+- **Completed work:** manifests/venice.json — 15 models, pricing first-party-verified
+  (Venice docs mirror, 2026-07-05, price_confidence high), capability flags honestly marked
+  training-knowledge, streaming_usage deliberately undeclared pending confirmation;
+  manifests/gemini.json — OpenAI-compat endpoint, 2 models, pricing null/unconfirmed per
+  the repo's verification discipline; "google"→"gemini" alias; four role profiles + seeded
+  roleRanks for architect/writer/reviewer/advisor AND engine-internal plan/code/review
+  (independent literals); QualityRanks extended with venice/gemini flagships; manifests
+  README updated; 18 new/updated tests.
+- **Architect correction on review:** writer/code profiles changed balanced→quality and
+  Sonnet's writer/code rank 96→97. Rationale: the writer agent proved that (a) balanced
+  cost-blending routed auto:writer to venice/qwen3-coder (cheapest tools-capable) over
+  Sonnet — making the maintainer's explicit "Sonnet 5 does the bulk writing" policy
+  decorative — and (b) a 96 rank exactly ties opus's qualityRanks fallback and loses the
+  alphabetical tiebreak. Cost control remains with PEP caps + cheap/balanced profiles;
+  operators can override per deployment. NOTE: this changes the pre-existing `code`
+  profile's default preference (shipped balanced in PR #24) — flagged for maintainer in
+  the PR description.
+- **Changed files:** internal/gateway/adapters/manifests/{venice.json,gemini.json,README.md};
+  internal/gateway/adapters/{registry.go,adapters_test.go}; internal/config/{config.go,
+  config_test.go}; internal/gateway/gateway_test.go; cli-os/docs/android-architecture.md
+  (§5.4 writer row updated to match).
+- **Tests run / Verification:** same integrated run as unit 3 (both units verified
+  together against the merged tree):
+  - `command: cd cli-os && go test ./...` · `exit_code: 0` · `summary: all ok — incl.
+    TestAutoWriterQualityPicksSonnet (auto:writer → anthropic/claude-sonnet-5 end-to-end),
+    TestAutoArchitectProfilePrefersFable (→ anthropic/claude-fable-5), venice/gemini
+    manifest loading + pricing, capability fail-closed rejection of tool-less venice
+    models` · 2026-07-05T22:24Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS,
+    0 FAIL` · 2026-07-05T22:25Z.
+- **Response drafted/sent:** none.
+- **Event status:** n/a.
+- **Failures:** none. Known behavior recorded: bare model ids colliding across enabled
+  providers (venice resells claude-sonnet-5 etc.) resolve by provider order (DB insertion
+  order — no ORDER BY); explicit provider/model pins are the deterministic form. Left
+  as-is; noted in manifests README + PR.
+- **Decisions:** gemini ships unpriced (null) rather than training-data prices — consistent
+  with openai/zhipu discipline; venice capability flags conservative (tools:true only on
+  well-established models, fail-closed elsewhere).
+- **Confidence:** High on code and Venice pricing; medium on venice/gemini capability
+  metadata until first-party confirmation from an unblocked network.
+- **Next action:** integrated e2e gateway smoke + final APK rebuild + memory close-out + PR.
+- **Do-not-retry notes:** none.
+- **Lock:** lock-20260705-212423-claude-android-apk-pass still held.

@@ -1,0 +1,156 @@
+{
+  "provider": "venice",
+  "display_name": "Venice AI",
+  "adapter": "openai-compat",
+  "base_url": "https://api.venice.ai/api/v1",
+  "endpoints": { "chat": "/chat/completions" },
+  "auth": {
+    "scheme": "bearer",
+    "header": "Authorization"
+  },
+  "streaming": "openai-sse-chunks",
+  "tool_schema": "openai-function",
+  "notes": [
+    "OpenAI-compatible: standard `chat/completions`, OpenAI-style SSE chunks + [DONE], OpenAI function-tool schema.",
+    "Catalog resells other labs' models under Venice-hosted ids (claude-sonnet-5, claude-fable-5, openai-gpt-52, openai-gpt-52-codex, gemini-3-5-flash) alongside Venice's own open-weight lineup -- a Venice-only key still gets multi-family routing, and these ids intentionally collide with the native anthropic/openai/gemini manifests (see verification.capabilities and router.go Rule 3 bare-id resolution).",
+    "Capability flags (tools/vision) below are TRAINING-KNOWLEDGE pending first-party confirmation -- the dynamic /models endpoint (which would confirm them) is unreachable from this build environment. Prices are first-party (see verification.pricing). context/max_output are intentionally omitted (not just null) for every model: unset, they read as unverified fail-closed exactly like a model absent from the catalog would.",
+    "streaming_usage is intentionally NOT declared for any model: Venice's OpenAI-compat semantics (stream_options.include_usage honored) are plausible but unconfirmed first-party, so a request that REQUIRES streaming usage will not auto-route to a Venice model until this is confirmed -- an honest gap, not a bug."
+  ],
+  "verification": {
+    "shape": "high",
+    "shape_source": "OpenAI-compatible API (api.venice.ai/api/v1); Bearer auth, standard chat/completions shape",
+    "pricing": "high",
+    "pricing_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+    "pricing_checked": "2026-07-05",
+    "pricing_note": "Model ids and USD/1M-token input/output prices below were fetched verbatim from Venice's own docs mirror (github.com/veniceai/api-docs, overview/pricing.mdx) on 2026-07-05. Not backfilled from training-data memory.",
+    "capabilities": "low/training-knowledge",
+    "capabilities_note": "tools:true is set only on models where function-calling is well-established on Venice per training knowledge; it is NOT first-party confirmed (the dynamic models endpoint that would confirm capability flags is unreachable from this environment). context/max_output are omitted outright rather than guessed."
+  },
+  "models": [
+    {
+      "id": "venice-uncensored-1-2",
+      "capabilities": {},
+      "price_per_mtok": { "input": 0.20, "output": 0.90 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05",
+      "notes": "Venice flagship uncensored model."
+    },
+    {
+      "id": "llama-3.3-70b",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 0.70, "output": 2.80 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "qwen3-235b-a22b-instruct-2507",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 0.15, "output": 0.75 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "qwen3-coder-480b-a35b-instruct-turbo",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 0.35, "output": 1.50 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "qwen3-next-80b",
+      "capabilities": {},
+      "price_per_mtok": { "input": 0.35, "output": 1.90 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 1.65, "output": 3.30 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "capabilities": {},
+      "price_per_mtok": { "input": 0.14, "output": 0.28 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "kimi-k2-7-code",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 0.75, "output": 3.50 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "zai-org-glm-5",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 1.00, "output": 3.20 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "minimax-m27",
+      "capabilities": {},
+      "price_per_mtok": { "input": 0.38, "output": 1.50 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "claude-sonnet-5",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 3.00, "output": 15.00 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05",
+      "notes": "Claude Sonnet 5 resold via Venice. Id collides with anthropic's native claude-sonnet-5 -- see router.go Rule 3 bare-id resolution (first enabled+non-tripped provider that owns the id wins, in provider registration order; not a hardcoded native-over-resale preference)."
+    },
+    {
+      "id": "claude-fable-5",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 12.00, "output": 60.00 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05",
+      "notes": "Claude Fable 5 resold via Venice. Id collides with anthropic's native claude-fable-5 -- see router.go Rule 3 bare-id resolution."
+    },
+    {
+      "id": "openai-gpt-52",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 2.19, "output": 17.50 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05"
+    },
+    {
+      "id": "openai-gpt-52-codex",
+      "capabilities": { "tools": true },
+      "price_per_mtok": { "input": 2.19, "output": 17.50 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05",
+      "notes": "Codex path via Venice."
+    },
+    {
+      "id": "gemini-3-5-flash",
+      "capabilities": {},
+      "price_per_mtok": { "input": 1.55, "output": 9.45 },
+      "price_confidence": "high",
+      "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
+      "price_checked": "2026-07-05",
+      "notes": "Id collides with the gemini manifest's gemini ids only in family naming, not literally (gemini.json ships gemini-2.5-pro/gemini-2.5-flash, distinct ids) -- no Rule 3 collision for this one."
+    }
+  ]
+}

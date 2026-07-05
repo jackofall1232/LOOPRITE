@@ -160,7 +160,7 @@ mechanism. Added built-in profiles (all overridable in `config.json`):
 | Profile | Preference | Ranks encode |
 |---|---|---|
 | `auto:architect` | quality | **Fable 5 first** (then Opus, GLM-5.x, Venice-hosted equivalents) — planning/scaffolding/instructions |
-| `auto:writer` | balanced, requires tools | **Sonnet 5 first** — bulk implementation |
+| `auto:writer` | quality, requires tools | **Sonnet 5 first** — bulk implementation. Deliberately not `balanced`: a cost blend would silently hand the writing role to the cheapest tools-capable catalog entry (observed with Venice pricing loaded), making the stated policy decorative. Cost control stays with the PEP caps and `cheap`/`balanced` profiles. |
 | `auto:reviewer` | quality | Fable/Opus-class first — adversarial review |
 | `auto:advisor` | balanced | strong generalists, cost-aware — consultation |
 
