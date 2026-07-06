@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "lock_id": "lock-20260706-135600-claude-marketing-site",
+  "lock_id": "lock-20260706-143000-claude-pages-deploy",
   "owner_agent": "claude",
   "owner_session": "session_01GeDedQfdZXLjyThj3E4JsP",
-  "acquired_at": "2026-07-06T13:56:00Z",
-  "expires_at": "2026-07-06T14:56:00Z",
+  "acquired_at": "2026-07-06T14:30:00Z",
+  "expires_at": "2026-07-06T15:30:00Z",
   "ttl_seconds": 3600,
-  "purpose": "Append ledger entry for the marketing-site + APK-download build on branch claude/looprite-marketing-site-49yfm5",
+  "purpose": "Append ledger entry for wiring the GitHub Pages deploy workflow on branch claude/looprite-marketing-site-49yfm5",
   "protected_paths": [
     "ledger.md",
     "memory.md",

@@ -1323,3 +1323,42 @@ Append one entry per agent run. Do not overwrite prior runs.
   word and this session can wire a Pages deploy workflow instead of in-repo hosting.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260706-135600-claude-marketing-site acquired and released this run.
+
+### Run 2026-07-06T14:30:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Wire the GitHub Pages deploy for the marketing site (direct maintainer
+  instruction: "Wire the pages deploy"), continuing the same session/branch as the
+  2026-07-06T13:56Z entry; also begin PR #3 activity watch.
+- **Triggering event:** maintainer message in-session; PR #3 subscription kickoff (CI check
+  `Build & verify APK (real Android SDK)` in progress, zero review threads; one
+  chatgpt-codex-connector[bot] usage-limit notice — no action required).
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3
+- **Decision:** Normal work. Deploy via the Actions Pages path (`configure-pages` with
+  `enablement: true`, source = GitHub Actions) so no manual Settings step is needed; the
+  artifact stages only what the site serves (`index.html`, `.nojekyll`, `assets/`,
+  `downloads/`) so protocol sources and cli-os never ship to the public site. Trigger:
+  push to `main` + `workflow_dispatch` (the `github-pages` environment gates non-default
+  branches, so the first real deploy happens on merge).
+- **Completed work:** created `.github/workflows/deploy-pages.yml`; extended the existing
+  marketing-site row in `CLAUDE.md` §7 (same in-review pass, same branch).
+- **Fix implemented:** not applicable — new workflow.
+- **Changed files:** created `.github/workflows/deploy-pages.yml`; modified `CLAUDE.md`,
+  `.l00prite/ledger.md`, `.l00prite/lock.json`. Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `python3 -c "import yaml; yaml.safe_load(...)"` · `exit_code`: 0 ·
+    `summary`: workflow YAML parses · `timestamp`: 2026-07-06T14:28Z
+  - `command`: local dry-run of the assemble step (cp + presence asserts + du) ·
+    `exit_code`: 0 · `summary`: 17M artifact, exactly index.html/.nojekyll/assets(2)/
+    downloads(2) present · `timestamp`: 2026-07-06T14:29Z
+- **Response drafted/sent:** summary to maintainer in-session.
+- **Event status:** completed (bot notice skipped as no-action); PR #3 watch continues.
+- **Failures:** none.
+- **Decisions:** Site publishing is deliberately main-branch-gated; no paths filter on the
+  push trigger (redundant deploys are cheap and a filter risks silently skipping a needed
+  redeploy when a linked file moves).
+- **Confidence:** High for the workflow shape (standard actions/deploy-pages v4 chain);
+  the `enablement: true` auto-enable needs one live run on main to confirm (requires the
+  repo to be public, or a plan with private Pages).
+- **Next action:** After merge, confirm the first `deploy-pages` run goes green and the
+  page URL serves the APK; then consider swapping the in-repo APK for a Releases asset.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-143000-claude-pages-deploy acquired and released this run.
