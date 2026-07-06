@@ -221,10 +221,32 @@ Two independent ways to produce the APK; both consume the same `android/` source
   `os-architecture.md` §4 — it was the queued next unit before this brief), phone-first
   nav affordance (< 1000 px sidebar), repo-register path picker, wizard copy that stops
   referencing CLI/TLS env vars, Playwright e2e against the APK's gateway binary.
-- **Phase 2 — deeper on-device autonomy**: `git_command` subset mapped onto go-git
-  (status/diff/log/show), ssh clones via embedded ssh (or keep https-only), optional
-  Termux bridge / remote-verifier so `run_command` verification has real toolchains,
-  SAF import/export of repos, ledger/JSONL rotation for constrained storage.
+- **Phase 2 — deeper on-device autonomy** (scoped 2026-07-06, after Phase 1 shipped):
+  - [x] `git_command` read-only subset (`status`/`diff`/`log`/`show`, each only in its
+    narrow argument-free or single-ref form — never a guessed interpretation of an
+    unsupported flag combination) mapped onto go-git, so the model-facing tool works on
+    git-less Android instead of hard-refusing every invocation.
+  - [x] Ledger JSONL rotation (`cli-os/internal/ledger`) so the append-only mirror file
+    doesn't grow unbounded on constrained mobile storage.
+  - [x] SAF **import** of a repo folder into app-private storage (a native picker in
+    `MainActivity`, independent of the WebView) — the missing "get a repo already on the
+    device onto the app's storage" bootstrapping path that clone-from-URL doesn't cover.
+  - **SSH clones — decision: keep https-only for now.** go-git supports SSH transport in
+    pure Go, but only https/local-path clones have anywhere to source credentials from
+    today (`GIT_SSH_COMMAND` under the exec implementation, or nothing under go-git); there
+    is no on-device SSH-key import/management UI yet, so wiring the transport with no key
+    story would be dead code. Revisit once a key-provisioning UI exists (candidate for
+    Phase 3+, alongside SAF export below).
+  - **Termux bridge / remote-verifier — decision: deferred.** Giving `run_command`
+    verification access to a real toolchain by delegating to Termux or a remote host is
+    architecturally underspecified (protocol, auth, and trust boundary all need their own
+    design pass before implementation) — not a scoped unit for this phase. Tracked as a
+    future design item, not attempted here.
+  - **SAF export — decision: deferred.** Import (getting a repo onto the device) was the
+    higher-value, more urgent gap; export (copying a worktree back out to shared storage)
+    is comparatively low-urgency since the normal path off-device is a git remote (push),
+    which needs real network/ssh — the same key-provisioning gap above. Left for a future
+    phase alongside SSH.
 - **Phase 3 — distribution hardening**: split ABIs / app bundle, release signing
   ceremony, battery/doze tuning (WorkManager-scheduled resumption), F-Droid-style
   reproducible build recipe, on-device model (Ollama-on-LAN) quickstart.
