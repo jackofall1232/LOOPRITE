@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "lock_id": "lock-20260706-000500-claude-android-apk-review-fixes",
+  "lock_id": "lock-20260706-010500-claude-phase1-runs-ui",
   "owner_agent": null,
   "owner_session": null,
-  "acquired_at": "2026-07-06T00:05:00Z",
-  "expires_at": "2026-07-06T02:05:00Z",
+  "acquired_at": "2026-07-06T01:05:00Z",
+  "expires_at": "2026-07-06T03:05:00Z",
   "ttl_seconds": 7200,
   "purpose": null,
   "protected_paths": [

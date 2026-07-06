@@ -67,6 +67,19 @@ Durable project facts and decisions that future agents should preserve.
   mirror github.com/veniceai/api-docs — use it; docs.venice.ai and api.venice.ai are
   egress-blocked from build containers); Gemini pricing stays null until first-party
   verifiable. Never backfill prices from training memory.
+- Dashboard Runs UI (Phase 1, 2026-07-06): the command allowlist in the create-run form is
+  REQUIRED, not optional — the engine's own pre-flight hard-blocks without at least one
+  entry (its first line is the done-check), so a UI that lets it submit empty produces a
+  dead-end blocked pre-flight with no way forward. Any future create-run field must be
+  cross-checked against the engine's actual pre-flight blockers before being labeled
+  optional. The "next recommended action" text shown in a run's Exit view is a CLIENT-SIDE
+  static suggestion keyed on the boundary id — the Run API has no such field, and this must
+  never be presented as if it came from the server.
+- Offline UI/e2e testing against the mock adapter: the router keys model catalogs by
+  PROVIDER NAME against the embedded manifests, so a provider literally named `mock` has no
+  catalog and is unroutable (every role fails to route, pre-flight comes back blocked with
+  an empty team). Name the mock-adapter provider after a real manifest instead (e.g.
+  `anthropic`) — this repo's own `internal/server/e2e_test.go` already does this.
 
 ## Facts
 - l00prite ships no backend, hosted service, or install script; setup is manual (clone,

@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
   "project_name": "l00prite",
-  "current_goal": "Android APK pass (branch claude/looprite-android-apk-4mth8g): COMPLETE pending maintainer review — architecture plan + feasibility + roadmap committed, gateway Android-enabled (DNS/shell/gitx/setup-secret/env-scrub), Venice+Gemini providers + role routing (fable architect / sonnet writer), android/ wrapper app, signed APK built and verified from both pipelines, e2e smoke 15/15",
+  "current_goal": "Android APK pass (branch claude/looprite-android-apk-4mth8g): Phase 0 + Phase 1 both COMPLETE pending maintainer review — architecture, gateway Android-enablement, Venice+Gemini providers/role routing, android/ wrapper app, signed APK from both pipelines, CI green, all bot review findings addressed, and the dashboard Runs view (create/pre-flight/live/exit, phone nav, repo clone) shipped with adversarial review + Playwright e2e (10/10)",
   "current_phase": "review",
   "active_agent": null,
   "last_agent": "claude",
-  "last_updated": "2026-07-05T22:45:00Z",
+  "last_updated": "2026-07-06T01:10:00Z",
   "status": "in_progress",
   "blocked": false,
   "blocker_reason": null,
@@ -13,8 +13,8 @@
   "last_event_processed": null,
   "pending_event_count": 0,
   "review_response_required": false,
-  "ci_status": "unknown",
+  "ci_status": "green",
   "execution_active": false,
   "execution_stop_reason": null,
-  "next_recommended_action": "maintainer: review the Android APK PR (includes one Autonomous-Edit-Denylist path — .github/workflows/android-apk.yml — and one default-behavior change — code/writer profiles balanced→quality); after merge, Phase 1 starts with the dashboard Runs view (spec: cli-os/docs/os-architecture.md §4, roadmap: android-architecture.md §8)"
+  "next_recommended_action": "update PR #1's description to cover Phase 1, then maintainer review of the whole PR (flags: .github/workflows/android-apk.yml is an Autonomous-Edit-Denylist path added deliberately; code/writer routing profiles flipped balanced->quality). After merge, Phase 2 (deeper on-device autonomy) is next per android-architecture.md §8."
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "max_iterations": 20,
-  "current_iteration": 10,
+  "current_iteration": 11,
   "stop_conditions": [
     "definition_of_done_met",
     "blocked",

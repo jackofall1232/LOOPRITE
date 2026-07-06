@@ -949,3 +949,107 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260706-000500-claude-android-apk-review-fixes held for this run;
   released at the end of this turn.
+
+### Run 2026-07-06T00:16:00Z — Claude (Fable 5 architect + Sonnet 5 writers + Opus 4.8 reviewers/e2e), branch claude/looprite-android-apk-4mth8g — Phase 1: dashboard Runs view
+- **Goal:** Implement Phase 1 of the Android roadmap (android-architecture.md §8): the
+  dashboard Runs view (spec: os-architecture.md §4), phone-first nav, a repo clone-from-URL
+  option, and wizard copy that stops presenting CLI/TLS instructions as universal.
+- **Triggering event:** Maintainer direction — "run phase 1 of the plan... sonnet for bulk
+  writing, opus for review/skills/tools, fable to make executive decisions."
+- **Decision:** Multi-agent Workflow (write → review → fix → e2e), architect-authored spec
+  grounded in the real API (runs.go handlers, types.go Run/Preflight/Approval/Event structs
+  and every status/boundary/gate/objective string constant) and the file's existing
+  conventions (read in full before writing the spec — CSS system, api()/busy()/openModal()
+  helpers, the Repositories section as the structural template) so writers implemented
+  against ground truth, not guesses.
+- **Completed work:**
+  - `cli-os/public/dashboard.html` (1050→1502 lines): full Runs view — nav item, full-width
+    section, create-run modal (repo picker + clone-from-URL toggle, objective with privacy
+    warning, required command allowlist, all 6 gate-class selects always sent explicitly),
+    a wide-modal run-detail view spanning Pre-flight (verbatim preflight render, blockers
+    disable Start, exact-match "EXECUTE" confirm gate) → Live (status header, Stop,
+    approvals inbox, 2s-polled esc()'d event feed) → Exit (boundary banner, client-side-only
+    "what next" suggestion clearly not attributed to the server, Resume routing only through
+    a fresh POST /v1/runs/preflight — never straight to Start). Repo-register modal gained a
+    clone-from-URL default tab. Phone-first nav: hamburger + off-canvas drawer + backdrop,
+    scoped inside the existing 1000px breakpoint.
+  - `cli-os/public/setup.html`: footer CLI-command framing reworded to "however this gateway
+    was started"; vault-step key copy now covers both the file-based and env-var-injected
+    cases. Network-step TLS/env guidance was checked against its actual conditional
+    (`internal/gateway/setup.go`'s `exposed: !loopback && !tls` signal) and found already
+    correctly gated — left untouched rather than force an edit.
+  - Adversarial review: 2 Opus lenses (correctness/security, UX/protocol-fidelity) —
+    **zero blocking findings** (Start-gate exactness, Resume-never-bypasses-preflight,
+    esc() discipline, poll-timer/wide-class cleanup, and full 6-gate payload all verified
+    correct on the first pass). 6 non-blocking findings (keyboard-unreachable run rows,
+    silent failure on a slow/failed row fetch, a poll-callback race that could reopen a
+    just-closed modal, missing focus-on-open, raw gate-class ids shown outside the create
+    form, and vault copy that dropped a concrete desktop detail) — all fixed by a Sonnet
+    pass and independently re-verified by the architect.
+  - Architect fix round (post-workflow, from the e2e report): the create-run modal's
+    command-allowlist field was labeled "optional" and unvalidated, but the engine
+    hard-requires at least one allowlisted command (its first entry is the done-check) —
+    an empty submission silently produced a blocked pre-flight with no way to proceed.
+    Moved the field out of "Advanced", relabeled it "required", and added client-side
+    validation with an explanatory message before the goal/repo checks. Also added a
+    `.btn:disabled` CSS rule (opacity+cursor) — the e2e report flagged the Start button as
+    functionally correctly disabled but visually undimmed.
+  - E2E verification (Opus, Playwright 1.56.1 against a freshly built linux/amd64 binary —
+    go:embed baking in the real changed HTML): **10/10 checks pass**, driven through the
+    REAL wizard, REAL repo-register UI, REAL create-run/pre-flight/start/exit/resume flow,
+    and a REAL phone-viewport (375×812) drawer interaction — zero console errors/warnings
+    across the entire session. Both critical invariants asserted via DOM properties, not
+    screenshots: Start button `.disabled` is true/true/true/false across
+    empty→wrong-case→partial→exact "EXECUTE" input; Resume from the Exit view lands back on
+    a Pre-flight view with an empty confirm input and a disabled Start (not straight back to
+    running), corroborated at the API level (run status returned to `ready` with a fresh
+    `preflight_built` event). The live run hit a real, correctly-classified
+    `ambiguous_requirements` boundary (the mock adapter's canned reply isn't a valid
+    select_unit tool call under the real engine loop — expected and documented, not a bug).
+- **Changed files:** `cli-os/public/dashboard.html`, `cli-os/public/setup.html`.
+- **Tests run / Verification:**
+  - `command: node -e "new Function(<extracted script>)" for both files (pre- and
+    post-architect-fix)` · `exit_code: 0` · `summary: both files' <script> blocks parse
+    cleanly, no corruption` · 2026-07-06T00:50Z / 01:03Z.
+  - `command: grep -n "confirmInp.value" cli-os/public/dashboard.html` · `exit_code: 0` ·
+    `summary: independently confirmed the exact-match "EXECUTE" comparison before trusting
+    the writer/fix-agent's own claim` · 2026-07-06T00:51Z.
+  - `command: cd cli-os && CGO_ENABLED=0 go build ./cmd/l00prite && go vet ./... && go test
+    ./...` (run twice: after the write/review/fix pipeline, and again after the architect's
+    allowlist/CSS fix) · `exit_code: 0` both times · `summary: all packages ok; go:embed
+    picks up each new HTML revision; l00prite version smoke-runs the rebuilt binary` ·
+    2026-07-06T00:52Z and 01:07Z.
+  - `command: node scripts/validate-l00prite.js` (run after the final fix) · `exit_code`
+    for `grep -c '^FAIL'`: 1 (i.e. 0 matches — validator clean) · 2026-07-06T01:07Z.
+  - `command: bash cli-os/scripts/build-apk.sh` (final rebuild reflecting all Phase 1
+    changes) · `exit_code: 0` · `summary: signed APK reassembled, sha256
+    c8919b5d42bf0656...` · 2026-07-06T01:08Z.
+  - `command: Playwright e2e (Opus agent, scratchpad script, not committed — matches this
+    repo's established one-off-verification convention) against a freshly built binary` ·
+    `summary: 10/10 checks pass, zero console errors, screenshots + server log retained
+    under the session scratchpad` · 2026-07-06T00:55Z-ish (workflow-internal).
+- **Response drafted/sent:** none yet — PR #1 description to be updated to include Phase 1
+  in the same follow-up as this ledger entry.
+- **Event status:** n/a.
+- **Failures:** none blocking. Recorded for follow-up (not fixed in this pass, out of
+  scope): the internal `mock` test adapter is not selectable in the setup wizard's adapter
+  dropdown, and a provider literally named `mock` is unroutable (the router keys model
+  catalogs by provider name against the embedded manifests) — offline testing must name the
+  mock-adapter provider after a manifest that has one (e.g. `anthropic`), as this repo's own
+  `internal/server/e2e_test.go` already does. Clone-from-URL was not e2e-exercised (needs
+  real network egress, deliberately avoided in an offline verification pass).
+- **Decisions:** command allowlist is a REQUIRED field in the create-run UI, not optional —
+  the engine's own pre-flight blocks without one, so silently accepting an empty allowlist
+  would be a UX dead-end, not a real "optional" feature. "Next recommended action" text in
+  the Exit view is explicitly a client-side suggestion (labeled as such), never attributed
+  to the server, since the Run API has no such field.
+- **Confidence:** High — every invariant claim in this entry was independently re-verified
+  by the architect (grep/re-read, not just trusted from a sub-agent's report), and the e2e
+  pass exercised the real binary/real browser/real API rather than mocking the UI layer.
+- **Next action:** update PR #1's description to cover Phase 1; continue watching CI/reviews
+  until merge; Phase 2 (deeper on-device autonomy) remains queued per android-architecture.md
+  §8.
+- **Do-not-retry notes:** none new beyond the mock-adapter-naming note above (not a
+  do-not-retry, a how-to-do-it-correctly note).
+- **Lock:** lock-20260706-010500-claude-phase1-runs-ui held for this entry; released
+  immediately after.

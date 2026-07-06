@@ -45,10 +45,35 @@ previously queued dashboard Runs view (moved to Next, below).
 - [x] Ledger/todos/memory/failures updated at every unit boundary; lock released at
       session end; PR opened for maintainer review.
 
-Deferred to Phase 1+ (see android-architecture.md §8): dashboard Runs view (was already
-queued), phone-nav polish, wizard copy de-CLI-ing, repo-register path picker, real-device
-smoke test (no emulator ABI possible in this container), first live CI run of the
-android-apk workflow, venice/gemini capability confirmation from an unblocked network.
+## Phase 1 — dashboard Runs view (android-architecture.md §8), branch same as above
+
+- [x] `cli-os/public/dashboard.html` (f73ce08, fix follow-up unhashed) — full Runs view:
+      create/pre-flight/live/exit lifecycle, exact-match "EXECUTE" Start gate, esc()'d
+      2s-polled event feed, approvals inbox, Resume-always-through-fresh-preflight,
+      repo clone-from-URL, phone-first hamburger nav. Command allowlist made a required
+      field with client-side validation (engine hard-blocks pre-flight without one — an
+      e2e-surfaced gap, fixed post-workflow) + a `.btn:disabled` visual-affordance fix.
+- [x] `cli-os/public/setup.html` (f73ce08) — wizard copy: footer CLI framing reworded
+      platform-neutral; vault-step key copy covers both file-based and env-injected cases;
+      network-step TLS/env guidance checked and confirmed already correctly gated on the
+      real non-loopback/exposed signal (left untouched).
+- [x] Adversarial review (2 Opus lenses) — zero blocking findings; 6 non-blocking findings
+      (keyboard access, silent-failure feedback, a poll-race modal reopen, focus-on-open,
+      gate-label consistency, one copy nit) all fixed and re-verified.
+- [x] E2E verification (Opus + Playwright 1.56.1 against a freshly built real binary) —
+      10/10 checks pass, zero console errors, both critical invariants (Start-gate
+      exactness, Resume-to-preflight-not-running) asserted via DOM properties not
+      screenshots. Scratchpad-only script per this repo's established convention (not
+      committed — no reusable Playwright harness exists in the repo yet).
+- [x] Ledger/todos/memory updated; lock released; PR #1 description to be updated to
+      cover Phase 1.
+
+Deferred to Phase 2+ (see android-architecture.md §8): real-device smoke test (no emulator
+ABI possible in this container), clone-from-URL e2e coverage (needs network egress),
+venice/gemini capability confirmation from an unblocked network, making the internal `mock`
+test adapter selectable in the setup wizard (currently only reachable by direct API/DB
+injection, and must be named after a real manifest like `anthropic` to be routable —
+recorded in failures.md), a committed reusable Playwright harness for future UI regressions.
 
 ## Previous Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
 
