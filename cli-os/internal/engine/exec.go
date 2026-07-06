@@ -164,7 +164,7 @@ func (e *Engine) awaitApproval(ctx context.Context, run *Run, gate GateRequest) 
 // runVerification executes one allowlisted verification command through the Toolbox (so the same
 // jail + allowlist apply) and records it honestly — command, exit code, summary, timestamp.
 func (e *Engine) runVerification(ctx context.Context, run *Run, f Files, command string) VerificationRecord {
-	tb := &Toolbox{Root: run.RepoRoot, Allowlist: run.Config.CommandAllowlist}
+	tb := &Toolbox{Root: run.RepoRoot, Allowlist: run.Config.CommandAllowlist, Git: e.Git}
 	out := tb.Execute(ctx, "run_command", map[string]any{"command": command}, false)
 	rec := VerificationRecord{Command: command, Timestamp: util.NowISO()}
 	if out.Gate != nil {

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Grants cleartext HTTP to 127.0.0.1 ONLY (the gateway's loopback listener). Every
+  other destination falls through to the base-config, which forbids cleartext, matching
+  android:usesCleartextTraffic="false" on the <application> element (gap G9 in
+  cli-os/docs/android-architecture.md). All non-loopback traffic the gateway itself makes
+  (to api.anthropic.com etc.) is plain HTTPS from the Go process, not from the WebView,
+  and is unaffected by this file.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

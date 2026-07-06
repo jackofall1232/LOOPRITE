@@ -26,6 +26,15 @@ See `CLAUDE.md` Section 3 for the full, current requirements list.
 ## Definition of Done
 See `CLAUDE.md` Section 4 for the v1 (shipped) and v1.1 (this branch) checklists.
 
+## Android control plane (in progress)
+The L00prite OS Android APK track (maintainer brief 2026-07-05) packages the `cli-os/`
+gateway as a self-contained Android app: the device is the local control plane (no hosted
+server). Authoritative design: `cli-os/docs/android-architecture.md` — packaging decision
+(bundled android/arm64 PIE gateway exec'd from the APK's native-library dir + thin Java
+wrapper + WebView dashboard), platform adaptations (DNS/CA/shell/git/secrets), Venice AI +
+Gemini provider manifests, architect/writer/reviewer/advisor role profiles, and the
+Phase 0–3 roadmap.
+
 ## Mode Boundary
 Planning Mode generates files only; it never executes the projects it scaffolds and always
 ships Execution Mode disarmed. Execution Mode is entered only through

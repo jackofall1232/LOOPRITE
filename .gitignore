@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# L00prite OS Android APK build output (cli-os/scripts/build-apk.sh)
+/cli-os/dist-android/

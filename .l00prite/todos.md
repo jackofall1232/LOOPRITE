@@ -1,6 +1,157 @@
 # Prioritized TODOs
 
-## Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
+## Active — Android APK pass (maintainer brief 2026-07-05, branch `claude/looprite-android-apk-4mth8g`)
+
+Maintainer brief: evolve the repo into a self-contained **L00prite OS Android APK** — the
+Android device is the local control plane (no hosted L00prite server). A user sideloads the
+APK, adds provider keys (stored encrypted on-device), connects/clones a Git repo, enters a
+prompt, and L00prite runs the project end-to-end on the phone. Preserve all existing
+protocol functionality; build on `cli-os/` (gateway/dashboard/engine); providers: OpenAI,
+Codex, Anthropic (Fable/Sonnet), Gemini, **Venice AI (dedicated path)**; keep bridging and
+role routing (architect/writer/reviewer/advisor; Fable 5 = architect, Sonnet 5 = writer);
+open a PR when the prototype is complete and verified. This pass takes precedence over the
+previously queued dashboard Runs view (moved to Next, below).
+
+- [x] Recon: repo map (7-reader fan-out), environment feasibility probes.
+      Evidence so far: `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/l00prite`
+      succeeds from current source (PIE ELF, `/system/bin/linker64` interpreter, pure-Go
+      SQLite — no NDK/gomobile needed); a complete no-Google APK toolchain exists in this
+      build container (apt: aapt/zipalign/apksigner/dalvik-exchange; Maven Central:
+      robolectric android-all as compile-time android.jar, apksig) since dl.google.com is
+      proxy-blocked here.
+- [x] `cli-os/docs/android-architecture.md` — deliverables 1–3 committed (bc5a3a6):
+      packaging decision (bundled android/arm64 PIE gateway + Java wrapper + WebView),
+      G1–G11 gap analysis, provider/role expansion, dual build pipeline, Phase 0–3 roadmap.
+- [x] Go: Android enablement (8d8b632) — `LOOPRITE_DNS` resolver override + android
+      fallback; shell path resolution; `gitx` seam (exec git verbatim default, pure-Go
+      go-git v5.18.0 fallback); `LOOPRITE_SETUP_SECRET` first-run gate; secret env
+      scrubbing. android/arm64 builds clean; android/amd64 skipped (needs cgo/NDK —
+      recorded in failures.md). `go test ./...` green.
+- [x] Providers (82084e4): `manifests/venice.json` (15 models, first-party pricing) +
+      `manifests/gemini.json`; architect/writer/reviewer/advisor profiles + seeded
+      roleRanks incl. engine plan/code/review (fable-5 architect 98, sonnet-5 writer 97 —
+      writer/code switched to quality preference so the policy actually routes; flagged
+      for maintainer: this flips the pre-existing `code` default from balanced).
+- [x] `android/` app (e74898c) — Java wrapper: GatewayService foreground exec of
+      `libl00prite.so` with the full env contract, Keystore-wrapped master key, Mozilla CA
+      asset, MainActivity WebView + /healthz poll, cleartext-to-127.0.0.1-only.
+- [x] APK pipeline (e74898c) — `cli-os/scripts/build-apk.sh` (hermetic no-Google chain) +
+      `.github/workflows/android-apk.yml` (real SDK; first live run pending on the PR).
+- [x] Verification: go test all ok; validator 519 PASS 0 FAIL; e2e gateway smoke 15/15
+      (setup-secret gate, wizard latch, venice models + auto:writer/architect in
+      /v1/models, mock chat round-trip, dry-run auto:writer → venice/claude-sonnet-5 via
+      roleRanks.writer); final APK from merged tree signed + verified (v2+v3,
+      sha256 042c407e…, 15MB). Doctor HEALTHY check runs post lock-release.
+- [x] Ledger/todos/memory/failures updated at every unit boundary; lock released at
+      session end; PR opened for maintainer review.
+
+## Phase 1 — dashboard Runs view (android-architecture.md §8), branch same as above
+
+- [x] `cli-os/public/dashboard.html` (f73ce08, fix follow-up unhashed) — full Runs view:
+      create/pre-flight/live/exit lifecycle, exact-match "EXECUTE" Start gate, esc()'d
+      2s-polled event feed, approvals inbox, Resume-always-through-fresh-preflight,
+      repo clone-from-URL, phone-first hamburger nav. Command allowlist made a required
+      field with client-side validation (engine hard-blocks pre-flight without one — an
+      e2e-surfaced gap, fixed post-workflow) + a `.btn:disabled` visual-affordance fix.
+- [x] `cli-os/public/setup.html` (f73ce08) — wizard copy: footer CLI framing reworded
+      platform-neutral; vault-step key copy covers both file-based and env-injected cases;
+      network-step TLS/env guidance checked and confirmed already correctly gated on the
+      real non-loopback/exposed signal (left untouched).
+- [x] Adversarial review (2 Opus lenses) — zero blocking findings; 6 non-blocking findings
+      (keyboard access, silent-failure feedback, a poll-race modal reopen, focus-on-open,
+      gate-label consistency, one copy nit) all fixed and re-verified.
+- [x] E2E verification (Opus + Playwright 1.56.1 against a freshly built real binary) —
+      10/10 checks pass, zero console errors, both critical invariants (Start-gate
+      exactness, Resume-to-preflight-not-running) asserted via DOM properties not
+      screenshots. Scratchpad-only script per this repo's established convention (not
+      committed — no reusable Playwright harness exists in the repo yet).
+- [x] Ledger/todos/memory updated; lock released; PR #1 description to be updated to
+      cover Phase 1.
+
+## Phase 2 — deeper on-device autonomy (android-architecture.md §8), branch same as above
+
+- [x] `cli-os/internal/gitx` + `cli-os/internal/engine/tools.go` (54515f4) — Log(repo,limit)/
+      Show(repo,ref) added to the gitx.Client seam (exec: byte-identical passthrough to real
+      git log/show; gogit: go-git's Repository.Log + Commit.Patch, direction-verified —
+      parent.Patch(commit) so an added file renders as a genuine addition). git_command's
+      gogit path now serves an EXACT-MATCH-ONLY subset (bare status; bare diff/diff HEAD;
+      log or log -n N/--max-count=N/-N; show <ref> with no flags) instead of unconditionally
+      refusing every call — any other shape falls through unchanged to the original refusal.
+- [x] `cli-os/internal/ledger` (54515f4) — JSONL mirror rotation (5 MiB default, one backup
+      generation, LOOPRITE_LEDGER_MAX_BYTES override) under a mutex serializing check-size/
+      rotate/append against concurrent HTTP-request callers. SQLite ledger table untouched
+      (out of scope, a separate future decision).
+- [x] `android/src/com/l00prite/os/MainActivity.java` (54515f4) — native "Import repo…" SAF
+      picker (DocumentsContract, not DocumentFile — confirmed AndroidX-only/absent from the
+      platform jar) copying a picked folder into `<filesDir>/imported-repos/<name>`, with
+      canonical-path containment checked at the destination root AND every recursive child
+      (not just per-segment sanitization).
+- [x] Adversarial review (2 Opus lenses) — zero blocking findings; 3 non-blocking (stale
+      refusal-message enumeration, an undocumented bare-diff semantic difference between
+      backends, an undocumented env var) all fixed.
+- [x] Verification (Opus) — full test+race suite; git_command subset live-driven through
+      the real engine/Toolbox path with git genuinely stripped from PATH; Show's patch text
+      inspected directly for addition-direction correctness; ledger rotation stress-tested
+      with 2500 concurrent Append calls (zero panics/corruption, SQLite exactly 2500 rows);
+      APK rebuilt + apksigner verify + confirmed SAF code compiled into the dex via strings.
+      Explicit, undisguised limitation: no real-device SAF picker/copy verification possible
+      (no emulator ABI in this container).
+- [x] Architect independently spot-checked the ledger mutex and the SAF path-containment
+      check in the committed files (not just trusting sub-agent reports) before committing.
+- [x] Explicit scope decisions recorded in android-architecture.md §8 (a726bc2): ssh clones
+      stay https-only (no on-device key-provisioning UI yet); Termux bridge/remote-verifier
+      deferred (needs its own protocol/auth/trust design pass); SAF export deferred (import
+      was the more urgent gap; export's natural path is a git-remote push, same
+      key-provisioning gap as ssh).
+- [x] Ledger/todos/memory updated; PR #1 description to be updated to cover Phase 2; a
+      Gemini Code Assist re-review requested on the PR per maintainer direction.
+
+Deferred to Phase 3+ (see android-architecture.md §8): real-device smoke test (no emulator
+ABI possible in this container), clone-from-URL e2e coverage (needs network egress),
+venice/gemini capability confirmation from an unblocked network, making the internal `mock`
+test adapter selectable in the setup wizard (currently only reachable by direct API/DB
+injection, and must be named after a real manifest like `anthropic` to be routable —
+recorded in failures.md), a committed reusable Playwright harness for future UI regressions,
+ssh clone support once a key-provisioning UI exists, the Termux/remote-verifier bridge
+(needs its own design pass), SAF export, split ABIs/app bundle, release signing ceremony,
+battery/doze tuning, F-Droid-style reproducible build recipe, on-device model
+(Ollama-on-LAN) quickstart.
+
+## PR #1 bot-review fixes + /review skill pass (branch same as above)
+
+- [x] Gemini Code Assist's 3 findings, all fixed and pushed (e820a69): `gitx/exec.go`'s
+      `run()` now forces `LC_ALL=C` so the English-substring failure detection (`Commit`'s
+      `identityMissing`, `Log`'s empty-repo marker) can't silently break under a localized
+      git build; `MainActivity.onPollFinished`'s posted `Runnable` now checks the existing
+      `activityDestroyed` flag before touching `webView`/`statusView` (independently
+      corroborated by two of the /review skill's own finders); `resolver.go`'s
+      `normalizeDNSAddr` now strips an IPv6 zone identifier (e.g. `fe80::1%wlan0`) before
+      `net.ParseIP` validation while preserving it in the dial address, with new
+      `TestNormalizeDNSAddr` cases. Also added `webView.destroy()` to `onDestroy()` (a
+      real native-resource-leak finding from the same finder pass, same root cause as the
+      `activityDestroyed` gap).
+- [x] `/review` skill run over the full PR diff (8 finder angles: line-by-line,
+      removed-behavior, cross-file, reuse, simplification, efficiency, altitude,
+      CLAUDE.md conventions — each independently verified against the real code, not taken
+      on a single agent's word). Zero CLAUDE.md violations found. 8 non-blocking findings
+      posted as inline PR review comments (submitted as one GitHub review, COMMENT event):
+      a stale human-review-boundary comment in `engine.go` vs. the new gitx seam's silent
+      synthetic-identity commit retry; an undocumented `git_command log` output-shape
+      divergence between exec-git and gogit hosts (unlike the neighboring `diff` case,
+      which documents its own divergence); a possible duplicate-event race in the
+      dashboard's 2s run-event poll under slow round trips (no in-flight guard); a stale
+      doc comment on `gitx.Client.Raw` describing a call path `git_command` doesn't
+      actually use; two ledger-rotation efficiency notes (mutex scope, per-request
+      `os.Stat`); two independently-maintained "safe without approval" git-subcommand lists
+      with no shared source of truth; the new SAF-import subsystem bolted onto
+      `MainActivity` instead of extracted into its own class.
+- [x] Verified after the fixes: `go build/vet/test ./...` clean, APK rebuilt via
+      `cli-os/scripts/build-apk.sh` and re-signed/verified (v2+v3 true), validator
+      519 PASS / 0 FAIL.
+- [ ] None of the 8 review findings are blocking; left for the maintainer to triage
+      alongside merge — no further autonomous action queued on them.
+
+## Previous Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
 
 Maintainer brief: evolve the repo toward "L00prite OS" — an installable, vendor-neutral
 autonomous software-engineering application (add keys → connect repo → prompt → Start).

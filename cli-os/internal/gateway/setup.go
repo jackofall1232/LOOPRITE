@@ -9,6 +9,15 @@
 // and performs no action — so a setup endpoint can never linger as an unauthenticated back door. The
 // server also refuses to boot a non-loopback bind without TLS, so first-run setup is never exposed by
 // accident. GET /v1/setup/status stays readable (booleans/counts only, no secrets), like /healthz.
+//
+// LOOPRITE_SETUP_SECRET (docs/android-architecture.md §4 G7): on a shared loopback host — any
+// co-installed Android app can also reach 127.0.0.1 — the setup-incomplete window above is
+// otherwise unauthenticated by design (that's the whole point: a fresh install has no token yet).
+// A malicious co-installed app could race first-run setup and mint itself the admin token before
+// the legitimate user does. When the operator sets LOOPRITE_SETUP_SECRET, every mutating setup
+// endpoint additionally requires a matching x-l00prite-setup-secret header (requireSetupSecret,
+// below); unset (the desktop default), this is a complete no-op — behavior is byte-identical to
+// before G7 existed.
 package gateway
 
 import (
@@ -79,6 +88,26 @@ func setupAudit(app *App, action, detail string) {
 		util.RID("aud"), util.NowISO(), "setup", action, d)
 }
 
+// requireSetupSecret enforces LOOPRITE_SETUP_SECRET (G7) when the operator has set one: the caller
+// must present the identical value in the x-l00prite-setup-secret header, compared in constant
+// time via the same primitive token verification uses (util.TimingSafeEqual) so this gate leaks no
+// timing information either. Returns true (and writes nothing) when the env var is unset — the
+// desktop default — so every existing caller of the setup wizard is completely unaffected.
+func requireSetupSecret(w http.ResponseWriter, r *http.Request) bool {
+	secret := os.Getenv("LOOPRITE_SETUP_SECRET")
+	if secret == "" {
+		return true
+	}
+	got := r.Header.Get("x-l00prite-setup-secret")
+	if got == "" || !util.TimingSafeEqual(got, secret) {
+		sendJSON(w, 403, map[string]any{"error": map[string]any{
+			"message": "Missing or invalid x-l00prite-setup-secret header.",
+			"type":    "authentication_error", "code": "setup_secret_required"}})
+		return false
+	}
+	return true
+}
+
 // setupGate returns true (and writes a 403) when setup is already complete, so mutating handlers can
 // short-circuit. This is the lockdown that closes the first-run window permanently.
 func (app *App) setupGate(w http.ResponseWriter) bool {
@@ -130,7 +159,10 @@ func (app *App) networkInfo() map[string]any {
 	}
 }
 
-// HandleSetupStatus is GET /v1/setup/status — always readable (no secrets).
+// HandleSetupStatus is GET /v1/setup/status — always readable (no secrets), even when
+// LOOPRITE_SETUP_SECRET is set (G7): it leaks only booleans/counts (vault initialized?, provider
+// count, active token count, which step is next), nothing an attacker can act on directly, so it
+// is exempt from requireSetupSecret exactly like /healthz is exempt from Bearer auth.
 func (app *App) HandleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	vault := config.MasterKeyPresent(app.Cfg)
 	provCount := app.providerCount()
@@ -161,6 +193,9 @@ type vaultReq struct {
 
 // HandleSetupVault is POST /v1/setup/vault — initialize the vault master key.
 func (app *App) HandleSetupVault(w http.ResponseWriter, r *http.Request) {
+	if !requireSetupSecret(w, r) {
+		return
+	}
 	if app.setupGate(w) {
 		return
 	}
@@ -213,6 +248,9 @@ type providerTestReq struct {
 // HandleSetupProviderTest is POST /v1/setup/provider/test — validate a key with a REAL upstream call
 // (stores nothing). Returns a clear pass/fail so the wizard never accepts a bad key silently.
 func (app *App) HandleSetupProviderTest(w http.ResponseWriter, r *http.Request) {
+	if !requireSetupSecret(w, r) {
+		return
+	}
 	if app.setupGate(w) {
 		return
 	}
@@ -241,6 +279,9 @@ type providerReq struct {
 // the SAME storeProvider core the authenticated dashboard "add provider" endpoint (Part E) uses, so the
 // first-run and ongoing paths can never diverge. A bad key is rejected 400 and stored nowhere.
 func (app *App) HandleSetupProvider(w http.ResponseWriter, r *http.Request) {
+	if !requireSetupSecret(w, r) {
+		return
+	}
 	if app.setupGate(w) {
 		return
 	}
@@ -270,6 +311,9 @@ type tokenReq struct {
 // HandleSetupToken is POST /v1/setup/token — mint the first token via the same primitive as
 // `token mint`. Returned ONCE; never stored in plaintext. Minting typically finalizes setup.
 func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
+	if !requireSetupSecret(w, r) {
+		return
+	}
 	if app.setupGate(w) {
 		return
 	}

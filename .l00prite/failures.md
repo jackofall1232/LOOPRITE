@@ -46,6 +46,29 @@ Record failed approaches and why they should not be retried unless conditions ch
   - Naming the execution boundary list `stop_conditions`: heartbeat.json already has a
     top-level `stop_conditions` with different semantics; the collision made governance
     ambiguous. It is `run_boundaries`.
+- Approaches that failed during the 2026-07-05 Android APK pass — do not retry unless the
+  stated condition changes:
+  - Downloading anything Android from Google hosts in a proxied build container:
+    `dl.google.com` is CONNECT-403-blocked and `maven.google.com` is just a 301 to it — no
+    SDK, no AGP, no NDK, no emulator images. The working chain is apt
+    (aapt/zipalign/apksigner/dalvik-exchange/android-framework-res) + Maven Central
+    (robolectric `android-all` as the javac framework classpath) + real-SDK builds in CI.
+  - Using the robolectric `android-all` jar as `aapt -I` framework resources: its
+    `resources.arsc` is unparseable by aapt/aapt2 ("Package Groups (0)") — it is a compile
+    CLASSPATH substitute only; resource compilation needs `android-framework-res`'s
+    `framework-res.apk`.
+  - `CGO_ENABLED=0 GOOS=android GOARCH=amd64` (emulator ABI): the Go toolchain hard-refuses
+    ("requires external (cgo) linking") — unlike arm64 there is no internal-linker support,
+    and `-linkmode=internal` / `-tags netgo,osusergo` do not help. Needs a real NDK cross
+    toolchain, or a future Go release; both build pipelines skip it on exactly that error.
+  - Bumping go-git past v5.18.0 while the module targets go 1.24: v5.19.1's graph requires
+    go >= 1.25. Bump the toolchain first.
+  - Fetching `docs.venice.ai`, `api.venice.ai`, or `curl.se` from the build container —
+    egress-blocked; Venice docs are reachable via their public GitHub mirror
+    (`veniceai/api-docs`).
+  - In tests, setting `GIT_AUTHOR_NAME=""` (empty) to simulate missing git identity: git
+    treats a present-but-empty env var as an authoritative override that defeats even
+    `-c user.name`. Unset the vars instead.
 
 ## Blockers
 - None currently active.

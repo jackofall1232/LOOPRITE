@@ -113,6 +113,10 @@ func at(pos []string, i int) string {
 }
 
 func main() {
+	// Must run before anything (config.Load included) might perform a DNS lookup — see
+	// docs/android-architecture.md §4 G1. A no-op on desktop (LOOPRITE_DNS unset, /etc/resolv.conf
+	// present), so this costs nothing there.
+	util.InitResolver()
 	cfg := config.Load()
 	pos, flags := parseArgs(os.Args[1:])
 	cmd, sub, arg := at(pos, 0), at(pos, 1), at(pos, 2)

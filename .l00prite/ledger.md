@@ -622,3 +622,643 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none.
 - **Lock:** lock-20260705-201723 acquired for this entry plus the `state.json`/`todos.md`
   writes above; released immediately after.
+
+### Run 2026-07-05T21:24:23Z — Claude (Fable 5), branch claude/looprite-android-apk-4mth8g — unit 1: recon + Android architecture
+- **Goal:** Start the Android APK pass (maintainer brief 2026-07-05): recon the full repo +
+  build environment, decide the Android packaging strategy, and write the architecture
+  plan / feasibility decision / phased roadmap (deliverables 1–3).
+- **Triggering event:** Maintainer brief — evolve the repo into a self-contained L00prite
+  OS Android APK (device = local control plane; no hosted server).
+- **Decision:** Packaging Option A chosen — cross-compile the existing Go gateway to an
+  android/arm64 PIE binary, ship it as lib/arm64-v8a/libl00prite.so, exec from
+  nativeLibraryDir under a thin no-AndroidX Java wrapper (foreground service + WebView on
+  http://127.0.0.1:8787). gomobile, Termux-dependence, and native rewrites rejected — see
+  cli-os/docs/android-architecture.md §2.
+- **Completed work:** 7-reader parallel recon of every cli-os subsystem + protocol layer;
+  environment feasibility probes; no-Google APK toolchain proven end-to-end (signed v2+v3
+  hello-world APK with WebView activity + service + native-lib payload, built from apt
+  aapt/zipalign/apksigner/dalvik-exchange + android-framework-res + Maven Central
+  robolectric android-all); Venice AI pricing verified first-party (docs mirror,
+  2026-07-05); wrote cli-os/docs/android-architecture.md (plan, feasibility evidence,
+  G1–G11 gap analysis, provider/role expansion, security model, dual build pipeline,
+  Phase 0–3 roadmap); blueprint.md Android section.
+- **Changed files:** cli-os/docs/android-architecture.md (new), .l00prite/blueprint.md,
+  .l00prite/{lock,state,todos} (session start, prior commit 7936abd).
+- **Tests run / Verification:**
+  - `command: GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: PIE ELF aarch64, interpreter /system/bin/linker64, pure-Go
+    SQLite — no NDK/gomobile needed` · 2026-07-05T21:19Z.
+  - `command: apksigner verify --verbose signed.apk (toolchain POC, scratchpad)` ·
+    `exit_code: 0` · `summary: v2=true v3=true; aapt dump badging shows launchable
+    activity + service + native-code arm64-v8a` · 2026-07-05T21:30Z.
+  - `command: curl https://dl.google.com/... via agent proxy` · `exit_code: 56` ·
+    `summary: dl.google.com CONNECT 403 — Google-hosted SDK/AGP unavailable in this build
+    container; motivated the no-Google local chain + real-SDK CI dual pipeline` ·
+    2026-07-05T21:18Z.
+- **Response drafted/sent:** none — design unit; the PR at pass end is the response.
+- **Event status:** n/a (no event).
+- **Failures:** none blocking. Recorded for reuse: dl.google.com and maven.google.com
+  (301→dl.google.com) are proxy-blocked here; curl.se and api.venice.ai and
+  docs.venice.ai also blocked; Venice docs reachable via their public GitHub docs mirror.
+- **Decisions:** (1) gitx seam with pure-Go go-git fallback instead of bundling a static
+  git binary (self-contained, keeps exec-git byte-identical on desktop). (2) Master key
+  via Android-Keystore-wrapped LOOPRITE_MASTER_KEY env, never a key file on flash.
+  (3) New optional LOOPRITE_SETUP_SECRET gate closes the loopback first-run setup race
+  unique to multi-app devices. (4) dist.sh untouched; android builds live in
+  scripts/build-apk.sh + CI workflow (workflow addition = denylisted path, deliberately
+  shipped via human-reviewed PR).
+- **Confidence:** High on feasibility (both pillars proven by direct experiment before
+  design commit); medium on Venice capability metadata (pricing first-party-verified,
+  context/tools flags to be marked at source-supported confidence in the manifest).
+- **Next action:** implement per android-architecture.md §4/§5/§7 — three parallel writer
+  units (Go platform enablement; providers/roles; android app + build pipeline), each
+  reviewed by the architect and committed separately.
+- **Do-not-retry notes:** do not attempt Android SDK/AGP/NDK downloads from Google hosts
+  in this environment; do not fetch docs.venice.ai directly (use the GitHub docs mirror).
+- **Lock:** lock-20260705-212423-claude-android-apk-pass held (acquired at session start
+  after prior lock showed released; expires 2026-07-06T01:24:23Z — refresh before expiry
+  per LOCKING.md rule 7).
+
+### Run 2026-07-05T22:05:00Z — Claude (Fable 5 architect + Sonnet 5 writer), branch claude/looprite-android-apk-4mth8g — unit 2: Android app + APK pipeline
+- **Goal:** Implement android-architecture.md §3/§7: the android/ wrapper app (Java,
+  no-AndroidX), the hermetic no-Google build script, and the real-SDK CI workflow.
+- **Triggering event:** Unit 1 (architecture) committed; parallel writer dispatch.
+- **Decision:** Written by a Sonnet 5 writer agent to the architect's spec; reviewed
+  line-by-line by the architect (Fable 5) before commit.
+- **Completed work:** android/{AndroidManifest.xml,README.md,res/values/strings.xml,
+  res/xml/network_security_config.xml,src/com/l00prite/os/{MainActivity,GatewayService,
+  Keys}.java}; cli-os/scripts/build-apk.sh; .github/workflows/android-apk.yml;
+  .gitignore entry for cli-os/dist-android/. Writer deviations accepted by the architect:
+  ACCESS_NETWORK_STATE permission (required for LinkProperties DNS discovery, G1),
+  allowBackup=false (keeps the wrapped vault key out of Android Auto Backup),
+  android/amd64 emulator ABI skipped as best-effort (genuine Go toolchain limit:
+  android/amd64 requires external cgo linking — arm64 does not; both pipelines degrade
+  identically and pick the ABI back up automatically if a future Go adds internal
+  linking). Architect fixes on review: session-specific scratchpad path stripped from
+  build-apk.sh (replaced with a cache-glob under ~/.cache/l00prite-apk, cache seeded);
+  dist-android/ gitignored.
+- **Changed files:** android/** (new), cli-os/scripts/build-apk.sh (new),
+  .github/workflows/android-apk.yml (new — NOTE: matches the Autonomous-Edit Denylist
+  glob .github/workflows/**; shipped deliberately via this human-reviewed PR, flagged in
+  the PR description), .gitignore.
+- **Tests run / Verification:**
+  - `command: bash cli-os/scripts/build-apk.sh v0-verify3 (writer run, isolated worktree
+    of dc38b74 because the Go tree was concurrently mid-edit by unit 3)` · `exit_code: 0`
+    · `summary: signed APK produced; apksigner verify v2=true v3=true; badging shows
+    com.l00prite.os / launchable MainActivity / INTERNET / native-code arm64-v8a;
+    lib/arm64-v8a/libl00prite.so Stored (11.9MB PIE aarch64, /system/bin/linker64);
+    assets/cacert.pem present (146 Mozilla certs, built only from
+    /usr/share/ca-certificates/mozilla, never the proxy-tainted system store)` ·
+    2026-07-05T21:58Z.
+  - `command: python3 yaml.safe_load(android-apk.yml) + bash -n on run blocks` ·
+    `exit_code: 0` · `summary: workflow parses; CI run itself pending first PR run` ·
+    2026-07-05T21:59Z.
+  - `command: bash -n cli-os/scripts/build-apk.sh (post architect edit)` · `exit_code: 0`
+    · `summary: syntax clean after cache-glob refactor` · 2026-07-05T22:04Z.
+- **Response drafted/sent:** none.
+- **Event status:** n/a.
+- **Failures:** android/amd64 cross-build impossible without NDK (external-cgo-linking
+  requirement) — recorded as a known limitation, NOT retried; do not burn time on
+  -linkmode/-tags workarounds (all confirmed ineffective).
+- **Decisions:** master key wrapped by Android Keystore, injected via LOOPRITE_MASTER_KEY
+  env only (never a file on flash); setup secret in plain app-private prefs is an
+  accepted trade-off (dies at setup-latch time); WebView load deferred behind /healthz
+  poll; full APK rebuild against the final merged tree is owed in the verification pass.
+- **Confidence:** High for everything executed here; medium for the CI workflow until its
+  first real Actions run (sdkmanager/d8 paths are standard but unexecuted from this
+  sandbox).
+- **Next action:** review + commit units 3 (Go platform enablement) and 4
+  (providers/roles) when their writers finish; then integrated verification.
+- **Do-not-retry notes:** see Failures (android/amd64).
+- **Lock:** lock-20260705-212423-claude-android-apk-pass still held.
+
+### Run 2026-07-05T22:25:00Z — Claude (Fable 5 architect + Sonnet 5 writer), branch claude/looprite-android-apk-4mth8g — unit 3: Go Android platform enablement
+- **Goal:** Implement android-architecture.md §4 gaps G1/G3/G4/G7/G8 in the Go gateway/engine,
+  additively (desktop byte-identical when new envs unset and git exists).
+- **Triggering event:** Unit 1 spec committed; parallel writer dispatch.
+- **Decision:** Written by a Sonnet 5 writer agent to the architect's spec; diffs reviewed by
+  the architect before commit.
+- **Completed work:** (G1) internal/util/resolver.go — LOOPRITE_DNS resolver override +
+  android-no-resolv.conf fallback (8.8.8.8/1.1.1.1), installed first thing in main();
+  (G3) engine shellPath() sh→/bin/sh→/system/bin/sh; (G8) util.ScrubSecretEnv strips
+  LOOPRITE_MASTER_KEY/LOOPRITE_SETUP_SECRET from every child-process env; (G4) new
+  internal/gitx seam — exec-git impl (byte-identical legacy behavior, commit-identity
+  fallback retry) + pure-Go go-git v5.18.0 fallback when no git binary (https/local clone,
+  status, checkout -B, add, commit, DiffHead as an honestly-labeled status summary, Raw →
+  ErrRawUnsupported) — wired through engine preflight/tools/StartRun and /v1/repos/clone;
+  (G7) LOOPRITE_SETUP_SECRET gate: x-l00prite-setup-secret header (constant-time) required
+  on the 4 mutating setup endpoints when set, setup.html reads ?ss= once, strips it from
+  the address bar, never persists it.
+- **Changed files:** cmd/l00prite/main.go; go.mod/go.sum (go-git v5.18.0 pinned — v5.19+
+  requires go>=1.25, this module holds go 1.24); internal/util/{resolver,env}(+tests);
+  internal/gitx/* (new, +tests); internal/engine/{engine,exec,preflight,tools}(+tools_test);
+  internal/gateway/{repos_clone,setup}.go; internal/server/setup_test.go; public/setup.html.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go test ./...` · `exit_code: 0` · `summary: all packages ok,
+    incl. new gitx suite (both impls), setup-secret gate tests, resolver tests` ·
+    2026-07-05T22:24Z.
+  - `command: cd cli-os && go vet ./...` · `exit_code: 0` · `summary: clean` · 22:24Z.
+  - `command: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: go-git stays pure Go; android build intact` · 22:24Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS,
+    0 FAIL` · 2026-07-05T22:25Z.
+- **Response drafted/sent:** none.
+- **Event status:** n/a.
+- **Failures:** noted for reuse: go-git v5.19.1 (latest) requires go >= 1.25 — pinned
+  v5.18.0 + compatible transitives to hold the module at go 1.24; do not bump go-git
+  without bumping the toolchain. Test gotcha: a present-but-EMPTY GIT_AUTHOR_NAME env var
+  defeats -c user.name fallback (git treats it as authoritative) — tests must unset, not
+  empty.
+- **Decisions:** (1) the old "git is not installed on the gateway host" pre-flight blocker
+  is gone — with go-git compiled in, some implementation always exists; remaining blockers
+  (no commits / dirty tree) unchanged. (2) exec commit gains a one-shot identity-fallback
+  retry (l00prite-os/l00prite-os@localhost) — a desktop run without gitconfig now proceeds
+  under the fallback identity instead of dying at human_review_gate; on-device runs would
+  otherwise be impossible. (3) gogit DiffHead is a labeled file-status summary, never a
+  faked unified diff.
+- **Confidence:** High — every unit has direct tests, both impls exercised, desktop paths
+  byte-preserved by construction (exec impl ports the exact strings/flags/env).
+- **Next action:** commit unit 4 (providers/roles), then integrated e2e + APK rebuild.
+- **Do-not-retry notes:** see Failures.
+- **Lock:** lock-20260705-212423-claude-android-apk-pass still held.
+
+### Run 2026-07-05T22:30:00Z — Claude (Fable 5 architect + Sonnet 5 writer), branch claude/looprite-android-apk-4mth8g — unit 4: Venice/Gemini providers + role routing
+- **Goal:** Implement android-architecture.md §5: dedicated Venice AI manifest path, Gemini
+  manifest, architect/writer/reviewer/advisor role profiles with seeded roleRanks.
+- **Triggering event:** Unit 1 spec committed; parallel writer dispatch.
+- **Decision:** Written by a Sonnet 5 writer agent; reviewed by the architect, who made one
+  policy correction before commit (below).
+- **Completed work:** manifests/venice.json — 15 models, pricing first-party-verified
+  (Venice docs mirror, 2026-07-05, price_confidence high), capability flags honestly marked
+  training-knowledge, streaming_usage deliberately undeclared pending confirmation;
+  manifests/gemini.json — OpenAI-compat endpoint, 2 models, pricing null/unconfirmed per
+  the repo's verification discipline; "google"→"gemini" alias; four role profiles + seeded
+  roleRanks for architect/writer/reviewer/advisor AND engine-internal plan/code/review
+  (independent literals); QualityRanks extended with venice/gemini flagships; manifests
+  README updated; 18 new/updated tests.
+- **Architect correction on review:** writer/code profiles changed balanced→quality and
+  Sonnet's writer/code rank 96→97. Rationale: the writer agent proved that (a) balanced
+  cost-blending routed auto:writer to venice/qwen3-coder (cheapest tools-capable) over
+  Sonnet — making the maintainer's explicit "Sonnet 5 does the bulk writing" policy
+  decorative — and (b) a 96 rank exactly ties opus's qualityRanks fallback and loses the
+  alphabetical tiebreak. Cost control remains with PEP caps + cheap/balanced profiles;
+  operators can override per deployment. NOTE: this changes the pre-existing `code`
+  profile's default preference (shipped balanced in PR #24) — flagged for maintainer in
+  the PR description.
+- **Changed files:** internal/gateway/adapters/manifests/{venice.json,gemini.json,README.md};
+  internal/gateway/adapters/{registry.go,adapters_test.go}; internal/config/{config.go,
+  config_test.go}; internal/gateway/gateway_test.go; cli-os/docs/android-architecture.md
+  (§5.4 writer row updated to match).
+- **Tests run / Verification:** same integrated run as unit 3 (both units verified
+  together against the merged tree):
+  - `command: cd cli-os && go test ./...` · `exit_code: 0` · `summary: all ok — incl.
+    TestAutoWriterQualityPicksSonnet (auto:writer → anthropic/claude-sonnet-5 end-to-end),
+    TestAutoArchitectProfilePrefersFable (→ anthropic/claude-fable-5), venice/gemini
+    manifest loading + pricing, capability fail-closed rejection of tool-less venice
+    models` · 2026-07-05T22:24Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS,
+    0 FAIL` · 2026-07-05T22:25Z.
+- **Response drafted/sent:** none.
+- **Event status:** n/a.
+- **Failures:** none. Known behavior recorded: bare model ids colliding across enabled
+  providers (venice resells claude-sonnet-5 etc.) resolve by provider order (DB insertion
+  order — no ORDER BY); explicit provider/model pins are the deterministic form. Left
+  as-is; noted in manifests README + PR.
+- **Decisions:** gemini ships unpriced (null) rather than training-data prices — consistent
+  with openai/zhipu discipline; venice capability flags conservative (tools:true only on
+  well-established models, fail-closed elsewhere).
+- **Confidence:** High on code and Venice pricing; medium on venice/gemini capability
+  metadata until first-party confirmation from an unblocked network.
+- **Next action:** integrated e2e gateway smoke + final APK rebuild + memory close-out + PR.
+- **Do-not-retry notes:** none.
+- **Lock:** lock-20260705-212423-claude-android-apk-pass still held.
+
+### Run 2026-07-05T22:45:00Z — Claude (Fable 5), branch claude/looprite-android-apk-4mth8g — unit 5: integrated verification + session close-out
+- **Goal:** Verify the merged tree end-to-end, rebuild the final APK, update all memory
+  files, release the lock, and open the PR.
+- **Triggering event:** Units 2–4 committed (e74898c, 8d8b632, 82084e4).
+- **Decision:** Pass complete; hand to maintainer review via PR.
+- **Completed work:** e2e gateway smoke under the Android env contract; final APK rebuild
+  from the merged tree via cli-os/scripts/build-apk.sh (cache-glob jar path exercised);
+  memory.md durable decisions, failures.md do-not-retry entries, todos.md check-offs,
+  state.json/heartbeat.json close-out, CLAUDE.md Run Ledger row; lock released.
+- **Changed files:** .l00prite/{ledger,memory,failures,todos}.md,
+  .l00prite/{state,heartbeat,lock}.json, CLAUDE.md.
+- **Tests run / Verification:**
+  - `command: bash e2e-smoke.sh (gateway serve with LOOPRITE_MASTER_KEY env +
+    LOOPRITE_SETUP_SECRET + LOOPRITE_DNS; scripted curl walk)` · `exit_code: 0` ·
+    `summary: 15/15 — healthz; wizard at /; setup POST without secret 403, with secret
+    200; token minted; latch closes setup even with secret; venice provider added;
+    /v1/models lists venice/claude-sonnet-5, venice/openai-gpt-52-codex, auto:writer,
+    auto:architect; mock chat.completion round-trip; dry-run auto:writer routes to
+    venice/claude-sonnet-5 with rank_source roleRanks.writer (only venice enabled —
+    sonnet-first policy holds through the Venice path); setup.html carries the
+    x-l00prite-setup-secret plumbing` · 2026-07-05T22:38Z.
+  - `command: bash cli-os/scripts/build-apk.sh (merged tree, commit 82084e4)` ·
+    `exit_code: 0` · `summary: l00prite-os-82084e4.apk 15MB, sha256 042c407e5293...,
+    lib/arm64-v8a/libl00prite.so Stored 14.9MB PIE aarch64 /system/bin/linker64,
+    assets/cacert.pem 146 Mozilla certs` · 2026-07-05T22:35Z.
+  - `command: apksigner verify --verbose dist-android/l00prite-os-82084e4.apk` ·
+    `exit_code: 0` · `summary: v2 true, v3 true; badging: package com.l00prite.os,
+    launchable-activity MainActivity, INTERNET, native-code arm64-v8a` ·
+    2026-07-05T22:36Z.
+  - `command: cd cli-os && go test ./...` · `exit_code: 0` · `summary: all packages ok`
+    · 2026-07-05T22:24Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS,
+    0 FAIL` · 2026-07-05T22:47Z (re-run after memory-file edits).
+  - `command: node scripts/l00prite-doctor.js .` · see the post-release re-run recorded
+    below (doctor only prints HEALTHY once no active lock remains).
+- **Response drafted/sent:** PR opened for maintainer review (see Next action).
+- **Event status:** n/a.
+- **Failures:** none in this unit; pass-level do-not-retry notes live in failures.md
+  ("Approaches that failed during the 2026-07-05 Android APK pass").
+- **Decisions:** maintainer-review flags carried into the PR description: (1)
+  .github/workflows/android-apk.yml is an Autonomous-Edit-Denylist path added
+  deliberately in this human-reviewed PR; (2) code/writer routing profiles flipped
+  balanced→quality (changes a PR #24 default) per the explicit role-policy brief; (3)
+  bare model ids colliding across providers resolve by provider order — pin
+  provider/model when it matters.
+- **Confidence:** High — every claim above has command+exit_code evidence from this
+  session; the one unexecuted artifact is the CI workflow's first live run, which the PR
+  itself will trigger.
+- **Next action:** maintainer reviews and merges the PR; Phase 1 (dashboard Runs view
+  first) is queued in todos.md.
+- **Do-not-retry notes:** see failures.md.
+- **Lock:** lock-20260705-212423-claude-android-apk-pass RELEASED at session end
+  (2026-07-05T22:47Z), per LOCKING.md rule 5.
+
+### Run 2026-07-06T00:05:00Z — Claude (Sonnet 5), branch claude/looprite-android-apk-4mth8g — PR #1 CI fix + bot review response
+- **Goal:** Fix the first live `android-apk` CI run's failure and address all bot review
+  findings (Gemini Code Assist + Copilot) on PR #1.
+- **Triggering event:** GitHub webhook — CI check `Build & verify APK (real Android SDK)`
+  failed (exit 127); Gemini Code Assist review (7 comments) and Copilot review (3
+  comments) posted on the PR.
+- **Decision:** All 10 findings were small, high-confidence, non-architectural — fixed
+  directly without asking, per the subscription's stated authority.
+- **Completed work:**
+  - CI fix: `sdkmanager` is not on PATH on `ubuntu-latest` runners despite `ANDROID_HOME`
+    being preinstalled; resolved explicitly from
+    `$ANDROID_HOME/cmdline-tools/{latest,*}/bin/sdkmanager`.
+  - Gemini (6 code comments, 1 summary — all addressed): cached `gitx.Detect()`'s
+    exec-vs-gogit decision at process start instead of re-running `exec.LookPath` on every
+    call; `gogit.Commit()` now explicitly maps `git.ErrEmptyCommit` to `("", nil)`;
+    `commitSignature()` resolves name/email independently across local-then-global config
+    scopes (local wins, matching git's own precedence — also implements the local-config
+    lookup the original doc comment had promised but the code didn't do); DNS dialer loop
+    checks `ctx.Err()` before each server dial; `build-apk.sh`'s android-all version grep
+    no longer aborts the whole script under `set -e -o pipefail` on a metadata-format miss.
+  - Copilot (3 comments, all addressed): `MainActivity`'s health-poll thread is now a field,
+    interrupted in `onDestroy()` (closes a leak/stale-callback race across activity
+    recreation); `androidFallback()` no longer treats a non-ENOENT stat failure as "missing"
+    (regression test added, root-aware skip since permission checks don't bind at euid 0 —
+    confirmed this container runs as root); `commitSignature` doc comment now accurately
+    describes the local-over-global resolution (same fix as the Gemini duplicate finding).
+  - Resolved all 9 GitHub review threads (all fixes landed in the pushed diff; nothing
+    ambiguous enough to need a reply).
+- **Changed files:** `.github/workflows/android-apk.yml`,
+  `android/src/com/l00prite/os/{GatewayService,MainActivity}.java`,
+  `cli-os/internal/gitx/{gitx,gitx_test,gogit}.go`,
+  `cli-os/internal/util/{resolver,resolver_test}.go`, `cli-os/scripts/build-apk.sh`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./... && go test ./...` ·
+    `exit_code: 0` · `summary: all packages ok; one test needed updating (gitx_test's
+    Detect() PATH-clearing test now exercises the underlying detectOnce() directly since
+    Detect() is cached) — new resolver regression test for the non-ENOENT stat case also
+    passes (correctly skips under root)` · 2026-07-06T00:12Z.
+  - `command: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: android build unaffected` · 2026-07-06T00:12Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` (0 FAIL lines) ·
+    2026-07-06T00:13Z.
+  - `command: python3 -c "import yaml; yaml.safe_load(open('.github/workflows/android-apk.yml'))"`
+    · `exit_code: 0` · `summary: workflow YAML re-parses after the sdkmanager fix` ·
+    2026-07-06T00:13Z.
+  - `command: bash cli-os/scripts/build-apk.sh` · `exit_code: 0` · `summary: APK
+    reassembles and re-signs cleanly after the Java/script fixes (sha256
+    4c0ff6482d7c...)` · 2026-07-06T00:14Z.
+- **Response drafted/sent:** none needed — all 9 review threads resolved by fix, no reply
+  required.
+- **Event status:** completed (CI fix + both reviews addressed); PR remains open pending
+  the next CI run and maintainer merge decision.
+- **Failures:** none in this unit.
+- **Decisions:** none beyond the fixes themselves; no architectural changes.
+- **Confidence:** High — every finding was independently reproducible/verifiable (the
+  cache-vs-test interaction was caught by the existing test suite itself) and all
+  verification commands above are green.
+- **Next action:** watch for the next CI run's result; re-check PR mergeable state; a
+  ~12-minute check-in is already scheduled via send_later.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-000500-claude-android-apk-review-fixes held for this run;
+  released at the end of this turn.
+
+### Run 2026-07-06T00:16:00Z — Claude (Fable 5 architect + Sonnet 5 writers + Opus 4.8 reviewers/e2e), branch claude/looprite-android-apk-4mth8g — Phase 1: dashboard Runs view
+- **Goal:** Implement Phase 1 of the Android roadmap (android-architecture.md §8): the
+  dashboard Runs view (spec: os-architecture.md §4), phone-first nav, a repo clone-from-URL
+  option, and wizard copy that stops presenting CLI/TLS instructions as universal.
+- **Triggering event:** Maintainer direction — "run phase 1 of the plan... sonnet for bulk
+  writing, opus for review/skills/tools, fable to make executive decisions."
+- **Decision:** Multi-agent Workflow (write → review → fix → e2e), architect-authored spec
+  grounded in the real API (runs.go handlers, types.go Run/Preflight/Approval/Event structs
+  and every status/boundary/gate/objective string constant) and the file's existing
+  conventions (read in full before writing the spec — CSS system, api()/busy()/openModal()
+  helpers, the Repositories section as the structural template) so writers implemented
+  against ground truth, not guesses.
+- **Completed work:**
+  - `cli-os/public/dashboard.html` (1050→1502 lines): full Runs view — nav item, full-width
+    section, create-run modal (repo picker + clone-from-URL toggle, objective with privacy
+    warning, required command allowlist, all 6 gate-class selects always sent explicitly),
+    a wide-modal run-detail view spanning Pre-flight (verbatim preflight render, blockers
+    disable Start, exact-match "EXECUTE" confirm gate) → Live (status header, Stop,
+    approvals inbox, 2s-polled esc()'d event feed) → Exit (boundary banner, client-side-only
+    "what next" suggestion clearly not attributed to the server, Resume routing only through
+    a fresh POST /v1/runs/preflight — never straight to Start). Repo-register modal gained a
+    clone-from-URL default tab. Phone-first nav: hamburger + off-canvas drawer + backdrop,
+    scoped inside the existing 1000px breakpoint.
+  - `cli-os/public/setup.html`: footer CLI-command framing reworded to "however this gateway
+    was started"; vault-step key copy now covers both the file-based and env-var-injected
+    cases. Network-step TLS/env guidance was checked against its actual conditional
+    (`internal/gateway/setup.go`'s `exposed: !loopback && !tls` signal) and found already
+    correctly gated — left untouched rather than force an edit.
+  - Adversarial review: 2 Opus lenses (correctness/security, UX/protocol-fidelity) —
+    **zero blocking findings** (Start-gate exactness, Resume-never-bypasses-preflight,
+    esc() discipline, poll-timer/wide-class cleanup, and full 6-gate payload all verified
+    correct on the first pass). 6 non-blocking findings (keyboard-unreachable run rows,
+    silent failure on a slow/failed row fetch, a poll-callback race that could reopen a
+    just-closed modal, missing focus-on-open, raw gate-class ids shown outside the create
+    form, and vault copy that dropped a concrete desktop detail) — all fixed by a Sonnet
+    pass and independently re-verified by the architect.
+  - Architect fix round (post-workflow, from the e2e report): the create-run modal's
+    command-allowlist field was labeled "optional" and unvalidated, but the engine
+    hard-requires at least one allowlisted command (its first entry is the done-check) —
+    an empty submission silently produced a blocked pre-flight with no way to proceed.
+    Moved the field out of "Advanced", relabeled it "required", and added client-side
+    validation with an explanatory message before the goal/repo checks. Also added a
+    `.btn:disabled` CSS rule (opacity+cursor) — the e2e report flagged the Start button as
+    functionally correctly disabled but visually undimmed.
+  - E2E verification (Opus, Playwright 1.56.1 against a freshly built linux/amd64 binary —
+    go:embed baking in the real changed HTML): **10/10 checks pass**, driven through the
+    REAL wizard, REAL repo-register UI, REAL create-run/pre-flight/start/exit/resume flow,
+    and a REAL phone-viewport (375×812) drawer interaction — zero console errors/warnings
+    across the entire session. Both critical invariants asserted via DOM properties, not
+    screenshots: Start button `.disabled` is true/true/true/false across
+    empty→wrong-case→partial→exact "EXECUTE" input; Resume from the Exit view lands back on
+    a Pre-flight view with an empty confirm input and a disabled Start (not straight back to
+    running), corroborated at the API level (run status returned to `ready` with a fresh
+    `preflight_built` event). The live run hit a real, correctly-classified
+    `ambiguous_requirements` boundary (the mock adapter's canned reply isn't a valid
+    select_unit tool call under the real engine loop — expected and documented, not a bug).
+- **Changed files:** `cli-os/public/dashboard.html`, `cli-os/public/setup.html`.
+- **Tests run / Verification:**
+  - `command: node -e "new Function(<extracted script>)" for both files (pre- and
+    post-architect-fix)` · `exit_code: 0` · `summary: both files' <script> blocks parse
+    cleanly, no corruption` · 2026-07-06T00:50Z / 01:03Z.
+  - `command: grep -n "confirmInp.value" cli-os/public/dashboard.html` · `exit_code: 0` ·
+    `summary: independently confirmed the exact-match "EXECUTE" comparison before trusting
+    the writer/fix-agent's own claim` · 2026-07-06T00:51Z.
+  - `command: cd cli-os && CGO_ENABLED=0 go build ./cmd/l00prite && go vet ./... && go test
+    ./...` (run twice: after the write/review/fix pipeline, and again after the architect's
+    allowlist/CSS fix) · `exit_code: 0` both times · `summary: all packages ok; go:embed
+    picks up each new HTML revision; l00prite version smoke-runs the rebuilt binary` ·
+    2026-07-06T00:52Z and 01:07Z.
+  - `command: node scripts/validate-l00prite.js` (run after the final fix) · `exit_code`
+    for `grep -c '^FAIL'`: 1 (i.e. 0 matches — validator clean) · 2026-07-06T01:07Z.
+  - `command: bash cli-os/scripts/build-apk.sh` (final rebuild reflecting all Phase 1
+    changes) · `exit_code: 0` · `summary: signed APK reassembled, sha256
+    c8919b5d42bf0656...` · 2026-07-06T01:08Z.
+  - `command: Playwright e2e (Opus agent, scratchpad script, not committed — matches this
+    repo's established one-off-verification convention) against a freshly built binary` ·
+    `summary: 10/10 checks pass, zero console errors, screenshots + server log retained
+    under the session scratchpad` · 2026-07-06T00:55Z-ish (workflow-internal).
+- **Response drafted/sent:** none yet — PR #1 description to be updated to include Phase 1
+  in the same follow-up as this ledger entry.
+- **Event status:** n/a.
+- **Failures:** none blocking. Recorded for follow-up (not fixed in this pass, out of
+  scope): the internal `mock` test adapter is not selectable in the setup wizard's adapter
+  dropdown, and a provider literally named `mock` is unroutable (the router keys model
+  catalogs by provider name against the embedded manifests) — offline testing must name the
+  mock-adapter provider after a manifest that has one (e.g. `anthropic`), as this repo's own
+  `internal/server/e2e_test.go` already does. Clone-from-URL was not e2e-exercised (needs
+  real network egress, deliberately avoided in an offline verification pass).
+- **Decisions:** command allowlist is a REQUIRED field in the create-run UI, not optional —
+  the engine's own pre-flight blocks without one, so silently accepting an empty allowlist
+  would be a UX dead-end, not a real "optional" feature. "Next recommended action" text in
+  the Exit view is explicitly a client-side suggestion (labeled as such), never attributed
+  to the server, since the Run API has no such field.
+- **Confidence:** High — every invariant claim in this entry was independently re-verified
+  by the architect (grep/re-read, not just trusted from a sub-agent's report), and the e2e
+  pass exercised the real binary/real browser/real API rather than mocking the UI layer.
+- **Next action:** update PR #1's description to cover Phase 1; continue watching CI/reviews
+  until merge; Phase 2 (deeper on-device autonomy) remains queued per android-architecture.md
+  §8.
+- **Do-not-retry notes:** none new beyond the mock-adapter-naming note above (not a
+  do-not-retry, a how-to-do-it-correctly note).
+- **Lock:** lock-20260706-010500-claude-phase1-runs-ui held for this entry; released
+  immediately after.
+
+### Run 2026-07-06T01:30:00Z — Claude (Fable 5 architect + Sonnet 5 writers + Opus 4.8 reviewers/verifier), branch claude/looprite-android-apk-4mth8g — Phase 2: on-device autonomy
+- **Goal:** Implement Phase 2 of the Android roadmap (android-architecture.md §8): deeper
+  on-device autonomy, using the same Sonnet-writes/Opus-reviews-and-verifies/Fable-decides
+  format as Phase 0/1, per maintainer direction to continue that pattern.
+- **Triggering event:** Maintainer direction — "go ahead and complete phase 2 using the
+  same format... continue with the same jobs for sonnet, opus, and fable as phase 0 and
+  phase 1."
+- **Decision:** Of the roadmap's five candidate Phase 2 items, three were scoped for
+  implementation and two explicitly deferred (committed separately, a726bc2, before
+  dispatching writers):
+  - IMPLEMENTED: git_command read-only subset (status/diff/log/show) over go-git; ledger
+    JSONL rotation; SAF repo import (Android).
+  - DEFERRED with rationale: ssh clones (keep https-only — no on-device key-provisioning UI
+    exists yet, wiring the transport with nothing to source credentials from would be dead
+    code); Termux bridge/remote-verifier (architecturally underspecified — protocol/auth/
+    trust need their own design pass first); SAF export (import was the more urgent gap;
+    export's natural path off-device is a git-remote push, which hits the same
+    key-provisioning gap as ssh).
+- **Completed work:**
+  - `cli-os/internal/gitx` — extended the `Client` interface with `Log(repo, limit)` and
+    `Show(repo, ref)`; `execClient` passes through to real `git log --oneline`/`git show`
+    (byte-identical to today); `gogitClient` implements both via go-git's `Repository.Log`
+    and `Commit.Patch` (verified against the pinned v5.18.0 source before speccing — Show's
+    diff direction is `parent.Patch(commit)`, not the reverse, so an added file renders as a
+    genuine addition, not inverted; root commits get an honest "no parent to diff against"
+    note rather than a fabricated diff).
+  - `cli-os/internal/engine/tools.go` — the model-facing `git_command` tool no longer
+    unconditionally refuses every call under `Kind()!="exec"`; a new `gitCommandGogit`
+    narrowly maps EXACT argument shapes (bare `status`; bare `diff`/`diff HEAD`; bare `log`
+    or `log -n N`/`--max-count=N`/`-N`; `show <ref>` with no flags) to the new gitx methods,
+    with any other subcommand or unsupported flag combination falling through UNCHANGED to
+    the original refusal — never silently misinterpreted. Never gated (matches the existing
+    no-approval-needed status for these read-only ops).
+  - `cli-os/internal/ledger` — the JSONL mirror (previously unbounded) now rotates at a
+    5 MiB default threshold (one backup generation, `LOOPRITE_LEDGER_MAX_BYTES` override,
+    invalid values fall back to default) under a mutex serializing the
+    check-size/rotate/append sequence — load-bearing since `Append` is called from
+    concurrent HTTP request goroutines. SQLite ledger table untouched (out of scope).
+  - `android/src/com/l00prite/os/MainActivity.java` — a native "Import repo…" button
+    (independent of the WebView, no AndroidX) using `ACTION_OPEN_DOCUMENT_TREE` +
+    `DocumentsContract` (DocumentFile confirmed AndroidX-only and absent from the platform
+    framework jar — verified empirically, not assumed) to copy a folder into
+    `<filesDir>/imported-repos/<name>`, closing the "get a repo already on the device onto
+    a real path" gap neither clone-from-URL nor path-register covers. Path-traversal
+    defense checks the canonical resolved path is contained within `imported-repos/` for
+    both the destination root and every recursive child entry (not just per-segment string
+    sanitization). Lifecycle-safety mirrors the existing health-poll thread's
+    destroyed-activity guard.
+  - Adversarial review: 2 Opus lenses — **zero blocking findings** (the exact-match
+    argument-shape contract, the Patch-direction correctness, the rotation mutex, and the
+    path-containment check all verified correct on the first pass). 3 non-blocking findings
+    (a stale refusal-message enumeration that omitted log/show and wrongly listed
+    branch/commit; an intentional-but-previously-undocumented semantic difference in bare
+    `diff` between backends; an undocumented `LOOPRITE_LEDGER_MAX_BYTES` env var) — all
+    fixed by a Sonnet pass.
+  - Verification (Opus, "tools/skills" role): independently re-ran the full test+race
+    suite; **live-drove** the gogit git_command subset through the real engine/Toolbox path
+    against a real temp repo with git genuinely stripped from PATH (confirmed via
+    `exec.LookPath` failing before trusting the result), and inspected the actual returned
+    Show patch text with its own eyes to confirm the addition-direction claim (not taken on
+    faith from the writer or the correctness reviewer); independently stress-tested ledger
+    rotation with 2500 concurrent Append calls forcing ~12 rotations (zero panics, zero
+    corrupt JSONL lines in either generation via two independent JSON parsers, SQLite table
+    exactly matching all 2500 rows); rebuilt the APK via the real hermetic pipeline and
+    confirmed the SAF code actually compiled into the dex (grepped `strings classes.dex` for
+    the real method/class names) while being explicit that device-level SAF picker/copy
+    behavior remains unverified (no emulator ABI in this container — documented limitation,
+    not glossed over).
+  - Architect spot-check (independent, not just trusting reports): personally re-read the
+    ledger mutex and the SAF `assertWithinRoot` containment check in the actual committed
+    files before trusting either.
+- **Changed files:** `cli-os/internal/gitx/{gitx,exec,gogit,gitx_test}.go`,
+  `cli-os/internal/engine/{tools,tools_test}.go`, `cli-os/internal/ledger/{ledger,
+  ledger_test}.go`, `android/src/com/l00prite/os/MainActivity.java`, `android/README.md`,
+  plus the prior scoping commit to `cli-os/docs/android-architecture.md`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` ·
+    2026-07-06T01:47Z.
+  - `command: go test -count=1 ./...` (forced fresh, not cached) · `exit_code: 0` ·
+    `summary: all 13 testable packages ok` · 2026-07-06T01:48Z.
+  - `command: go test -race -count=1 ./internal/ledger/... ./internal/gitx/...
+    ./internal/engine/...` · `exit_code: 0` · `summary: zero race warnings` ·
+    2026-07-06T01:48Z.
+  - `command: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: file confirms ELF aarch64 PIE, /system/bin/linker64` ·
+    2026-07-06T01:49Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code`: 0 FAIL lines ·
+    2026-07-06T01:50Z.
+  - `command: bash cli-os/scripts/build-apk.sh` · `exit_code: 0` · `summary: signed APK
+    rebuilt, sha256 852f8aec35ec...` · 2026-07-06T01:52Z.
+  - `command: (Opus verify agent) 2500-goroutine concurrent ledger.Append stress test,
+    threshold sized to force ~12 rotations` · `summary: zero panics, zero corrupt JSONL
+    lines (two independent parsers), SQLite table exactly 2500 rows` · workflow-internal.
+  - `command: (Opus verify agent) live git_command drive via the real Toolbox path,
+    PATH stripped of git, confirmed via exec.LookPath failure` · `summary: status/diff/
+    log/show all correct; out-of-contract calls (two-ref show, log --all, rev-parse)
+    correctly refuse rather than misinterpret; Show's patch text inspected directly,
+    added-file content confirmed on a plus-prefixed line` · workflow-internal.
+  - `command: bash cli-os/scripts/build-apk.sh (Opus verify agent's own run)` ·
+    `summary: apksigner verify v2/v3 true; aapt dump badging correct; strings classes.dex
+    confirms SAF method/class names actually compiled in` · workflow-internal.
+- **Response drafted/sent:** PR #1 to be updated to cover Phase 2; a Gemini re-review
+  request to be posted per maintainer direction.
+- **Event status:** n/a.
+- **Failures:** none blocking. One transient false alarm recorded for awareness, not a
+  do-not-retry: the ledger writer observed intermittent `go build ./...` failures during
+  the PARALLEL write phase caused by the concurrently-in-flight gitx writer's own
+  in-progress edits (a normal, expected transient during parallel writes to different
+  packages that share a dependency edge) — resolved by the time all writers finished; the
+  post-write verification runs were consistently clean.
+- **Decisions:** the git_command gogit subset's argument-shape contract is deliberately
+  EXACT-MATCH ONLY — any unrecognized flag or extra argument falls through to the original
+  refusal rather than being interpreted loosely, so the tool can never silently answer a
+  different question than the real command would. Ledger rotation checks size BEFORE
+  appending (not after) so the current row is guaranteed to land in a definitely-fresh file
+  when rotation fires, with no read-back/split logic needed. SAF import is native-Android
+  only (no WebView/JS-bridge) — kept the feature boundary clean and avoided expanding the
+  WebView's JS-bridge attack surface for a one-off utility affordance.
+- **Confidence:** High — every safety-critical claim (exact-match argument contract, Patch
+  direction, mutex correctness, path-containment) was verified by at least two independent
+  parties (a reviewer plus either the verifier or the architect), not taken on a single
+  agent's word.
+- **Next action:** update PR #1's description to cover Phase 2; post a Gemini Code Assist
+  re-review request comment on the PR per maintainer direction; continue watching CI/reviews.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-013000-claude-phase2-on-device-autonomy held for this entry;
+  released at the end of this turn.
+
+### Run 2026-07-06T01:58:00Z — Claude (Sonnet 5), branch claude/looprite-android-apk-4mth8g
+- **Goal:** Address 3 Gemini Code Assist review findings on PR #1, then run the `/review`
+  skill's full 8-finder-angle pipeline over the entire PR diff and act on the results.
+- **Triggering event:** GitHub PR comment `@claude[agent]+claude-sonnet-5 review` from the
+  repo owner, plus three queued Gemini Code Assist review comments (PR-level summary +
+  two inline findings) that arrived while the review was running.
+- **Reviewer/comment reference:** PR #1, Gemini Code Assist inline comments on
+  `cli-os/internal/gitx/exec.go:37` and `android/src/com/l00prite/os/MainActivity.java:234`.
+- **Decision:** Valid — all 3 Gemini findings were real, well-scoped, and independently
+  corroborated by the /review skill's own finder angles (two finders separately flagged the
+  same `activityDestroyed` gap). Fixed all 3, plus one closely-related finding from the same
+  finder pass (`webView.destroy()` missing from `onDestroy()`).
+- **Completed work:** Fixed `gitx/exec.go`'s `run()` to force `LC_ALL=C` on the git
+  subprocess env (English-substring failure detection in `Commit`/`identityMissing`/`Log`
+  could otherwise break under a localized git build); added the `activityDestroyed` guard
+  to `MainActivity.onPollFinished`'s posted `Runnable`; added `webView.destroy()` to
+  `onDestroy()`; fixed `resolver.go`'s `normalizeDNSAddr` to strip an IPv6 zone identifier
+  (e.g. `fe80::1%wlan0`) before `net.ParseIP` validation while preserving it in the returned
+  dial address, with new `TestNormalizeDNSAddr` regression cases. Then ran the `/review`
+  skill: 8 parallel finder angles (line-by-line, removed-behavior, cross-file, reuse,
+  simplification, efficiency, altitude, CLAUDE.md conventions) over the saved full PR diff
+  (51 files, +6417/-157), each finder cross-referencing the real checkout (confirmed at the
+  exact PR head commit). CLAUDE.md conventions angle returned zero findings — no violation
+  of the two review-gated-file rules or the repo's engineering-style rules found. The
+  remaining 7 finder angles' candidates were deduped and personally re-verified (direct
+  reads of `engine.go`, `tools.go`, `gitx.go`, `ledger.go`, `dashboard.html`,
+  `MainActivity.java`) rather than trusting sub-agent reports alone; 8 survived as
+  genuine, non-blocking findings and were posted as one GitHub PR review (COMMENT event,
+  inline comments + a summary body) rather than filed as separate action items, since none
+  warranted a code change without further maintainer input.
+- **Fix implemented:** The 3 Gemini findings + the related WebView leak fix (4 files
+  changed, committed as `e820a69`). The 8 /review-skill findings were posted as review
+  feedback, not applied as code changes — each is either an intentional-but-undocumented
+  design tradeoff (the `engine.go` synthetic-identity comment mismatch) or a low-severity
+  cleanup/efficiency/altitude note the maintainer should triage, not something safe to
+  silently rewrite without confirming intent.
+- **Changed files:** modified `cli-os/internal/gitx/exec.go`, `cli-os/internal/util/
+  resolver.go`, `cli-os/internal/util/resolver_test.go`, `android/src/com/l00prite/os/
+  MainActivity.java`; `.l00prite/ledger.md`, `.l00prite/todos.md`, `.l00prite/lock.json`
+  (this run). No protocol files, prompts, `.claude/commands/build-loop.md`, or
+  `scripts/validate-l00prite.js` touched.
+- **Tests run / Verification:**
+  - `command`: `go build ./...` (cli-os module) · `exit_code`: 0 · `summary`: clean build
+    after all 4 fixes · `timestamp`: 2026-07-06T01:59Z
+  - `command`: `go test ./internal/util/... ./internal/gitx/...` · `exit_code`: 0 ·
+    `summary`: both packages pass, incl. new `TestNormalizeDNSAddr` zone-id cases ·
+    `timestamp`: 2026-07-06T01:59Z
+  - `command`: `go vet ./... && go test ./...` (full cli-os module) · `exit_code`: 0 ·
+    `summary`: all 10 tested packages pass, zero vet warnings · `timestamp`: 2026-07-06T02:00Z
+  - `command`: `bash cli-os/scripts/build-apk.sh` · `exit_code`: 0 · `summary`: APK rebuilt
+    with the MainActivity fixes, `apksigner verify` v2+v3 true, `aapt dump badging` correct,
+    sha256 85215027a4d3… · `timestamp`: 2026-07-06T01:56Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-06T02:00Z
+- **Response drafted/sent:** Commit `e820a69` pushed to `claude/looprite-android-apk-4mth8g`
+  (fixes the 3 Gemini findings + the WebView leak). One GitHub PR review submitted
+  (COMMENT event) with 8 inline comments + a summary body, posted against head commit
+  `e820a693f83f7020fd9a8c13cb924f9fe09964b4`.
+- **Event status:** completed — the triggering review-request comment and the 3 queued
+  Gemini findings are all addressed; the PR-level Gemini summary comment and the
+  "/gemini please review... authentication logic" comment (addressed to the Gemini bot,
+  not to this agent) required no action from this agent.
+- **Failures:** none. One environment note: `mcp__github__pull_request_read` with
+  `method=get_diff` exceeded the tool's inline token limit (405,488 chars) and was
+  auto-saved to a local file instead of erroring — adapted by pointing every finder agent
+  at that saved file plus the local checkout (confirmed at the exact PR head commit via
+  `git rev-parse HEAD`) rather than needing the full diff inline.
+- **Decisions:** GitHub review comments must target a line that is actually part of the
+  diff hunk (not just any line in the file) — `add_comment_to_pending_review` rejects a
+  pre-existing unchanged line with no visible hunk context even when the surrounding
+  function was touched; picked the nearest changed line instead when a finding's exact
+  target line was outside the diff.
+- **Confidence:** High — every posted finding was independently re-verified against the
+  actual code by direct Read/Grep rather than relayed from a single finder agent's report.
+- **Next action:** none queued — all 8 findings are explicitly non-blocking and left for
+  the maintainer to triage at merge time; continue watching PR #1 via the existing
+  subscription for further activity.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-015800-claude-pr1-review-and-bot-fixes acquired and released this
+  run.
