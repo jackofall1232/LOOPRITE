@@ -1,6 +1,6 @@
 // Package gitx is the engine's git seam (docs/android-architecture.md §4 G4): a Client interface
-// with the eight primitives the run engine actually needs (clone, rev-parse HEAD, status
-// --porcelain, checkout -B, add -A, commit, diff HEAD, and a raw passthrough), plus two
+// with the ten primitives the run engine actually needs (clone, rev-parse HEAD, status
+// --porcelain, checkout -B, add -A, commit, diff HEAD, log, show, and a raw passthrough), plus two
 // implementations. Detect picks the exec-git implementation when a "git" binary is on PATH — this
 // is byte-for-byte the behavior every desktop host had before this package existed — and falls
 // back to a pure-Go go-git implementation only when no git binary exists at all (stock Android
@@ -53,11 +53,32 @@ type Client interface {
 	// should expect.
 	DiffHead(repo string) (string, error)
 
+	// Log returns one line per commit, most-recent-first, formatted as "<7-char-abbrev-hash> <first
+	// line of the commit message>" (git's own --oneline shape), for at most limit commits. A limit
+	// <= 0 is clamped to a sane built-in default (20) rather than treated as zero or unlimited —
+	// a bad or absent limit must never silently produce an empty response or an unbounded one. An
+	// empty repository (no commits yet — the same unborn-HEAD case RevParseHead's doc comment
+	// describes) is NOT an error: it returns ("", nil).
+	Log(repo string, limit int) (string, error)
+
+	// Show resolves ref to a single commit and returns a short header (hash, author name and email,
+	// author date, full commit message) followed by a real unified diff of that commit against its
+	// first parent. ref is whatever a single git revision spec means to the underlying
+	// implementation (a full hash, an abbreviated hash, HEAD, etc.). For a root commit (no parent to
+	// diff against), the diff section is omitted in favor of a plain "(root commit — no parent to
+	// diff against)" note rather than a fabricated diff — see gogitClient.Show's doc comment for the
+	// direction subtlety in how that real diff is computed.
+	Show(repo string, ref string) (string, error)
+
 	// Raw is an arbitrary git-subcommand passthrough (what the model-facing git_command tool uses
 	// when Kind()=="exec"). The gogit implementation always returns ErrRawUnsupported: go-git has
 	// no notion of "run any git subcommand", only the specific operations above.
 	Raw(ctx context.Context, repo string, args ...string) (string, error)
 }
+
+// defaultLogLimit is the commit count Log uses when called with limit <= 0 (see Log's doc
+// comment). Shared by both implementations so the clamp is defined in exactly one place.
+const defaultLogLimit = 20
 
 // ErrRawUnsupported is returned by the gogit implementation's Raw method: there is no git binary
 // to pass arbitrary subcommands through to, and go-git itself has no generic subcommand runner.
@@ -86,3 +107,11 @@ var detected = detectOnce()
 func Detect() Client {
 	return detected
 }
+
+// NewGogitClient returns the pure-Go go-git implementation directly, regardless of whether a git
+// binary is on PATH. gogitClient is unexported (Detect is meant to be the only production entry
+// point), but Detect()'s choice is cached once at process start (see detectOnce/detected) and does
+// not react to a PATH mutated mid-test — so callers outside this package that need to exercise the
+// gogit code path deterministically (e.g. internal/engine tests constructing a Toolbox with
+// Toolbox.Git forced to gogit) cannot get there through Detect() alone. This is that seam.
+func NewGogitClient() Client { return gogitClient{} }

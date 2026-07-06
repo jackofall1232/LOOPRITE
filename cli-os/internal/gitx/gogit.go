@@ -4,15 +4,19 @@ package gitx
 // (stock Android ships neither git nor ssh — docs/android-architecture.md §4 G4). It covers
 // exactly what the run engine needs to keep functioning without a git binary: HTTPS/local-path
 // clone, status, branch, commit (with a synthetic fallback identity — a first-boot device has no
-// gitconfig at all), and a diff good enough for the reviewer role.
+// gitconfig at all), a diff good enough for the reviewer role, and read-only history (log, show)
+// good enough for the model-facing git_command tool's narrow gogit subset (see
+// engine/tools.go's gitCommand / gitCommandGogit).
 //
 // It deliberately does NOT support: ssh transport (no ssh binary or library is wired in here —
 // ssh-style URLs are rejected up front with a clear error instead of hanging), or arbitrary git
-// subcommands (Raw always returns ErrRawUnsupported; the model-facing git_command tool surfaces
-// this as "core operations still work, passthrough does not" — see engine/tools.go's gitCommand).
+// subcommands (Raw always returns ErrRawUnsupported; the model-facing git_command tool serves only
+// its conservative status/diff/log/show subset under this Kind() and refuses everything else with
+// "core operations still work, passthrough does not" — see engine/tools.go's gitCommand).
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -213,6 +217,116 @@ func (c gogitClient) DiffHead(repo string) (string, error) {
 		s := st[p]
 		fmt.Fprintf(&b, "%c%c %s\n", byte(s.Staging), byte(s.Worktree), p)
 	}
+	return b.String(), nil
+}
+
+// firstLine returns the first line of a (possibly multi-line) commit message, for Log's
+// one-line-per-commit rendering.
+func firstLine(msg string) string {
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		return msg[:i]
+	}
+	return msg
+}
+
+// Log walks history from HEAD via (*git.Repository).Log (depth-first, the default order — close
+// enough to git's own most-recent-first traversal for this seam's purposes) and renders at most
+// limit commits as "<7-char-abbrev-hash> <first line of message>", one per line, most-recent-
+// first. limit <= 0 is clamped to defaultLogLimit (see the Client.Log doc comment). An empty
+// repository (HEAD unborn, the same case RevParseHead documents) is not an error: it returns
+// ("", nil), the same contract execClient.Log honors for its own empty-repo case.
+func (c gogitClient) Log(repo string, limit int) (string, error) {
+	if limit <= 0 {
+		limit = defaultLogLimit
+	}
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		return "", err
+	}
+	head, err := r.Head()
+	if err != nil {
+		if err == plumbing.ErrReferenceNotFound {
+			return "", nil
+		}
+		return "", err
+	}
+	iter, err := r.Log(&git.LogOptions{From: head.Hash()})
+	if err != nil {
+		return "", fmt.Errorf("gitx/gogit: log: %w", err)
+	}
+	defer iter.Close()
+
+	var b strings.Builder
+	for n := 0; n < limit; n++ {
+		commit, err := iter.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("gitx/gogit: log: %w", err)
+		}
+		fmt.Fprintf(&b, "%s %s\n", commit.Hash.String()[:7], firstLine(commit.Message))
+	}
+	return b.String(), nil
+}
+
+// Show resolves ref (via (*git.Repository).ResolveRevision, which understands full/abbreviated
+// hashes, HEAD, branch/tag names, and the "~"/"^" suffixes — the standard revision syntax go-git
+// implements) to a commit and renders a short header followed by a real unified diff of that
+// commit against its first parent.
+//
+// The diff direction matters: it is computed as parent.Patch(commit), NOT commit.Patch(parent).
+// (*object.Commit).Patch(to) renders the diff FROM the receiver's tree TO to's tree (confirmed
+// against go-git's own commit.go: Patch calls PatchContext, which does `fromTree, _ :=
+// c.Tree(); ...; return fromTree.PatchContext(ctx, toTree)` — receiver is "from", argument is
+// "to"). Concretely: a file newly ADDED in the shown commit does not exist in the parent's tree,
+// so for that addition to render as an ADDITION (plus-lines, "new file mode", diff against
+// /dev/null) rather than a DELETION, the parent (the "before", without the file) must be the
+// receiver and the shown commit (the "after", with the file) must be the argument — i.e.
+// parent.Patch(commit). Getting this backwards would silently invert every add/delete in the
+// rendered patch while still "looking like" a plausible diff, which is exactly the kind of
+// mistake this seam's honesty discipline (see DiffHead's doc comment) exists to avoid.
+//
+// For a root commit (no parent), go-git exposes no empty-tree object to honestly diff against
+// here, so rather than fabricate a diff-looking summary, the diff section is replaced with a plain
+// "(root commit — no parent to diff against)" note — the same never-fabricate discipline
+// DiffHead's doc comment applies to its own limitation.
+func (c gogitClient) Show(repo string, ref string) (string, error) {
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		return "", err
+	}
+	hash, err := r.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return "", fmt.Errorf("gitx/gogit: show %q: resolve ref: %w", ref, err)
+	}
+	commit, err := r.CommitObject(*hash)
+	if err != nil {
+		return "", fmt.Errorf("gitx/gogit: show %q: %w", ref, err)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "commit %s\n", commit.Hash.String())
+	fmt.Fprintf(&b, "Author: %s <%s>\n", commit.Author.Name, commit.Author.Email)
+	fmt.Fprintf(&b, "Date:   %s\n\n", commit.Author.When.Format(time.RFC1123Z))
+	for _, line := range strings.Split(strings.TrimRight(commit.Message, "\n"), "\n") {
+		fmt.Fprintf(&b, "    %s\n", line)
+	}
+	b.WriteString("\n")
+
+	parent, err := commit.Parent(0)
+	if err != nil {
+		if err == object.ErrParentNotFound {
+			b.WriteString("(root commit — no parent to diff against)\n")
+			return b.String(), nil
+		}
+		return "", fmt.Errorf("gitx/gogit: show %q: resolve parent: %w", ref, err)
+	}
+	patch, err := parent.Patch(commit)
+	if err != nil {
+		return "", fmt.Errorf("gitx/gogit: show %q: diff against parent: %w", ref, err)
+	}
+	b.WriteString(patch.String())
 	return b.String(), nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -204,7 +205,168 @@ func TestRevParseHeadOnUnbornRepo(t *testing.T) {
 	}
 }
 
+// ---- Log ----
+
+// logLineRE matches one Log output line: a 7-hex-char abbreviated hash, a space, then the rest of
+// the line (the commit's first message line, which may itself contain spaces).
+var logLineRE = regexp.MustCompile(`^[0-9a-f]{7} (.*)$`)
+
+func TestLogFormatOrderAndLimit(t *testing.T) {
+	for name, cl := range clients(t) {
+		cl := cl
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			initGitRepo(t, dir)
+			for _, msg := range []string{"first commit", "second commit", "third commit"} {
+				writeFile(t, dir, "f.txt", msg+"\n")
+				gitFixture(t, dir, "add", "-A")
+				gitFixture(t, dir, "commit", "-m", msg)
+			}
+
+			// Bare call (limit <= 0): all 3 commits, most-recent-first, each line
+			// "<7-char-abbrev-hash> <first line of message>".
+			out, err := cl.Log(dir, 0)
+			if err != nil {
+				t.Fatalf("Log(0): %v", err)
+			}
+			lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+			if len(lines) != 3 {
+				t.Fatalf("Log(0) = %d lines, want 3: %q", len(lines), out)
+			}
+			wantOrder := []string{"third commit", "second commit", "first commit"}
+			for i, line := range lines {
+				m := logLineRE.FindStringSubmatch(line)
+				if m == nil {
+					t.Fatalf("line %d %q does not match <7-hex> <message>", i, line)
+				}
+				if m[1] != wantOrder[i] {
+					t.Fatalf("line %d message = %q, want %q (order must be most-recent-first)", i, m[1], wantOrder[i])
+				}
+			}
+
+			// limit clamps the result to the N most recent commits.
+			out2, err := cl.Log(dir, 2)
+			if err != nil {
+				t.Fatalf("Log(2): %v", err)
+			}
+			lines2 := strings.Split(strings.TrimRight(out2, "\n"), "\n")
+			if len(lines2) != 2 {
+				t.Fatalf("Log(2) = %d lines, want 2: %q", len(lines2), out2)
+			}
+			if !strings.Contains(lines2[0], "third commit") || !strings.Contains(lines2[1], "second commit") {
+				t.Fatalf("Log(2) = %q, want the 2 most recent commits (third, second)", out2)
+			}
+		})
+	}
+}
+
+func TestLogOnEmptyRepo(t *testing.T) {
+	for name, cl := range clients(t) {
+		cl := cl
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			initGitRepo(t, dir)
+			out, err := cl.Log(dir, 0)
+			if err != nil {
+				t.Fatalf("Log on empty repo should not be an error, got %v", err)
+			}
+			if out != "" {
+				t.Fatalf("Log on empty repo = %q, want empty string", out)
+			}
+		})
+	}
+}
+
+// ---- Show ----
+
+func TestShowHeaderAndAddedFileDiff(t *testing.T) {
+	for name, cl := range clients(t) {
+		cl := cl
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			initGitRepo(t, dir)
+			writeFile(t, dir, "README.md", "hello\n")
+			gitFixture(t, dir, "add", "-A")
+			gitFixture(t, dir, "commit", "-m", "root commit")
+
+			writeFile(t, dir, "extra.txt", "brand new content\n")
+			gitFixture(t, dir, "add", "-A")
+			gitFixture(t, dir, "commit", "-m", "add extra.txt")
+			head := strings.TrimSpace(gitFixture(t, dir, "rev-parse", "HEAD"))
+
+			out, err := cl.Show(dir, "HEAD")
+			if err != nil {
+				t.Fatalf("Show(HEAD): %v", err)
+			}
+			if !strings.Contains(out, head) {
+				t.Fatalf("Show output missing the resolved commit hash %q: %q", head, out)
+			}
+			if !strings.Contains(out, "fixture@example.com") {
+				t.Fatalf("Show output missing the author email: %q", out)
+			}
+			if !strings.Contains(out, "add extra.txt") {
+				t.Fatalf("Show output missing the commit message: %q", out)
+			}
+			// The added file must render as an ADDITION (a plus-prefixed line carrying its
+			// content) in the patch, not merely "some non-empty diff-shaped text".
+			added := false
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, "+") && strings.Contains(line, "brand new content") {
+					added = true
+					break
+				}
+			}
+			if !added {
+				t.Fatalf("Show output has no plus-prefixed line with the added file's content: %q", out)
+			}
+		})
+	}
+}
+
 // ---- gogit-specific ----
+
+// TestGogitShowRootCommit proves Show does not fabricate a diff for a root commit (no parent to
+// diff against): unlike real `git show`, which renders a genuine diff against the empty tree, the
+// gogit implementation has no such primitive wired up here and — per its own never-fabricate
+// discipline (see gogitClient.DiffHead) — omits the diff section in favor of a plain note instead
+// of guessing. This is a deliberate, spec-permitted divergence from the exec implementation, so it
+// is verified only against gogitClient, not through the shared clients(t) table.
+func TestGogitShowRootCommit(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFile(t, dir, "README.md", "hello\n")
+	gitFixture(t, dir, "add", "-A")
+	gitFixture(t, dir, "commit", "-m", "root commit")
+	root := strings.TrimSpace(gitFixture(t, dir, "rev-parse", "HEAD"))
+
+	cl := gogitClient{}
+	out, err := cl.Show(dir, root)
+	if err != nil {
+		t.Fatalf("Show(root): %v", err)
+	}
+	if !strings.Contains(out, "root commit") {
+		t.Fatalf("Show(root) missing the commit message: %q", out)
+	}
+	if !strings.Contains(out, "root commit — no parent to diff against") {
+		t.Fatalf("Show(root) should note there is no parent to diff against, got: %q", out)
+	}
+	if strings.Contains(out, "diff --git") {
+		t.Fatalf("Show(root) should not fabricate a diff, got: %q", out)
+	}
+}
+
+func TestGogitShowUnknownRef(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFile(t, dir, "README.md", "hello\n")
+	gitFixture(t, dir, "add", "-A")
+	gitFixture(t, dir, "commit", "-m", "init")
+
+	cl := gogitClient{}
+	if _, err := cl.Show(dir, "not-a-real-ref"); err == nil {
+		t.Fatal("expected an error for a ref that does not resolve to any commit")
+	}
+}
 
 func TestGogitRawUnsupported(t *testing.T) {
 	_, err := (gogitClient{}).Raw(context.Background(), t.TempDir(), "status")

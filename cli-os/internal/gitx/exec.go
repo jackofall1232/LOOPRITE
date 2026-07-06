@@ -141,6 +141,41 @@ func (c execClient) DiffHead(repo string) (string, error) {
 	return c.runTimed(repo, "diff", "HEAD")
 }
 
+// emptyRepoLogMarker is the stable substring in real git's stderr when `git log` is run on a
+// repository with no commits yet ("fatal: your current branch '<name>' does not have any commits
+// yet") — the branch name varies (master/main/whatever init.defaultBranch says), so only the tail
+// is matched, mirroring the identityMissing substring-matching convention above.
+const emptyRepoLogMarker = "does not have any commits yet"
+
+// Log shells out to `git log --oneline -n <limit>`: --oneline already produces the exact
+// "<abbrev-hash> <subject>" shape this seam promises, so it is passed straight through rather than
+// reformatted, for byte-parity with what a human running the real command would see. An empty
+// repository is not an error (see the Client.Log doc comment) even though real git itself exits
+// non-zero for this case (`git log` on an empty repo is `fatal: ... does not have any commits
+// yet`, exit 128) — that fatal is recognized and swallowed into ("", nil) here so the seam's
+// contract holds for both implementations alike.
+func (c execClient) Log(repo string, limit int) (string, error) {
+	if limit <= 0 {
+		limit = defaultLogLimit
+	}
+	out, err := c.runTimed(repo, "log", "--oneline", "-n", fmt.Sprint(limit))
+	if err != nil {
+		if strings.Contains(err.Error(), emptyRepoLogMarker) {
+			return "", nil
+		}
+		return "", err
+	}
+	return out, nil
+}
+
+// Show shells out to `git show <ref>` verbatim — this is the exec implementation, so it can pass
+// through untouched rather than hand-building the header/patch format gogitClient.Show must; a
+// desktop host with a git binary sees zero behavior change from what `git show` has always
+// printed.
+func (c execClient) Show(repo string, ref string) (string, error) {
+	return c.runTimed(repo, "show", ref)
+}
+
 func (c execClient) Raw(ctx context.Context, repo string, args ...string) (string, error) {
 	out, err := c.run(ctx, repo, args...)
 	if err != nil {

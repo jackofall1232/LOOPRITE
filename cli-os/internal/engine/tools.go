@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -683,11 +684,20 @@ func (tb *Toolbox) gitCommand(ctx context.Context, args map[string]any, approved
 	}
 	// git_command is arbitrary passthrough, which only the exec-git implementation can offer — the
 	// pure-Go go-git fallback (Android, no git binary; see internal/gitx) implements the specific
-	// primitives EnsureRunBranch/CommitUnit/CurrentDiff need, not an arbitrary subcommand. This is a
-	// plain ERROR, not a Gate: no human approval can supply a git binary that isn't there.
+	// primitives EnsureRunBranch/CommitUnit/CurrentDiff need, not an arbitrary subcommand. Under
+	// this Kind(), gitCommandGogit serves a conservative, exact-match read-only subset of
+	// status/diff/log/show instead of refusing everything outright; anything outside that subset
+	// still falls to the plain ERROR below (not a Gate: no human approval can supply a git binary
+	// that isn't there). The subset itself never gates — reached here, before the approval switch
+	// below is ever consulted, exactly like status/diff/log/show already run gate-free on the exec
+	// path (see that switch's case a few lines down).
 	if tb.gitClient().Kind() != "exec" {
+		if out, ok := tb.gitCommandGogit(sub, list); ok {
+			return out
+		}
 		return ToolOutcome{Result: "ERROR: git passthrough requires the git binary on this host; " +
-			"core git operations (status, branch, commit, diff) still run via the built-in pure-Go git"}
+			"the read-only subset (status, diff, log, show) still works in its basic argument forms " +
+			"via the built-in pure-Go git"}
 	}
 	if !approved {
 		gated := false
@@ -723,6 +733,111 @@ func (tb *Toolbox) gitCommand(ctx context.Context, args map[string]any, approved
 	cmd.Env = util.ScrubSecretEnv(os.Environ()) // Android G8: never leak the vault/setup secrets
 	out, runErr := cmd.CombinedOutput()
 	return ToolOutcome{Result: formatCmdResult(out, runErr, cctx, gitOutputCap, gitTimeoutSec)}
+}
+
+// logNArg matches git log's bare "-<N>" shorthand for "-n <N>" (e.g. "-5"): a leading dash
+// followed by digits with no leading zero, so a malformed count ("-0", "-05") never silently
+// matches and instead falls through to the hard refusal below.
+var logNArg = regexp.MustCompile(`^-[1-9][0-9]*$`)
+
+// gitCommandGogit serves the conservative, exact-match read-only subset of git_command that the
+// pure-Go go-git fallback (Kind()=="gogit") can offer without a git binary: status (no extra
+// args), diff / diff HEAD, log in its bare/-n N/--max-count=N/-N shorthand forms, and show <ref>
+// (exactly one ref, no flags). ok is false for anything outside this exact contract — an
+// unrecognized flag or extra argument is never interpreted as "probably fine"; the caller falls
+// through to the existing hard refusal instead. None of these gate: they are strictly read-only,
+// the same reason status/diff/log/show already run without approval on the exec path (the switch
+// a few lines above this function in gitCommand) — this function is called, and returns directly,
+// before that switch is ever reached, so the no-approval property holds here too.
+func (tb *Toolbox) gitCommandGogit(sub string, list []string) (ToolOutcome, bool) {
+	rest := list[1:]
+	switch {
+	case sub == "status" && len(rest) == 0:
+		out, err := tb.gitClient().StatusPorcelain(tb.Root)
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	// Bare `diff` is intentionally serviced here as `diff HEAD` (gitClient().DiffHead runs
+	// `git diff HEAD` under the exec client, i.e. working-tree-vs-HEAD, which is a superset of
+	// plain `git diff`'s working-tree-vs-index and additionally includes staged changes). That is
+	// a deliberate divergence from what bare `git diff` means on the exec-git backend a few lines
+	// above in gitCommand: gitx.Client has no working-tree-vs-index primitive to offer, and
+	// answering with the (truthful, merely broader) HEAD-relative diff beats refusing outright.
+	// A model relying on git_command for exact index-vs-worktree staging state will see different
+	// output between an exec-git host and this gogit host for the identical `diff` call.
+	case sub == "diff" && (len(rest) == 0 || (len(rest) == 1 && rest[0] == "HEAD")):
+		out, err := tb.gitClient().DiffHead(tb.Root)
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	case sub == "log":
+		n, ok := gitLogLimitArgs(rest)
+		if !ok {
+			return ToolOutcome{}, false
+		}
+		out, err := tb.gitClient().Log(tb.Root, n)
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	case sub == "show" && len(rest) == 1 && !strings.HasPrefix(rest[0], "-"):
+		out, err := tb.gitClient().Show(tb.Root, rest[0])
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	default:
+		return ToolOutcome{}, false
+	}
+}
+
+// gitLogLimitArgs reports the commit limit for one of the four accepted `git log` argument
+// shapes: bare (rest empty -> 0, so gitx.Client.Log applies its own default), "-n <positive int>",
+// "--max-count=<positive int>", or the bare "-<positive int>" shorthand. ok is false for anything
+// else, including a non-positive or unparseable count — the caller falls through to the hard
+// refusal rather than guessing what was meant.
+func gitLogLimitArgs(rest []string) (limit int, ok bool) {
+	switch {
+	case len(rest) == 0:
+		return 0, true
+	case len(rest) == 2 && rest[0] == "-n":
+		n, err := strconv.Atoi(rest[1])
+		return n, err == nil && n > 0
+	case len(rest) == 1 && strings.HasPrefix(rest[0], "--max-count="):
+		n, err := strconv.Atoi(strings.TrimPrefix(rest[0], "--max-count="))
+		return n, err == nil && n > 0
+	case len(rest) == 1 && logNArg.MatchString(rest[0]):
+		n, err := strconv.Atoi(strings.TrimPrefix(rest[0], "-"))
+		return n, err == nil && n > 0
+	default:
+		return 0, false
+	}
+}
+
+// formatGitResult renders a gitx-served (gogit) git_command result the same way formatCmdResult
+// renders an exec-git one — an "exit_code: 0" line first (there is no real child-process exit
+// code here, but the model-facing shape stays identical either way so the model sees one
+// consistent format regardless of which gitx.Client implementation served the call), then the
+// (capped) output, using the same gitOutputCap and the same truncation note text.
+func formatGitResult(out string) string {
+	truncated := false
+	if len(out) > gitOutputCap {
+		out = out[:gitOutputCap]
+		truncated = true
+	}
+	var b strings.Builder
+	b.WriteString("exit_code: 0\n")
+	b.WriteString(out)
+	if truncated {
+		b.WriteString("\n… [truncated: output exceeds cap]")
+	}
+	return b.String()
 }
 
 // gitBranchArgsAreSafe reports whether `git branch <rest...>` only lists (no args) or creates one

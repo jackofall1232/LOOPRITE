@@ -42,6 +42,17 @@ linux/darwin/windows runs here; only the wrapper around it is platform-specific.
 | `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` | `l00prite-os` / `l00prite-os@localhost` | Default commit identity for on-device runs (no `git config --global` on Android). |
 | `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` | same as above | ditto |
 
+`GatewayService` does not currently set `LOOPRITE_LEDGER_MAX_BYTES`, so it isn't part of the
+fixed contract above; it's mentioned here because it's the one ledger/storage knob most
+relevant to a storage-constrained device. It caps the size (default 5 MiB, plus one `.1`
+backup generation, so ~10 MiB worst case) of the human-readable JSONL mirror of the ledger
+under `LOOPRITE_HOME` before it rotates; the durable, unbounded record always stays in
+SQLite regardless. An empty, non-numeric, zero, or negative value falls back to the
+default rather than disabling rotation. To raise or lower it on-device, add it to the
+`env` map in `GatewayService.launchGateway()` (or launch `libl00prite.so serve` manually
+with it set, e.g. from an `adb shell` on a debug build) — there is no dashboard/UI control
+for it today.
+
 ## How to build
 
 Two independent pipelines consume the same `android/` sources (`android-architecture.md`
@@ -72,6 +83,30 @@ against `android-34` platform + build-tools 34.0.0 using `javac` against the rea
 `android.jar`, `d8` instead of `dx`, and a job-ephemeral debug keystore. Uploads the
 signed APK + `SHA256SUMS` as a workflow artifact (`l00prite-os-apk`). This is the
 reproducibility/CI check; it is not where release signing happens (see below).
+
+## Importing a repo via Storage Access Framework
+
+A small "Import repo..." button sits in the bottom-right corner of `MainActivity`, on top
+of the WebView (native Android UI, no JavaScript bridge — it works independently of the
+dashboard). It closes a specific gap: a repo reachable only through Android's Storage
+Access Framework (a synced folder, a file manager, another app's exposed documents) hands
+you a `content://` tree URI, not a real filesystem path, and the gateway's git tooling
+(both real `git` and the `go-git` fallback, gap G4) needs a real path to operate on.
+
+Tapping it launches the system `ACTION_OPEN_DOCUMENT_TREE` picker (classic
+`startActivityForResult`, no `androidx.activity` Result API — this app takes no AndroidX
+dependency anywhere), takes a persistable **read-only** grant on the chosen tree, then
+walks and copies it — `.git` included, nothing hidden is skipped — on a background thread
+into `<filesDir>/imported-repos/<name>`, where `<name>` is a sanitized form of the picked
+folder's display name (or a random fallback if that's unavailable/unsafe). The tree is
+walked directly via the framework's `android.provider.DocumentsContract`, not
+`DocumentFile`: `DocumentFile` has only ever shipped in the (AndroidX) support library,
+never as a platform class, so it isn't an option here.
+
+On completion, a dialog shows the resulting absolute on-device path with a "Copy path"
+button (`ClipboardManager`). Paste that path into the dashboard's existing "register an
+existing path" field to finish registering the repo — this feature only gets a repo onto
+the device; the dashboard flow (unchanged) is still how it becomes usable to the gateway.
 
 ## How to sideload
 

@@ -248,6 +248,145 @@ func TestGitCommand(t *testing.T) {
 	}
 }
 
+// ---- git_command under the gogit fallback (Kind()!="exec") ----
+
+// gogitRefusal is the exact, unchanged hard-refusal message any out-of-contract git_command call
+// still gets under the gogit fallback.
+const gogitRefusal = "ERROR: git passthrough requires the git binary on this host"
+
+func newGogitTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "init")
+	writeFileRaw(t, filepath.Join(dir, "extra.txt"), "brand new content\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "add extra.txt")
+	return dir
+}
+
+func TestGitCommandGogitStatusReachesStatusPorcelain(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	writeFileRaw(t, filepath.Join(dir, "dirty.txt"), "x")
+	tb := &Toolbox{Root: dir, Git: gitx.NewGogitClient()}
+
+	o := tb.Execute(context.Background(), "git_command", map[string]any{"args": []string{"status"}}, false)
+	if o.Gate != nil {
+		t.Fatalf("gogit status should not gate, got %+v", o.Gate)
+	}
+	if !strings.Contains(o.Result, "exit_code: 0") || !strings.Contains(o.Result, "dirty.txt") {
+		t.Fatalf("gogit status result unexpected (want StatusPorcelain output): %q", o.Result)
+	}
+}
+
+func TestGitCommandGogitDiffReachesDiffHead(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\nmodified\n")
+	tb := &Toolbox{Root: dir, Git: gitx.NewGogitClient()}
+
+	for _, args := range [][]string{{"diff"}, {"diff", "HEAD"}} {
+		o := tb.Execute(context.Background(), "git_command", map[string]any{"args": toAnySlice(args)}, false)
+		if o.Gate != nil {
+			t.Fatalf("gogit %v should not gate, got %+v", args, o.Gate)
+		}
+		if !strings.Contains(o.Result, "exit_code: 0") {
+			t.Fatalf("gogit %v result unexpected: %q", args, o.Result)
+		}
+	}
+}
+
+func TestGitCommandGogitLogReachesLog(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	tb := &Toolbox{Root: dir, Git: gitx.NewGogitClient()}
+	ctx := context.Background()
+
+	// Every accepted shape reaches gitx.Client.Log and succeeds without gating.
+	for _, args := range [][]string{
+		{"log"},
+		{"log", "-n", "1"},
+		{"log", "--max-count=1"},
+		{"log", "-1"},
+	} {
+		o := tb.Execute(ctx, "git_command", map[string]any{"args": toAnySlice(args)}, false)
+		if o.Gate != nil {
+			t.Fatalf("gogit %v should not gate, got %+v", args, o.Gate)
+		}
+		if !strings.Contains(o.Result, "exit_code: 0") || !strings.Contains(o.Result, "add extra.txt") {
+			t.Fatalf("gogit %v result unexpected: %q", args, o.Result)
+		}
+	}
+
+	// -n 1 / --max-count=1 / -1 must all cap the result to exactly the single most recent commit.
+	o := tb.Execute(ctx, "git_command", map[string]any{"args": []any{"log", "-n", "1"}}, false)
+	if strings.Contains(o.Result, "\ninit\n") || strings.Count(o.Result, "\n") > 2 {
+		t.Fatalf("gogit log -n 1 should return exactly one commit line, got: %q", o.Result)
+	}
+}
+
+func TestGitCommandGogitShowReachesShow(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	tb := &Toolbox{Root: dir, Git: gitx.NewGogitClient()}
+
+	o := tb.Execute(context.Background(), "git_command", map[string]any{"args": []string{"show", "HEAD"}}, false)
+	if o.Gate != nil {
+		t.Fatalf("gogit show HEAD should not gate, got %+v", o.Gate)
+	}
+	if !strings.Contains(o.Result, "exit_code: 0") || !strings.Contains(o.Result, "add extra.txt") {
+		t.Fatalf("gogit show HEAD result unexpected: %q", o.Result)
+	}
+	if !strings.Contains(o.Result, "+brand new content") {
+		t.Fatalf("gogit show HEAD should show the added file's content as an addition: %q", o.Result)
+	}
+}
+
+func TestGitCommandGogitShowUnknownRefIsGitxError(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	tb := &Toolbox{Root: dir, Git: gitx.NewGogitClient()}
+
+	o := tb.Execute(context.Background(), "git_command", map[string]any{"args": []string{"show", "not-a-real-ref"}}, false)
+	if o.Gate != nil {
+		t.Fatalf("gogit show of an unknown ref should not gate, got %+v", o.Gate)
+	}
+	if !strings.HasPrefix(o.Result, "ERROR:") || strings.Contains(o.Result, "exit_code") {
+		t.Fatalf("gogit show of an unknown ref should be a plain gitx-error ERROR, got: %q", o.Result)
+	}
+}
+
+// TestGitCommandGogitOutOfContractFallsThrough proves that argument shapes outside the narrow
+// gogit contract still get the exact, unchanged hard-refusal — never a panic, never a silent
+// "probably fine" execution.
+func TestGitCommandGogitOutOfContractFallsThrough(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	tb := &Toolbox{Root: dir, Git: gitx.NewGogitClient()}
+	ctx := context.Background()
+
+	cases := [][]string{
+		{"status", "--porcelain"}, // status takes no extra args in the gogit contract
+		{"diff", "--stat"},        // only bare diff / diff HEAD are accepted
+		{"diff", "main"},
+		{"log", "--oneline"},       // unsupported flag shape
+		{"log", "-n", "-5"},        // non-positive count
+		{"log", "-n", "abc"},       // unparseable count
+		{"log", "-0"},              // leading-zero-equivalent / non-positive shorthand
+		{"show"},                   // 0 refs
+		{"show", "HEAD", "HEAD~1"}, // 2 refs
+		{"show", "--stat", "HEAD"}, // a flag
+		{"add", "-A"},              // not in the subset at all
+		{"commit", "-m", "x"},      // not in the subset at all
+	}
+	for _, args := range cases {
+		o := tb.Execute(ctx, "git_command", map[string]any{"args": toAnySlice(args)}, false)
+		if o.Gate != nil {
+			t.Fatalf("gogit %v should not gate (it's refused outright, not gated), got %+v", args, o.Gate)
+		}
+		if !strings.HasPrefix(o.Result, gogitRefusal) {
+			t.Fatalf("gogit %v should get the unchanged hard refusal, got: %q", args, o.Result)
+		}
+	}
+}
+
 // ---- EnsureRunBranch / CommitUnit ----
 
 func TestBranchAndCommit(t *testing.T) {
