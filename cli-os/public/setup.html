@@ -137,8 +137,9 @@
 
   <div class="card" id="card"><div class="muted">Loading setup…</div></div>
 
-  <div class="foot">Nothing here is fabricated — every step writes real state the CLI can also read.
-    Prefer the terminal? <span class="mono">l00prite init · provider add · token mint · serve</span> does the same.</div>
+  <div class="foot">Nothing here is fabricated — every step writes the same real state, however this
+    gateway was started (CLI, Docker, or an app like L00prite OS). On a CLI install, the equivalent
+    commands are <span class="mono">l00prite init · provider add · token mint · serve</span>.</div>
 </div>
 
 <script>
@@ -251,7 +252,7 @@
       <div class="radios" id="modes">
         <label class="radio sel"><input type="radio" name="vmode" value="generate" checked>
           <div><div class="rt">Generate one for me <span class="muted">(recommended)</span></div>
-          <div class="rd">A fresh 32-byte key is created and written to the data dir with 0600 permissions.</div></div></label>
+          <div class="rd">A fresh 32-byte key is generated and written to a 0600-permission file in the data dir (or, on app installs like Android, kept in an environment variable the app keeps private).</div></div></label>
         <label class="radio"><input type="radio" name="vmode" value="own">
           <div><div class="rt">Provide my own key</div>
           <div class="rd">Paste a base64-encoded 32-byte key (e.g. to reuse an existing vault).</div></div></label>
