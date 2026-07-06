@@ -66,9 +66,14 @@ func TestDetectPrefersExecWhenGitPresent(t *testing.T) {
 }
 
 func TestDetectFallsBackToGogitWithoutGitOnPath(t *testing.T) {
+	// Detect() itself now returns a value cached once at process start (a redundant
+	// exec.LookPath per call was wasteful — every clone request, every engine iteration), so
+	// this test exercises the underlying detectOnce() directly rather than the process-lifetime
+	// cache; restore the real cached value afterward so later tests in this package see the
+	// actual host state again.
 	t.Setenv("PATH", "")
-	if got := Detect().Kind(); got != "gogit" {
-		t.Fatalf("Detect().Kind() = %q, want gogit (PATH cleared)", got)
+	if got := detectOnce().Kind(); got != "gogit" {
+		t.Fatalf("detectOnce().Kind() = %q, want gogit (PATH cleared)", got)
 	}
 }
 

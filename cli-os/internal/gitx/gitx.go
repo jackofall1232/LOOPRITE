@@ -64,12 +64,25 @@ type Client interface {
 var ErrRawUnsupported = errors.New("gitx: raw git passthrough is not supported without a git binary on this host; " +
 	"core operations (status, branch, commit, diff) still work via the built-in pure-Go git")
 
-// Detect chooses the exec implementation when a "git" binary is on PATH (every desktop host, and
-// this is exactly what every caller did before this package existed — zero behavior change there),
-// else the pure-Go go-git fallback (Android's usual case: no git, no ssh binary on the device).
-func Detect() Client {
+// detectOnce resolves the git binary's PATH presence into a Client. Whether one exists never
+// changes for the lifetime of the gateway process, so re-running exec.LookPath on every Detect
+// call (every clone request, every engine iteration) would be a pure redundant filesystem scan.
+func detectOnce() Client {
 	if _, err := exec.LookPath("git"); err == nil {
 		return execClient{}
 	}
 	return gogitClient{}
+}
+
+// detected is resolved once at process start; see detectOnce. A package-internal var (rather than
+// being inlined into Detect) so gitx_test.go can force re-detection after mutating PATH — real
+// callers only ever go through Detect.
+var detected = detectOnce()
+
+// Detect returns the Client selected at process start: the exec implementation when a "git"
+// binary was on PATH (every desktop host, and this is exactly what every caller did before this
+// package existed — zero behavior change there), else the pure-Go go-git fallback (Android's
+// usual case: no git, no ssh binary on the device).
+func Detect() Client {
+	return detected
 }

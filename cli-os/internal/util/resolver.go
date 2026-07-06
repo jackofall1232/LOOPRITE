@@ -9,6 +9,8 @@ package util
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"net"
 	"os"
 	"runtime"
@@ -39,14 +41,22 @@ func InitResolver() {
 }
 
 // androidFallback returns the public-DNS fallback servers when goos is "android" and
-// resolvConfPath does not exist, else nil. Split out from InitResolver so the decision is
-// testable on any host (goos/path are parameters, not read from the live environment here).
+// resolvConfPath does NOT EXIST, else nil. A stat failure other than "does not exist" (permission
+// denied, a transient IO error on an unusual Android build, ...) is deliberately NOT treated as
+// "missing" — this function must never override an operator's actual DNS configuration just
+// because it couldn't be confirmed present; it only acts on the one case it was designed for.
+// Split out from InitResolver so the decision is testable on any host (goos/path are parameters,
+// not read from the live environment here).
 func androidFallback(goos, resolvConfPath string) []string {
 	if goos != "android" {
 		return nil
 	}
-	if _, err := os.Stat(resolvConfPath); err == nil {
+	_, err := os.Stat(resolvConfPath)
+	if err == nil {
 		return nil // resolv.conf exists — trust it like every other platform does
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return nil // some other stat failure — do not assume "missing", do not override
 	}
 	return androidFallbackDNSServers
 }
@@ -96,6 +106,9 @@ func installResolver(servers []string) {
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			var lastErr error
 			for _, s := range servers {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				// network is exactly what Go's resolver asked for ("udp" or a "tcp" retry after
 				// truncation) — honor it rather than hardcoding one transport.
 				conn, err := dialer.DialContext(ctx, network, s)

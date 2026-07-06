@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private TextView statusView;
+    private Thread pollerThread;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
@@ -86,12 +87,15 @@ public class MainActivity extends Activity {
 
     private void startHealthPoll() {
         final String setupSecret = Keys.getOrCreateSetupSecret(this);
-        Thread poller = new Thread(new Runnable() {
+        pollerThread = new Thread(new Runnable() {
             @Override
             public void run() {
                 long deadline = System.currentTimeMillis() + POLL_TIMEOUT_MS;
                 boolean up = false;
                 while (System.currentTimeMillis() < deadline) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        return;
+                    }
                     if (isHealthy()) {
                         up = true;
                         break;
@@ -106,8 +110,20 @@ public class MainActivity extends Activity {
                 onPollFinished(up, setupSecret);
             }
         }, "l00prite-healthpoll");
-        poller.setDaemon(true);
-        poller.start();
+        pollerThread.setDaemon(true);
+        pollerThread.start();
+    }
+
+    @Override
+    protected void onDestroy() {
+        // The poller is a daemon thread (it will not itself prevent process exit), but an
+        // un-interrupted instance can still outlive a destroyed activity across a configuration
+        // change (e.g. rotation) and post a stale onPollFinished callback referencing this
+        // instance — interrupting it here closes that leak/race.
+        if (pollerThread != null) {
+            pollerThread.interrupt();
+        }
+        super.onDestroy();
     }
 
     private void onPollFinished(final boolean succeeded, final String setupSecret) {

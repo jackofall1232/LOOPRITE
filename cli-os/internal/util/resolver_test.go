@@ -125,6 +125,24 @@ func TestAndroidFallback(t *testing.T) {
 	if len(got) != 2 || got[0] != "8.8.8.8:53" || got[1] != "1.1.1.1:53" {
 		t.Fatalf("android with no resolv.conf must fall back to 8.8.8.8,1.1.1.1, got %v", got)
 	}
+
+	// A stat failure that is NOT "does not exist" (permission denied, a transient IO error on an
+	// unusual Android build, ...) must never be treated as "missing" — falling back in that case
+	// would override an operator's real DNS configuration on nothing more than an unconfirmed
+	// guess. Simulate this with an unreadable parent directory rather than a special file, since
+	// that's a real os.Stat failure mode distinct from "not exist".
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission-denied stat is not enforceable to test this branch")
+	}
+	unreadableDir := filepath.Join(tmp, "unreadable")
+	if err := os.Mkdir(unreadableDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(unreadableDir, 0o755) // let t.TempDir() clean it up
+	blocked := filepath.Join(unreadableDir, "resolv.conf")
+	if got := androidFallback("android", blocked); got != nil {
+		t.Fatalf("a non-ENOENT stat failure must not trigger the fallback (must not assume missing), got %v", got)
+	}
 }
 
 func TestNormalizeDNSAddr(t *testing.T) {

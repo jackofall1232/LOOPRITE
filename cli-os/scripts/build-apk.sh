@@ -98,7 +98,7 @@ else
   echo "  no ANDROID_ALL_JAR / cached PoC jar; resolving newest 15-robolectric-* from Maven Central"
   curl -sS -o "$WORK/maven-metadata.xml" "$ANDROID_ALL_METADATA_URL"
   ANDROID_ALL_VERSION="$(grep -oE '<version>15-robolectric-[0-9]+</version>' "$WORK/maven-metadata.xml" \
-    | sed -e 's#</\?version>##g' | tail -1)"
+    | sed -e 's#</\?version>##g' | tail -1 || true)"
   [ -n "$ANDROID_ALL_VERSION" ] || { echo "error: could not find a 15-robolectric-* version in maven-metadata.xml" >&2; exit 1; }
   ANDROID_ALL_JAR="$CACHE_DIR/android-all-${ANDROID_ALL_VERSION}.jar"
   if [ ! -f "$ANDROID_ALL_JAR" ]; then

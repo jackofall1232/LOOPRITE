@@ -155,23 +155,38 @@ func (c gogitClient) Commit(repo, message string) (string, error) {
 	sig := commitSignature(r)
 	hash, err := wt.Commit(message, &git.CommitOptions{Author: sig})
 	if err != nil {
+		// st.IsClean() above already filters the common case, but a staged-then-reverted change
+		// (tree matches HEAD again after AddAll) can still reach wt.Commit with nothing to record;
+		// go-git surfaces that as ErrEmptyCommit rather than an error worth propagating — same
+		// "nothing to commit" contract execClient.Commit honors.
+		if err == git.ErrEmptyCommit {
+			return "", nil
+		}
 		return "", err
 	}
 	return hash.String(), nil
 }
 
-// commitSignature prefers the repository's configured identity (local merged with global, via
-// ConfigScoped); when neither sets a user.name it falls back to a clearly-synthetic identity. A
-// first-boot Android host has no gitconfig at all — the same rationale execClient.Commit documents
-// for its exec-git identity-missing retry applies here, just resolved up front instead of via a
-// retry-after-failure (go-git does not error the way real git does on a missing identity, so
-// there's no failure to retry after; this is the equivalent proactive fallback).
+// commitSignature prefers the repository's configured identity — local (repo-scoped) config
+// overriding global, matching git's own precedence — falling back to a clearly-synthetic identity
+// for whichever of name/email neither scope sets. A first-boot Android host has no gitconfig at
+// all — the same rationale execClient.Commit documents for its exec-git identity-missing retry
+// applies here, just resolved up front instead of via a retry-after-failure (go-git does not error
+// the way real git does on a missing identity, so there's no failure to retry after; this is the
+// equivalent proactive fallback). Name and email are resolved independently: a host with only
+// user.email configured (no user.name) must not have the email silently discarded.
 func commitSignature(r *git.Repository) *object.Signature {
 	name, email := "l00prite-os", "l00prite-os@localhost"
-	if cfg, err := r.ConfigScoped(config.GlobalScope); err == nil && strings.TrimSpace(cfg.User.Name) != "" {
-		name = cfg.User.Name
-		if strings.TrimSpace(cfg.User.Email) != "" {
-			email = cfg.User.Email
+	for _, scope := range []config.Scope{config.GlobalScope, config.LocalScope} {
+		cfg, err := r.ConfigScoped(scope)
+		if err != nil {
+			continue
+		}
+		if n := strings.TrimSpace(cfg.User.Name); n != "" {
+			name = n
+		}
+		if e := strings.TrimSpace(cfg.User.Email); e != "" {
+			email = e
 		}
 	}
 	return &object.Signature{Name: name, Email: email, When: time.Now()}

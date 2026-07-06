@@ -182,22 +182,19 @@ public class GatewayService extends Service {
         return pb.start();
     }
 
-    /** Extracts assets/cacert.pem into filesDir if it is missing or its size differs. */
+    /**
+     * Extracts assets/cacert.pem into filesDir, overwriting any previous copy.
+     *
+     * Always re-extracts rather than trying to skip up-to-date copies: InputStream#available()
+     * is documented as an ESTIMATE of remaining bytes, not a reliable total-length signal (and is
+     * not guaranteed to equal the asset's real size for a compressed APK asset entry), so
+     * comparing it against the on-disk file size could either re-extract every boot for no
+     * reason or, worse, decide a stale copy is "already up to date" after an app update changes
+     * the bundled CA bundle. The file is ~130KB; unconditional extraction on every service start
+     * is not worth the risk to get an optimization only.
+     */
     private File extractCacertIfNeeded() throws IOException {
         File out = new File(getFilesDir(), ASSET_CACERT);
-
-        int assetSize;
-        InputStream probe = getAssets().open(ASSET_CACERT);
-        try {
-            assetSize = probe.available();
-        } finally {
-            probe.close();
-        }
-
-        if (out.exists() && out.length() == assetSize) {
-            return out;
-        }
-
         InputStream in = getAssets().open(ASSET_CACERT);
         try {
             FileOutputStream fos = new FileOutputStream(out);
