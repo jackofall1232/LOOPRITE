@@ -117,6 +117,40 @@ ssh clone support once a key-provisioning UI exists, the Termux/remote-verifier 
 battery/doze tuning, F-Droid-style reproducible build recipe, on-device model
 (Ollama-on-LAN) quickstart.
 
+## PR #1 bot-review fixes + /review skill pass (branch same as above)
+
+- [x] Gemini Code Assist's 3 findings, all fixed and pushed (e820a69): `gitx/exec.go`'s
+      `run()` now forces `LC_ALL=C` so the English-substring failure detection (`Commit`'s
+      `identityMissing`, `Log`'s empty-repo marker) can't silently break under a localized
+      git build; `MainActivity.onPollFinished`'s posted `Runnable` now checks the existing
+      `activityDestroyed` flag before touching `webView`/`statusView` (independently
+      corroborated by two of the /review skill's own finders); `resolver.go`'s
+      `normalizeDNSAddr` now strips an IPv6 zone identifier (e.g. `fe80::1%wlan0`) before
+      `net.ParseIP` validation while preserving it in the dial address, with new
+      `TestNormalizeDNSAddr` cases. Also added `webView.destroy()` to `onDestroy()` (a
+      real native-resource-leak finding from the same finder pass, same root cause as the
+      `activityDestroyed` gap).
+- [x] `/review` skill run over the full PR diff (8 finder angles: line-by-line,
+      removed-behavior, cross-file, reuse, simplification, efficiency, altitude,
+      CLAUDE.md conventions — each independently verified against the real code, not taken
+      on a single agent's word). Zero CLAUDE.md violations found. 8 non-blocking findings
+      posted as inline PR review comments (submitted as one GitHub review, COMMENT event):
+      a stale human-review-boundary comment in `engine.go` vs. the new gitx seam's silent
+      synthetic-identity commit retry; an undocumented `git_command log` output-shape
+      divergence between exec-git and gogit hosts (unlike the neighboring `diff` case,
+      which documents its own divergence); a possible duplicate-event race in the
+      dashboard's 2s run-event poll under slow round trips (no in-flight guard); a stale
+      doc comment on `gitx.Client.Raw` describing a call path `git_command` doesn't
+      actually use; two ledger-rotation efficiency notes (mutex scope, per-request
+      `os.Stat`); two independently-maintained "safe without approval" git-subcommand lists
+      with no shared source of truth; the new SAF-import subsystem bolted onto
+      `MainActivity` instead of extracted into its own class.
+- [x] Verified after the fixes: `go build/vet/test ./...` clean, APK rebuilt via
+      `cli-os/scripts/build-apk.sh` and re-signed/verified (v2+v3 true), validator
+      519 PASS / 0 FAIL.
+- [ ] None of the 8 review findings are blocking; left for the maintainer to triage
+      alongside merge — no further autonomous action queued on them.
+
 ## Previous Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
 
 Maintainer brief: evolve the repo toward "L00prite OS" — an installable, vendor-neutral

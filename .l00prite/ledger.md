@@ -1181,3 +1181,84 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260706-013000-claude-phase2-on-device-autonomy held for this entry;
   released at the end of this turn.
+
+### Run 2026-07-06T01:58:00Z — Claude (Sonnet 5), branch claude/looprite-android-apk-4mth8g
+- **Goal:** Address 3 Gemini Code Assist review findings on PR #1, then run the `/review`
+  skill's full 8-finder-angle pipeline over the entire PR diff and act on the results.
+- **Triggering event:** GitHub PR comment `@claude[agent]+claude-sonnet-5 review` from the
+  repo owner, plus three queued Gemini Code Assist review comments (PR-level summary +
+  two inline findings) that arrived while the review was running.
+- **Reviewer/comment reference:** PR #1, Gemini Code Assist inline comments on
+  `cli-os/internal/gitx/exec.go:37` and `android/src/com/l00prite/os/MainActivity.java:234`.
+- **Decision:** Valid — all 3 Gemini findings were real, well-scoped, and independently
+  corroborated by the /review skill's own finder angles (two finders separately flagged the
+  same `activityDestroyed` gap). Fixed all 3, plus one closely-related finding from the same
+  finder pass (`webView.destroy()` missing from `onDestroy()`).
+- **Completed work:** Fixed `gitx/exec.go`'s `run()` to force `LC_ALL=C` on the git
+  subprocess env (English-substring failure detection in `Commit`/`identityMissing`/`Log`
+  could otherwise break under a localized git build); added the `activityDestroyed` guard
+  to `MainActivity.onPollFinished`'s posted `Runnable`; added `webView.destroy()` to
+  `onDestroy()`; fixed `resolver.go`'s `normalizeDNSAddr` to strip an IPv6 zone identifier
+  (e.g. `fe80::1%wlan0`) before `net.ParseIP` validation while preserving it in the returned
+  dial address, with new `TestNormalizeDNSAddr` regression cases. Then ran the `/review`
+  skill: 8 parallel finder angles (line-by-line, removed-behavior, cross-file, reuse,
+  simplification, efficiency, altitude, CLAUDE.md conventions) over the saved full PR diff
+  (51 files, +6417/-157), each finder cross-referencing the real checkout (confirmed at the
+  exact PR head commit). CLAUDE.md conventions angle returned zero findings — no violation
+  of the two review-gated-file rules or the repo's engineering-style rules found. The
+  remaining 7 finder angles' candidates were deduped and personally re-verified (direct
+  reads of `engine.go`, `tools.go`, `gitx.go`, `ledger.go`, `dashboard.html`,
+  `MainActivity.java`) rather than trusting sub-agent reports alone; 8 survived as
+  genuine, non-blocking findings and were posted as one GitHub PR review (COMMENT event,
+  inline comments + a summary body) rather than filed as separate action items, since none
+  warranted a code change without further maintainer input.
+- **Fix implemented:** The 3 Gemini findings + the related WebView leak fix (4 files
+  changed, committed as `e820a69`). The 8 /review-skill findings were posted as review
+  feedback, not applied as code changes — each is either an intentional-but-undocumented
+  design tradeoff (the `engine.go` synthetic-identity comment mismatch) or a low-severity
+  cleanup/efficiency/altitude note the maintainer should triage, not something safe to
+  silently rewrite without confirming intent.
+- **Changed files:** modified `cli-os/internal/gitx/exec.go`, `cli-os/internal/util/
+  resolver.go`, `cli-os/internal/util/resolver_test.go`, `android/src/com/l00prite/os/
+  MainActivity.java`; `.l00prite/ledger.md`, `.l00prite/todos.md`, `.l00prite/lock.json`
+  (this run). No protocol files, prompts, `.claude/commands/build-loop.md`, or
+  `scripts/validate-l00prite.js` touched.
+- **Tests run / Verification:**
+  - `command`: `go build ./...` (cli-os module) · `exit_code`: 0 · `summary`: clean build
+    after all 4 fixes · `timestamp`: 2026-07-06T01:59Z
+  - `command`: `go test ./internal/util/... ./internal/gitx/...` · `exit_code`: 0 ·
+    `summary`: both packages pass, incl. new `TestNormalizeDNSAddr` zone-id cases ·
+    `timestamp`: 2026-07-06T01:59Z
+  - `command`: `go vet ./... && go test ./...` (full cli-os module) · `exit_code`: 0 ·
+    `summary`: all 10 tested packages pass, zero vet warnings · `timestamp`: 2026-07-06T02:00Z
+  - `command`: `bash cli-os/scripts/build-apk.sh` · `exit_code`: 0 · `summary`: APK rebuilt
+    with the MainActivity fixes, `apksigner verify` v2+v3 true, `aapt dump badging` correct,
+    sha256 85215027a4d3… · `timestamp`: 2026-07-06T01:56Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-06T02:00Z
+- **Response drafted/sent:** Commit `e820a69` pushed to `claude/looprite-android-apk-4mth8g`
+  (fixes the 3 Gemini findings + the WebView leak). One GitHub PR review submitted
+  (COMMENT event) with 8 inline comments + a summary body, posted against head commit
+  `e820a693f83f7020fd9a8c13cb924f9fe09964b4`.
+- **Event status:** completed — the triggering review-request comment and the 3 queued
+  Gemini findings are all addressed; the PR-level Gemini summary comment and the
+  "/gemini please review... authentication logic" comment (addressed to the Gemini bot,
+  not to this agent) required no action from this agent.
+- **Failures:** none. One environment note: `mcp__github__pull_request_read` with
+  `method=get_diff` exceeded the tool's inline token limit (405,488 chars) and was
+  auto-saved to a local file instead of erroring — adapted by pointing every finder agent
+  at that saved file plus the local checkout (confirmed at the exact PR head commit via
+  `git rev-parse HEAD`) rather than needing the full diff inline.
+- **Decisions:** GitHub review comments must target a line that is actually part of the
+  diff hunk (not just any line in the file) — `add_comment_to_pending_review` rejects a
+  pre-existing unchanged line with no visible hunk context even when the surrounding
+  function was touched; picked the nearest changed line instead when a finding's exact
+  target line was outside the diff.
+- **Confidence:** High — every posted finding was independently re-verified against the
+  actual code by direct Read/Grep rather than relayed from a single finder agent's report.
+- **Next action:** none queued — all 8 findings are explicitly non-blocking and left for
+  the maintainer to triage at merge time; continue watching PR #1 via the existing
+  subscription for further activity.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-015800-claude-pr1-review-and-bot-fixes acquired and released this
+  run.

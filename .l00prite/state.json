@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
   "project_name": "l00prite",
-  "current_goal": "Android APK pass (branch claude/looprite-android-apk-4mth8g): Phase 0 + Phase 1 + Phase 2 all COMPLETE pending maintainer review — architecture, gateway Android-enablement, Venice+Gemini providers/role routing, android/ wrapper app, dashboard Runs view, git_command-over-go-git subset, ledger JSONL rotation, SAF repo import, all built with the Sonnet-write/Opus-review-verify/Fable-decide format, CI green, all bot review findings addressed",
+  "current_goal": "Android APK pass (branch claude/looprite-android-apk-4mth8g): Phase 0 + Phase 1 + Phase 2 all COMPLETE pending maintainer review — architecture, gateway Android-enablement, Venice+Gemini providers/role routing, android/ wrapper app, dashboard Runs view, git_command-over-go-git subset, ledger JSONL rotation, SAF repo import, all built with the Sonnet-write/Opus-review-verify/Fable-decide format, CI green, all bot review findings addressed, own /review skill pass complete with 8 non-blocking findings posted",
   "current_phase": "review",
   "active_agent": null,
   "last_agent": "claude",
-  "last_updated": "2026-07-06T01:55:00Z",
+  "last_updated": "2026-07-06T02:00:00Z",
   "status": "in_progress",
   "blocked": false,
   "blocker_reason": null,
@@ -16,5 +16,5 @@
   "ci_status": "green",
   "execution_active": false,
   "execution_stop_reason": null,
-  "next_recommended_action": "update PR #1's description to cover Phase 2, request a Gemini Code Assist re-review of the whole PR via a GitHub comment, then maintainer review (flags: .github/workflows/android-apk.yml is an Autonomous-Edit-Denylist path added deliberately; code/writer routing profiles flipped balanced->quality). After merge, Phase 3 (distribution hardening) is next per android-architecture.md §8, alongside the deferred ssh/Termux-bridge/SAF-export items."
+  "next_recommended_action": "maintainer review and merge (flags: .github/workflows/android-apk.yml is an Autonomous-Edit-Denylist path added deliberately; code/writer routing profiles flipped balanced->quality). 3 Gemini findings fixed in commit e820a69; a self-run /review skill pass found 8 further non-blocking findings, posted as one GitHub PR review comment — none require autonomous action, left for maintainer triage at merge. After merge, Phase 3 (distribution hardening) is next per android-architecture.md §8, alongside the deferred ssh/Termux-bridge/SAF-export items."
 }

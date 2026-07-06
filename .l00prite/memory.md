@@ -105,6 +105,10 @@ Durable project facts and decisions that future agents should preserve.
 - Any path built from an untrusted display name (SAF import, or similar future features)
   must validate the FINAL resolved canonical path is contained within its intended parent
   directory — per-segment string sanitization alone is not sufficient defense-in-depth.
+- GitHub's `add_comment_to_pending_review` rejects a comment targeting a line that isn't
+  part of a visible diff hunk, even when the surrounding function was touched elsewhere in
+  the same file — a pre-existing unchanged line (e.g. an old comment above a changed line)
+  has no hunk context to attach to. Target the nearest actually-changed line instead.
 
 ## Facts
 - l00prite ships no backend, hosted service, or install script; setup is manual (clone,
