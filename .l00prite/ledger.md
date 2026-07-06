@@ -1053,3 +1053,131 @@ Append one entry per agent run. Do not overwrite prior runs.
   do-not-retry, a how-to-do-it-correctly note).
 - **Lock:** lock-20260706-010500-claude-phase1-runs-ui held for this entry; released
   immediately after.
+
+### Run 2026-07-06T01:30:00Z — Claude (Fable 5 architect + Sonnet 5 writers + Opus 4.8 reviewers/verifier), branch claude/looprite-android-apk-4mth8g — Phase 2: on-device autonomy
+- **Goal:** Implement Phase 2 of the Android roadmap (android-architecture.md §8): deeper
+  on-device autonomy, using the same Sonnet-writes/Opus-reviews-and-verifies/Fable-decides
+  format as Phase 0/1, per maintainer direction to continue that pattern.
+- **Triggering event:** Maintainer direction — "go ahead and complete phase 2 using the
+  same format... continue with the same jobs for sonnet, opus, and fable as phase 0 and
+  phase 1."
+- **Decision:** Of the roadmap's five candidate Phase 2 items, three were scoped for
+  implementation and two explicitly deferred (committed separately, a726bc2, before
+  dispatching writers):
+  - IMPLEMENTED: git_command read-only subset (status/diff/log/show) over go-git; ledger
+    JSONL rotation; SAF repo import (Android).
+  - DEFERRED with rationale: ssh clones (keep https-only — no on-device key-provisioning UI
+    exists yet, wiring the transport with nothing to source credentials from would be dead
+    code); Termux bridge/remote-verifier (architecturally underspecified — protocol/auth/
+    trust need their own design pass first); SAF export (import was the more urgent gap;
+    export's natural path off-device is a git-remote push, which hits the same
+    key-provisioning gap as ssh).
+- **Completed work:**
+  - `cli-os/internal/gitx` — extended the `Client` interface with `Log(repo, limit)` and
+    `Show(repo, ref)`; `execClient` passes through to real `git log --oneline`/`git show`
+    (byte-identical to today); `gogitClient` implements both via go-git's `Repository.Log`
+    and `Commit.Patch` (verified against the pinned v5.18.0 source before speccing — Show's
+    diff direction is `parent.Patch(commit)`, not the reverse, so an added file renders as a
+    genuine addition, not inverted; root commits get an honest "no parent to diff against"
+    note rather than a fabricated diff).
+  - `cli-os/internal/engine/tools.go` — the model-facing `git_command` tool no longer
+    unconditionally refuses every call under `Kind()!="exec"`; a new `gitCommandGogit`
+    narrowly maps EXACT argument shapes (bare `status`; bare `diff`/`diff HEAD`; bare `log`
+    or `log -n N`/`--max-count=N`/`-N`; `show <ref>` with no flags) to the new gitx methods,
+    with any other subcommand or unsupported flag combination falling through UNCHANGED to
+    the original refusal — never silently misinterpreted. Never gated (matches the existing
+    no-approval-needed status for these read-only ops).
+  - `cli-os/internal/ledger` — the JSONL mirror (previously unbounded) now rotates at a
+    5 MiB default threshold (one backup generation, `LOOPRITE_LEDGER_MAX_BYTES` override,
+    invalid values fall back to default) under a mutex serializing the
+    check-size/rotate/append sequence — load-bearing since `Append` is called from
+    concurrent HTTP request goroutines. SQLite ledger table untouched (out of scope).
+  - `android/src/com/l00prite/os/MainActivity.java` — a native "Import repo…" button
+    (independent of the WebView, no AndroidX) using `ACTION_OPEN_DOCUMENT_TREE` +
+    `DocumentsContract` (DocumentFile confirmed AndroidX-only and absent from the platform
+    framework jar — verified empirically, not assumed) to copy a folder into
+    `<filesDir>/imported-repos/<name>`, closing the "get a repo already on the device onto
+    a real path" gap neither clone-from-URL nor path-register covers. Path-traversal
+    defense checks the canonical resolved path is contained within `imported-repos/` for
+    both the destination root and every recursive child entry (not just per-segment string
+    sanitization). Lifecycle-safety mirrors the existing health-poll thread's
+    destroyed-activity guard.
+  - Adversarial review: 2 Opus lenses — **zero blocking findings** (the exact-match
+    argument-shape contract, the Patch-direction correctness, the rotation mutex, and the
+    path-containment check all verified correct on the first pass). 3 non-blocking findings
+    (a stale refusal-message enumeration that omitted log/show and wrongly listed
+    branch/commit; an intentional-but-previously-undocumented semantic difference in bare
+    `diff` between backends; an undocumented `LOOPRITE_LEDGER_MAX_BYTES` env var) — all
+    fixed by a Sonnet pass.
+  - Verification (Opus, "tools/skills" role): independently re-ran the full test+race
+    suite; **live-drove** the gogit git_command subset through the real engine/Toolbox path
+    against a real temp repo with git genuinely stripped from PATH (confirmed via
+    `exec.LookPath` failing before trusting the result), and inspected the actual returned
+    Show patch text with its own eyes to confirm the addition-direction claim (not taken on
+    faith from the writer or the correctness reviewer); independently stress-tested ledger
+    rotation with 2500 concurrent Append calls forcing ~12 rotations (zero panics, zero
+    corrupt JSONL lines in either generation via two independent JSON parsers, SQLite table
+    exactly matching all 2500 rows); rebuilt the APK via the real hermetic pipeline and
+    confirmed the SAF code actually compiled into the dex (grepped `strings classes.dex` for
+    the real method/class names) while being explicit that device-level SAF picker/copy
+    behavior remains unverified (no emulator ABI in this container — documented limitation,
+    not glossed over).
+  - Architect spot-check (independent, not just trusting reports): personally re-read the
+    ledger mutex and the SAF `assertWithinRoot` containment check in the actual committed
+    files before trusting either.
+- **Changed files:** `cli-os/internal/gitx/{gitx,exec,gogit,gitx_test}.go`,
+  `cli-os/internal/engine/{tools,tools_test}.go`, `cli-os/internal/ledger/{ledger,
+  ledger_test}.go`, `android/src/com/l00prite/os/MainActivity.java`, `android/README.md`,
+  plus the prior scoping commit to `cli-os/docs/android-architecture.md`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` ·
+    2026-07-06T01:47Z.
+  - `command: go test -count=1 ./...` (forced fresh, not cached) · `exit_code: 0` ·
+    `summary: all 13 testable packages ok` · 2026-07-06T01:48Z.
+  - `command: go test -race -count=1 ./internal/ledger/... ./internal/gitx/...
+    ./internal/engine/...` · `exit_code: 0` · `summary: zero race warnings` ·
+    2026-07-06T01:48Z.
+  - `command: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: file confirms ELF aarch64 PIE, /system/bin/linker64` ·
+    2026-07-06T01:49Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code`: 0 FAIL lines ·
+    2026-07-06T01:50Z.
+  - `command: bash cli-os/scripts/build-apk.sh` · `exit_code: 0` · `summary: signed APK
+    rebuilt, sha256 852f8aec35ec...` · 2026-07-06T01:52Z.
+  - `command: (Opus verify agent) 2500-goroutine concurrent ledger.Append stress test,
+    threshold sized to force ~12 rotations` · `summary: zero panics, zero corrupt JSONL
+    lines (two independent parsers), SQLite table exactly 2500 rows` · workflow-internal.
+  - `command: (Opus verify agent) live git_command drive via the real Toolbox path,
+    PATH stripped of git, confirmed via exec.LookPath failure` · `summary: status/diff/
+    log/show all correct; out-of-contract calls (two-ref show, log --all, rev-parse)
+    correctly refuse rather than misinterpret; Show's patch text inspected directly,
+    added-file content confirmed on a plus-prefixed line` · workflow-internal.
+  - `command: bash cli-os/scripts/build-apk.sh (Opus verify agent's own run)` ·
+    `summary: apksigner verify v2/v3 true; aapt dump badging correct; strings classes.dex
+    confirms SAF method/class names actually compiled in` · workflow-internal.
+- **Response drafted/sent:** PR #1 to be updated to cover Phase 2; a Gemini re-review
+  request to be posted per maintainer direction.
+- **Event status:** n/a.
+- **Failures:** none blocking. One transient false alarm recorded for awareness, not a
+  do-not-retry: the ledger writer observed intermittent `go build ./...` failures during
+  the PARALLEL write phase caused by the concurrently-in-flight gitx writer's own
+  in-progress edits (a normal, expected transient during parallel writes to different
+  packages that share a dependency edge) — resolved by the time all writers finished; the
+  post-write verification runs were consistently clean.
+- **Decisions:** the git_command gogit subset's argument-shape contract is deliberately
+  EXACT-MATCH ONLY — any unrecognized flag or extra argument falls through to the original
+  refusal rather than being interpreted loosely, so the tool can never silently answer a
+  different question than the real command would. Ledger rotation checks size BEFORE
+  appending (not after) so the current row is guaranteed to land in a definitely-fresh file
+  when rotation fires, with no read-back/split logic needed. SAF import is native-Android
+  only (no WebView/JS-bridge) — kept the feature boundary clean and avoided expanding the
+  WebView's JS-bridge attack surface for a one-off utility affordance.
+- **Confidence:** High — every safety-critical claim (exact-match argument contract, Patch
+  direction, mutex correctness, path-containment) was verified by at least two independent
+  parties (a reviewer plus either the verifier or the architect), not taken on a single
+  agent's word.
+- **Next action:** update PR #1's description to cover Phase 2; post a Gemini Code Assist
+  re-review request comment on the PR per maintainer direction; continue watching CI/reviews.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-013000-claude-phase2-on-device-autonomy held for this entry;
+  released at the end of this turn.

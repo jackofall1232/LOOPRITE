@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "lock_id": "lock-20260706-013000-claude-phase2-on-device-autonomy",
-  "owner_agent": "claude",
-  "owner_session": "claude/looprite-android-apk-4mth8g",
+  "owner_agent": null,
+  "owner_session": null,
   "acquired_at": "2026-07-06T01:30:00Z",
   "expires_at": "2026-07-06T05:30:00Z",
   "ttl_seconds": 14400,
-  "purpose": "Phase 2 (git_command-over-go-git subset, ledger rotation, SAF repo import) — maintainer direction to continue the Sonnet/Opus/Fable workflow format from Phase 0/1",
+  "purpose": null,
   "protected_paths": [
     "ledger.md",
     "memory.md",
@@ -18,5 +18,5 @@
     "reviews/",
     "sessions/"
   ],
-  "status": "active"
+  "status": "released"
 }

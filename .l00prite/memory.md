@@ -80,6 +80,31 @@ Durable project facts and decisions that future agents should preserve.
   catalog and is unroutable (every role fails to route, pre-flight comes back blocked with
   an empty team). Name the mock-adapter provider after a real manifest instead (e.g.
   `anthropic`) — this repo's own `internal/server/e2e_test.go` already does this.
+- The `gitx.Client` seam (Phase 2, 2026-07-06): any new git primitive added to this
+  interface must be implemented in BOTH `execClient` (exec must stay a byte-identical
+  passthrough to the real command — zero behavior change on desktop) and `gogitClient`
+  (pure-Go, for git-less Android). Never fabricate diff-looking output that isn't real —
+  `DiffHead`'s worktree-vs-HEAD case has no honest go-git equivalent so it's a labeled
+  summary, but `Show`'s commit-vs-parent case DOES have one (`Commit.Patch`) and must use
+  it. Patch direction is `parent.Patch(commit)`, not the reverse — verify by direction, not
+  assumption, whenever touching this (an added file must render as an addition).
+- The model-facing `git_command` tool's gogit subset (Phase 2) is EXACT-MATCH-ONLY by
+  design: any unrecognized flag or extra argument on an otherwise-supported subcommand must
+  fall through to the hard refusal, never be loosely interpreted as "probably fine" — a
+  coding-agent's own tool silently answering a different question than the real command
+  would is a correctness bug, not a convenience.
+- `cli-os/internal/ledger.Append` is called from concurrent HTTP-request goroutines — any
+  future change to its JSONL-mirror logic (rotation, format, etc.) must hold `jsonlMu` (or
+  its successor) around the full check-then-act sequence; a naive check-size-then-rename
+  race was a real hazard here, not hypothetical.
+- Android has no AndroidX/Jetpack dependency anywhere in this app (deliberate, Phase 0
+  decision, reconfirmed Phase 2): `DocumentFile` is AndroidX-only and does NOT exist in the
+  platform framework jar (verified empirically against the actual `android-all` jar this
+  repo's build uses) — SAF tree-walking must use `android.provider.DocumentsContract`
+  directly, never assume `DocumentFile` is available.
+- Any path built from an untrusted display name (SAF import, or similar future features)
+  must validate the FINAL resolved canonical path is contained within its intended parent
+  directory — per-segment string sanitization alone is not sufficient defense-in-depth.
 
 ## Facts
 - l00prite ships no backend, hosted service, or install script; setup is manual (clone,

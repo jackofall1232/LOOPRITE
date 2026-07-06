@@ -68,12 +68,54 @@ previously queued dashboard Runs view (moved to Next, below).
 - [x] Ledger/todos/memory updated; lock released; PR #1 description to be updated to
       cover Phase 1.
 
-Deferred to Phase 2+ (see android-architecture.md §8): real-device smoke test (no emulator
+## Phase 2 — deeper on-device autonomy (android-architecture.md §8), branch same as above
+
+- [x] `cli-os/internal/gitx` + `cli-os/internal/engine/tools.go` (54515f4) — Log(repo,limit)/
+      Show(repo,ref) added to the gitx.Client seam (exec: byte-identical passthrough to real
+      git log/show; gogit: go-git's Repository.Log + Commit.Patch, direction-verified —
+      parent.Patch(commit) so an added file renders as a genuine addition). git_command's
+      gogit path now serves an EXACT-MATCH-ONLY subset (bare status; bare diff/diff HEAD;
+      log or log -n N/--max-count=N/-N; show <ref> with no flags) instead of unconditionally
+      refusing every call — any other shape falls through unchanged to the original refusal.
+- [x] `cli-os/internal/ledger` (54515f4) — JSONL mirror rotation (5 MiB default, one backup
+      generation, LOOPRITE_LEDGER_MAX_BYTES override) under a mutex serializing check-size/
+      rotate/append against concurrent HTTP-request callers. SQLite ledger table untouched
+      (out of scope, a separate future decision).
+- [x] `android/src/com/l00prite/os/MainActivity.java` (54515f4) — native "Import repo…" SAF
+      picker (DocumentsContract, not DocumentFile — confirmed AndroidX-only/absent from the
+      platform jar) copying a picked folder into `<filesDir>/imported-repos/<name>`, with
+      canonical-path containment checked at the destination root AND every recursive child
+      (not just per-segment sanitization).
+- [x] Adversarial review (2 Opus lenses) — zero blocking findings; 3 non-blocking (stale
+      refusal-message enumeration, an undocumented bare-diff semantic difference between
+      backends, an undocumented env var) all fixed.
+- [x] Verification (Opus) — full test+race suite; git_command subset live-driven through
+      the real engine/Toolbox path with git genuinely stripped from PATH; Show's patch text
+      inspected directly for addition-direction correctness; ledger rotation stress-tested
+      with 2500 concurrent Append calls (zero panics/corruption, SQLite exactly 2500 rows);
+      APK rebuilt + apksigner verify + confirmed SAF code compiled into the dex via strings.
+      Explicit, undisguised limitation: no real-device SAF picker/copy verification possible
+      (no emulator ABI in this container).
+- [x] Architect independently spot-checked the ledger mutex and the SAF path-containment
+      check in the committed files (not just trusting sub-agent reports) before committing.
+- [x] Explicit scope decisions recorded in android-architecture.md §8 (a726bc2): ssh clones
+      stay https-only (no on-device key-provisioning UI yet); Termux bridge/remote-verifier
+      deferred (needs its own protocol/auth/trust design pass); SAF export deferred (import
+      was the more urgent gap; export's natural path is a git-remote push, same
+      key-provisioning gap as ssh).
+- [x] Ledger/todos/memory updated; PR #1 description to be updated to cover Phase 2; a
+      Gemini Code Assist re-review requested on the PR per maintainer direction.
+
+Deferred to Phase 3+ (see android-architecture.md §8): real-device smoke test (no emulator
 ABI possible in this container), clone-from-URL e2e coverage (needs network egress),
 venice/gemini capability confirmation from an unblocked network, making the internal `mock`
 test adapter selectable in the setup wizard (currently only reachable by direct API/DB
 injection, and must be named after a real manifest like `anthropic` to be routable —
-recorded in failures.md), a committed reusable Playwright harness for future UI regressions.
+recorded in failures.md), a committed reusable Playwright harness for future UI regressions,
+ssh clone support once a key-provisioning UI exists, the Termux/remote-verifier bridge
+(needs its own design pass), SAF export, split ABIs/app bundle, release signing ceremony,
+battery/doze tuning, F-Droid-style reproducible build recipe, on-device model
+(Ollama-on-LAN) quickstart.
 
 ## Previous Active — L00prite OS build pass (maintainer brief, branch `OS-APK`)
 
