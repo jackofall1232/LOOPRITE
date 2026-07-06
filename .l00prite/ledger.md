@@ -1262,3 +1262,64 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260706-015800-claude-pr1-review-and-bot-fixes acquired and released this
   run.
+
+### Run 2026-07-06T13:56:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Build a tech-focused marketing/landing website for LOOPRITE with a working
+  Android APK download, a "what LOOPRITE does" section, a clear beta notice, and attribution
+  to the MIT-licensed l00prite source repo (per direct maintainer instruction, with creative
+  license on design).
+- **Triggering event:** none — direct maintainer instruction in-session.
+- **Reviewer/comment reference:** none.
+- **Decision:** Normal work. Two supporting decisions: (1) placed the site at the repo root
+  (`index.html` + `.nojekyll`) so GitHub Pages can serve it directly from the branch with
+  zero build tooling, keeping the repo's no-dependencies ethos (the page is fully
+  self-contained — no CDN fonts/scripts); (2) since the repo has no GitHub releases yet, a
+  `releases/latest` download link would be dead, so the APK was built from source with the
+  existing hermetic pipeline and shipped in-repo at `downloads/` so the download button works
+  immediately (15 MB, well under git/Pages limits; swap to a Releases asset later if
+  preferred).
+- **Completed work:** Installed the apt Android toolchain (aapt/zipalign/apksigner/
+  dalvik-exchange/android-framework-res); built and verified
+  `l00prite-os-0.1.0-beta.apk` via `cli-os/scripts/build-apk.sh 0.1.0-beta`; created
+  `downloads/` (APK + SHA256SUMS); wrote `index.html` — dark circuit-board design matching
+  `assets/brand-image.png` (feathered hero mask, animated circuit pulses, agent ticker,
+  six OS-metaphor cards, Planning/Execution mode panels, an animated execute-loop pre-flight
+  terminal, phone mockup, sideload install steps, SHA-256 copy button, beta warning strip,
+  source-repo section linking https://github.com/jackofall1232/l00prite); added `.nojekyll`.
+  All copy kept accurate to shipped behavior (disarmed-by-default Execution Mode, nine run
+  boundaries, per-action approvals, on-device keys, debug-signed beta).
+- **Fix implemented:** not applicable — new page. Two defects found and fixed during
+  verification: mobile horizontal overflow caused by the unbreakable repo-URL heading in the
+  source card (fixed with `min-width:0` + `overflow-wrap:anywhere`), and hard visible edges
+  of the square brand PNG against the page gradient (fixed with a radial CSS mask).
+- **Changed files:** created `index.html`, `.nojekyll`, `downloads/l00prite-os-0.1.0-beta.apk`,
+  `downloads/SHA256SUMS`; modified `CLAUDE.md` (Run Ledger row), `.l00prite/ledger.md`,
+  `.l00prite/lock.json`. Zero edits to the two review-gated files
+  (`.claude/commands/build-loop.md`, `scripts/validate-l00prite.js`).
+- **Tests run / Verification:**
+  - `command`: `bash cli-os/scripts/build-apk.sh 0.1.0-beta` · `exit_code`: 0 · `summary`:
+    APK built; `apksigner verify` v2 true; badging package/activity/permission/native-code
+    checks all pass; sha256 ef9f8a025cbc… · `timestamp`: 2026-07-06T13:45Z
+  - `command`: `curl` HEAD-equivalents against a local `http.server` · `exit_code`: 0 ·
+    `summary`: `/`, `/downloads/…beta.apk` (15,291,037 bytes), `/downloads/SHA256SUMS`,
+    `/assets/brand-image.png` all 200 · `timestamp`: 2026-07-06T13:49Z
+  - `command`: Playwright (chromium) against the served page, desktop 1440px + mobile 390px ·
+    `exit_code`: 0 · `summary`: zero console errors, zero failed requests, all 3 APK links
+    point at the real file, SHA copy button works, no mobile horizontal scroll after fix ·
+    `timestamp`: 2026-07-06T13:53Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-06T13:55Z
+- **Response drafted/sent:** Summary + screenshots returned to the maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** The committed APK is the debug-signed beta from the hermetic pipeline —
+  release signing remains the explicit Phase 3 ceremony; the site copy labels the build as
+  debug-signed beta accordingly. Site is static-host-agnostic (any static server works, not
+  just GitHub Pages).
+- **Confidence:** High — every user-facing claim on the page was checked against
+  CLAUDE.md/README/android-architecture docs, and the page was exercised live in a real
+  browser at two viewports.
+- **Next action:** Maintainer: enable GitHub Pages (branch → root) to publish, or say the
+  word and this session can wire a Pages deploy workflow instead of in-repo hosting.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-135600-claude-marketing-site acquired and released this run.
