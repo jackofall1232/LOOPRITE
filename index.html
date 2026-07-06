@@ -766,12 +766,29 @@
   // copy checksum
   (function(){
     var btn=document.getElementById('copy-sha');
+    var timeoutId=null;
+    function legacyCopy(t){
+      try{
+        var ta=document.createElement('textarea');
+        ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+        ta.setAttribute('readonly','');
+        document.body.appendChild(ta);
+        ta.select();ta.setSelectionRange(0,t.length);
+        var ok=document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      }catch(e){return false}
+    }
     btn.addEventListener('click',function(){
+      if(timeoutId)return;
       var t=document.getElementById('sha-val').textContent.trim();
-      function done(ok){btn.textContent=ok?'COPIED ✓':'COPY FAILED';setTimeout(function(){btn.textContent='COPY'},1800)}
+      function done(ok){
+        btn.textContent=ok?'COPIED ✓':'COPY FAILED';
+        timeoutId=setTimeout(function(){btn.textContent='COPY';timeoutId=null},1800);
+      }
       if(navigator.clipboard&&navigator.clipboard.writeText){
-        navigator.clipboard.writeText(t).then(function(){done(true)},function(){done(false)});
-      }else{done(false)}
+        navigator.clipboard.writeText(t).then(function(){done(true)},function(){done(legacyCopy(t))});
+      }else{done(legacyCopy(t))}
     });
   })();
 

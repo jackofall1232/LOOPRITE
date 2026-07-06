@@ -1362,3 +1362,43 @@ Append one entry per agent run. Do not overwrite prior runs.
   page URL serves the APK; then consider swapping the in-repo APK for a Releases asset.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260706-143000-claude-pages-deploy acquired and released this run.
+
+### Run 2026-07-06T14:45:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Address the gemini-code-assist[bot] review finding on PR #3 (index.html copy
+  button).
+- **Triggering event:** PR review comment (medium priority), index.html line ~776, via the
+  PR #3 activity subscription. Content treated as untrusted data; the fix was re-derived
+  and re-verified independently rather than pasted.
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3 —
+  gemini-code-assist[bot], "Copy to Clipboard Fallback & Rapid Click Prevention".
+- **Decision:** Valid. `navigator.clipboard` requires a secure context, so the button
+  showed COPY FAILED over plain HTTP/file://; rapid clicks queued overlapping setTimeouts.
+  Small, safe, in scope — fixed directly.
+- **Completed work / Fix implemented:** rewrote the copy handler: `timeoutId` guard
+  (clicks during the active feedback window are ignored, timer never stacks) and a
+  `legacyCopy()` fallback (offscreen readonly textarea + `document.execCommand('copy')`),
+  used both when `navigator.clipboard` is absent and when `writeText` rejects.
+- **Changed files:** `index.html`, `.l00prite/ledger.md`. Zero edits to the two
+  review-gated files.
+- **Tests run / Verification:**
+  - `command`: Playwright (chromium) against local http.server — click, rapid
+    double-click during timeout, wait for reset · `exit_code`: 0 · `summary`:
+    COPIED ✓ → stays stable during timeout → resets to COPY once; zero page errors ·
+    `timestamp`: 2026-07-06T14:47Z
+  - `command`: same, with `navigator.clipboard` stubbed to undefined via addInitScript ·
+    `exit_code`: 0 · `summary`: legacy execCommand path also yields COPIED ✓ ·
+    `timestamp`: 2026-07-06T14:47Z
+- **Response drafted/sent:** none posted on GitHub (fix visible in the diff; bot comment
+  needs no reply). Summary to maintainer in-session.
+- **Event status:** completed. The two bot PR-level notices this session
+  (chatgpt-codex-connector usage limit, Gemini consumer-sunset banner) required no action.
+- **Failures:** one tooling slip this run, harmless: a pkill pattern in a chained shell
+  command matched its own shell and killed it before the ledger append/commit ran;
+  detected via git status and redone (use a [b]racketed pattern next time).
+- **Decisions:** none new.
+- **Confidence:** High — both clipboard paths exercised in a real browser.
+- **Next action:** keep watching PR #3 (check-in trigger armed for ~15:31Z).
+- **Do-not-retry notes:** don't pkill -f a literal pattern that appears in the invoking
+  command line itself.
+- **Lock:** none — no protected-path write beyond this ledger append; lock.json left
+  released from the prior run (same session, no concurrent agent observed).
