@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOOPRITE — Loop once. Loop right.</title>
+<meta name="description" content="LOOPRITE gives AI coding agents durable, file-based memory and a deterministic execution protocol — vendor-neutral, resumable, and gated by explicit human confirmation. Now running on Android (beta).">
+<meta property="og:title" content="LOOPRITE — Loop once. Loop right.">
+<meta property="og:description" content="The operating system for autonomous software engineering. Durable agent memory, gated execution, on your Android device. Beta.">
+<meta property="og:image" content="assets/brand-image.png">
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%23040810"/><path d="M14 32c0-7 9-7 14 0s14 7 14 0-9-7-14 0-14 7-14 0z" fill="none" stroke="%235bc9f2" stroke-width="5" stroke-linecap="round"/></svg>'>
+<style>
+  :root{
+    --bg:#03060b;
+    --bg-2:#050b14;
+    --panel:#070f1b;
+    --panel-2:#0a1524;
+    --line:#12283d;
+    --line-bright:#1c3f5e;
+    --ice:#9adcf5;
+    --ice-bright:#c9eefb;
+    --glow:#3fb6e8;
+    --glow-deep:#1272a8;
+    --text:#d7e7f2;
+    --muted:#8aa3b5;
+    --dim:#5b7386;
+    --ok:#63e6a4;
+    --warn:#ffd479;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono","Fira Code",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:Inter,"SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+    --maxw:1120px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    line-height:1.6;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:rgba(63,182,232,.35);color:#fff}
+
+  /* ---------- background layers ---------- */
+  .bg-fixed{
+    position:fixed;inset:0;z-index:-2;
+    background:
+      radial-gradient(1000px 520px at 50% -8%, rgba(24,102,150,.28), transparent 62%),
+      radial-gradient(800px 600px at 88% 108%, rgba(16,72,110,.20), transparent 60%),
+      radial-gradient(700px 500px at 6% 82%, rgba(13,58,92,.16), transparent 60%),
+      linear-gradient(180deg,var(--bg) 0%,var(--bg-2) 100%);
+  }
+  .bg-grid{
+    position:fixed;inset:0;z-index:-1;opacity:.5;pointer-events:none;
+    background-image:
+      radial-gradient(rgba(90,180,225,.075) 1px, transparent 1.4px);
+    background-size:26px 26px;
+    mask-image:radial-gradient(1200px 900px at 50% 12%, #000 30%, transparent 80%);
+    -webkit-mask-image:radial-gradient(1200px 900px at 50% 12%, #000 30%, transparent 80%);
+  }
+  .circuit{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  .circuit svg{position:absolute;width:1400px;height:900px;left:50%;top:0;transform:translateX(-50%);opacity:.6}
+  .trace{fill:none;stroke:#0f2c44;stroke-width:1.5}
+  .node{fill:#0f2c44}
+  .pulse{fill:none;stroke:var(--glow);stroke-width:1.6;stroke-linecap:round;
+    stroke-dasharray:40 640;filter:drop-shadow(0 0 5px var(--glow));
+    animation:flow 7s linear infinite}
+  .pulse.p2{animation-delay:2.4s;animation-duration:9s}
+  .pulse.p3{animation-delay:4.8s;animation-duration:8s}
+  @keyframes flow{to{stroke-dashoffset:-680}}
+
+  /* ---------- shared ---------- */
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;position:relative;z-index:1}
+  section{padding:104px 0;position:relative}
+  .kicker{
+    font-family:var(--mono);font-size:.78rem;letter-spacing:.42em;text-transform:uppercase;
+    color:var(--glow);display:flex;align-items:center;gap:14px;margin-bottom:18px;
+  }
+  .kicker::before{content:"";width:34px;height:1px;background:linear-gradient(90deg,transparent,var(--glow))}
+  .kicker::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(63,182,232,.5),transparent);max-width:160px}
+  h2{
+    font-family:var(--mono);font-weight:700;letter-spacing:.04em;
+    font-size:clamp(1.7rem,3.6vw,2.6rem);color:var(--ice-bright);
+    text-shadow:0 0 26px rgba(63,182,232,.35);
+    margin-bottom:16px;
+  }
+  .lead{color:var(--muted);max-width:46em;font-size:1.06rem}
+  .lead b,.lead strong{color:var(--text);font-weight:600}
+  a{color:var(--ice)}
+  code{font-family:var(--mono);font-size:.92em;color:var(--ice);background:rgba(63,182,232,.08);
+    border:1px solid rgba(63,182,232,.18);border-radius:5px;padding:.08em .38em}
+
+  .reveal{opacity:0;transform:translateY(22px);transition:opacity .7s ease,transform .7s ease}
+  .reveal.in{opacity:1;transform:none}
+
+  /* ---------- nav ---------- */
+  nav{
+    position:fixed;top:0;left:0;right:0;z-index:50;
+    background:rgba(3,6,11,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-bottom:1px solid rgba(18,40,61,.8);
+  }
+  .nav-in{max-width:var(--maxw);margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;gap:28px}
+  .logo{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-weight:700;
+    letter-spacing:.24em;color:var(--ice-bright);text-decoration:none;font-size:.95rem}
+  .logo svg{filter:drop-shadow(0 0 6px rgba(63,182,232,.8))}
+  .nav-links{display:flex;gap:24px;margin-left:auto;align-items:center}
+  .nav-links a{
+    font-family:var(--mono);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);text-decoration:none;transition:color .2s;
+  }
+  .nav-links a:hover{color:var(--ice-bright)}
+  .nav-cta{
+    border:1px solid rgba(63,182,232,.55);border-radius:7px;padding:7px 14px;
+    color:var(--ice-bright)!important;background:rgba(63,182,232,.10);
+    box-shadow:0 0 14px rgba(63,182,232,.18), inset 0 0 12px rgba(63,182,232,.06);
+    transition:all .2s;
+  }
+  .nav-cta:hover{background:rgba(63,182,232,.2);box-shadow:0 0 22px rgba(63,182,232,.4)}
+  @media(max-width:760px){.nav-links a:not(.nav-cta){display:none}}
+
+  /* ---------- hero ---------- */
+  .hero{padding:150px 0 90px;text-align:center;position:relative}
+  .beta-pill{
+    display:inline-flex;align-items:center;gap:9px;
+    font-family:var(--mono);font-size:.74rem;letter-spacing:.3em;text-transform:uppercase;
+    color:var(--ice);border:1px solid rgba(63,182,232,.45);border-radius:999px;
+    padding:7px 18px;margin-bottom:34px;background:rgba(63,182,232,.07);
+    box-shadow:0 0 18px rgba(63,182,232,.15), inset 0 0 14px rgba(63,182,232,.05);
+  }
+  .beta-dot{width:7px;height:7px;border-radius:50%;background:var(--glow);
+    box-shadow:0 0 10px var(--glow);animation:blink 1.9s ease-in-out infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  .brand-img{
+    width:min(660px,92%);height:auto;display:block;margin:-3% auto -6%;
+    filter:drop-shadow(0 0 60px rgba(35,140,200,.28));
+    animation:heroGlow 6s ease-in-out infinite;
+    -webkit-mask-image:radial-gradient(ellipse 76% 70% at 50% 50%, #000 50%, transparent 82%);
+    mask-image:radial-gradient(ellipse 76% 70% at 50% 50%, #000 50%, transparent 82%);
+  }
+  @keyframes heroGlow{
+    0%,100%{filter:drop-shadow(0 0 46px rgba(35,140,200,.22))}
+    50%{filter:drop-shadow(0 0 78px rgba(63,182,232,.42))}
+  }
+  .hero h1{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .hero-sub{
+    margin:34px auto 10px;max-width:41em;color:var(--muted);font-size:clamp(1.02rem,2vw,1.2rem);
+  }
+  .hero-sub b{color:var(--ice-bright);font-weight:600}
+  .cta-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:38px}
+  .btn{
+    display:inline-flex;align-items:center;gap:11px;text-decoration:none;
+    font-family:var(--mono);font-size:.92rem;letter-spacing:.06em;font-weight:600;
+    padding:15px 28px;border-radius:9px;transition:all .22s ease;position:relative;
+  }
+  .btn-primary{
+    color:#02131e;background:linear-gradient(180deg,#8fdaf7,#46b9ea);
+    box-shadow:0 0 30px rgba(63,182,232,.45), 0 2px 0 rgba(255,255,255,.25) inset;
+  }
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 0 48px rgba(63,182,232,.7), 0 2px 0 rgba(255,255,255,.25) inset}
+  .btn-primary small{display:block;font-size:.68rem;font-weight:500;letter-spacing:.04em;opacity:.75}
+  .btn-ghost{
+    color:var(--ice);border:1px solid rgba(63,182,232,.45);background:rgba(63,182,232,.05);
+  }
+  .btn-ghost:hover{background:rgba(63,182,232,.14);box-shadow:0 0 22px rgba(63,182,232,.25)}
+  .btn svg{flex-shrink:0}
+  .hero-meta{
+    display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:26px;
+  }
+  .chip{
+    font-family:var(--mono);font-size:.72rem;letter-spacing:.12em;color:var(--dim);
+    border:1px solid var(--line);border-radius:6px;padding:5px 12px;background:rgba(7,15,27,.6);
+  }
+  .chip b{color:var(--muted);font-weight:600}
+
+  /* ---------- agent ticker ---------- */
+  .ticker{
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+    background:rgba(5,11,20,.6);overflow:hidden;padding:16px 0;position:relative;
+  }
+  .ticker::before,.ticker::after{
+    content:"";position:absolute;top:0;bottom:0;width:120px;z-index:2;pointer-events:none;
+  }
+  .ticker::before{left:0;background:linear-gradient(90deg,var(--bg),transparent)}
+  .ticker::after{right:0;background:linear-gradient(270deg,var(--bg),transparent)}
+  .ticker-track{display:flex;gap:0;width:max-content;animation:scroll 36s linear infinite}
+  .ticker-set{display:flex;align-items:center}
+  .ticker-set span{
+    font-family:var(--mono);font-size:.8rem;letter-spacing:.34em;color:var(--dim);
+    padding:0 18px;white-space:nowrap;
+  }
+  .ticker-set i{color:var(--glow);font-style:normal;text-shadow:0 0 8px rgba(63,182,232,.6)}
+  @keyframes scroll{to{transform:translateX(-50%)}}
+  .ticker-label{
+    text-align:center;font-family:var(--mono);font-size:.68rem;letter-spacing:.4em;
+    text-transform:uppercase;color:var(--dim);padding-bottom:12px;
+  }
+
+  /* ---------- cards ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:44px}
+  .card{
+    background:linear-gradient(180deg,var(--panel),rgba(7,15,27,.4));
+    border:1px solid var(--line);border-radius:12px;padding:26px;position:relative;
+    transition:border-color .25s, box-shadow .25s, transform .25s;overflow:hidden;
+  }
+  .card::before{
+    content:"";position:absolute;top:0;left:24px;right:24px;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(63,182,232,.5),transparent);
+    opacity:0;transition:opacity .25s;
+  }
+  .card:hover{border-color:var(--line-bright);transform:translateY(-3px);
+    box-shadow:0 14px 40px rgba(0,0,0,.5), 0 0 30px rgba(63,182,232,.07)}
+  .card:hover::before{opacity:1}
+  .card .ico{
+    width:42px;height:42px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    background:rgba(63,182,232,.09);border:1px solid rgba(63,182,232,.28);margin-bottom:18px;
+    box-shadow:inset 0 0 14px rgba(63,182,232,.08);
+  }
+  .card h3{
+    font-family:var(--mono);font-size:.95rem;letter-spacing:.1em;color:var(--ice-bright);
+    margin-bottom:10px;text-transform:uppercase;
+  }
+  .card p{color:var(--muted);font-size:.93rem}
+  .card p code{font-size:.86em}
+  .card .tag{
+    position:absolute;top:22px;right:22px;font-family:var(--mono);font-size:.62rem;
+    letter-spacing:.22em;color:var(--dim);text-transform:uppercase;
+  }
+
+  /* ---------- modes ---------- */
+  .modes-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:44px}
+  @media(max-width:900px){.modes-grid{grid-template-columns:1fr}}
+  .mode{
+    border:1px solid var(--line);border-radius:14px;padding:30px;
+    background:linear-gradient(180deg,var(--panel),rgba(7,15,27,.35));position:relative;overflow:hidden;
+  }
+  .mode.exec{border-color:rgba(63,182,232,.4);box-shadow:0 0 40px rgba(63,182,232,.06) inset}
+  .mode-num{
+    font-family:var(--mono);font-size:.7rem;letter-spacing:.3em;color:var(--dim);
+    text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:10px;
+  }
+  .mode-num::after{content:"";flex:1;height:1px;background:var(--line)}
+  .mode h3{font-family:var(--mono);font-size:1.25rem;color:var(--ice-bright);letter-spacing:.05em;margin-bottom:12px}
+  .mode p{color:var(--muted);font-size:.94rem;margin-bottom:14px}
+  .mode ul{list-style:none;margin-top:6px}
+  .mode li{
+    color:var(--muted);font-size:.9rem;padding:7px 0 7px 26px;position:relative;
+    border-top:1px dashed rgba(18,40,61,.7);
+  }
+  .mode li::before{
+    content:"▸";position:absolute;left:6px;color:var(--glow);
+  }
+  .mode li b{color:var(--text);font-weight:600}
+
+  /* ---------- terminal ---------- */
+  .term{
+    margin-top:48px;border:1px solid var(--line-bright);border-radius:12px;overflow:hidden;
+    background:#040910;box-shadow:0 24px 70px rgba(0,0,0,.55), 0 0 50px rgba(63,182,232,.08);
+    font-family:var(--mono);font-size:.84rem;line-height:1.75;
+  }
+  .term-bar{
+    display:flex;align-items:center;gap:8px;padding:11px 16px;
+    background:rgba(10,21,36,.9);border-bottom:1px solid var(--line);
+  }
+  .term-bar i{width:11px;height:11px;border-radius:50%;background:#1c3f5e;display:inline-block}
+  .term-bar i:nth-child(2){background:#17557c}
+  .term-bar i:nth-child(3){background:var(--glow);box-shadow:0 0 8px var(--glow)}
+  .term-bar span{margin-left:10px;font-size:.72rem;letter-spacing:.18em;color:var(--dim)}
+  .term-body{padding:22px 24px;overflow-x:auto;white-space:pre;color:#a9c4d6;min-height:360px}
+  .term-body .c-dim{color:#48627a}
+  .term-body .c-ice{color:var(--ice-bright)}
+  .term-body .c-glow{color:var(--glow);text-shadow:0 0 8px rgba(63,182,232,.5)}
+  .term-body .c-ok{color:var(--ok)}
+  .term-body .c-warn{color:var(--warn)}
+  .caret{display:inline-block;width:8px;height:15px;background:var(--ice);vertical-align:-2px;
+    animation:blink 1s steps(1) infinite}
+
+  /* ---------- android ---------- */
+  .android-grid{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:56px;margin-top:48px;align-items:start}
+  @media(max-width:920px){.android-grid{grid-template-columns:1fr;gap:40px}}
+  .phone{
+    width:min(300px,88vw);margin:0 auto;border-radius:38px;padding:12px;position:relative;
+    background:linear-gradient(160deg,#0d1c2e,#050b14);
+    border:1px solid var(--line-bright);
+    box-shadow:0 30px 80px rgba(0,0,0,.6), 0 0 60px rgba(63,182,232,.12);
+  }
+  .phone::before{
+    content:"";position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    width:96px;height:22px;background:#02050a;border-radius:0 0 14px 14px;z-index:3;
+  }
+  .phone-screen{
+    border-radius:28px;overflow:hidden;background:#04090f;border:1px solid #0d2033;
+    font-family:var(--mono);font-size:.62rem;line-height:1.6;
+  }
+  .ph-status{display:flex;justify-content:space-between;padding:10px 16px 4px;color:var(--dim);font-size:.58rem}
+  .ph-head{padding:12px 16px 10px;border-bottom:1px solid #0d2033;display:flex;align-items:center;gap:8px}
+  .ph-head svg{flex-shrink:0}
+  .ph-head b{color:var(--ice-bright);letter-spacing:.2em;font-size:.66rem}
+  .ph-head span{margin-left:auto;color:var(--ok);font-size:.56rem;letter-spacing:.1em}
+  .ph-sec{padding:12px 16px;border-bottom:1px solid #0d2033}
+  .ph-label{color:var(--dim);letter-spacing:.24em;font-size:.54rem;text-transform:uppercase;margin-bottom:8px}
+  .ph-row{display:flex;justify-content:space-between;color:#9db8ca;padding:3px 0}
+  .ph-row b{color:var(--ice);font-weight:600}
+  .ph-row .ok{color:var(--ok)}
+  .ph-row .warn{color:var(--warn)}
+  .ph-bar{height:5px;border-radius:3px;background:#0d2033;margin-top:8px;overflow:hidden}
+  .ph-bar i{display:block;height:100%;width:64%;border-radius:3px;
+    background:linear-gradient(90deg,var(--glow-deep),var(--glow));
+    box-shadow:0 0 8px rgba(63,182,232,.7);animation:load 5s ease-in-out infinite alternate}
+  @keyframes load{from{width:38%}to{width:82%}}
+  .ph-exec{
+    margin:12px 16px 16px;padding:10px;border:1px solid rgba(63,182,232,.4);border-radius:8px;
+    text-align:center;color:var(--ice-bright);letter-spacing:.3em;font-size:.6rem;
+    background:rgba(63,182,232,.08);box-shadow:0 0 14px rgba(63,182,232,.15);
+  }
+  .steps{list-style:none;counter-reset:s;margin-top:30px}
+  .steps li{
+    counter-increment:s;position:relative;padding:16px 0 16px 62px;color:var(--muted);
+    border-top:1px solid var(--line);font-size:.95rem;
+  }
+  .steps li::before{
+    content:"0" counter(s);position:absolute;left:0;top:14px;
+    font-family:var(--mono);font-size:.8rem;color:var(--glow);
+    border:1px solid rgba(63,182,232,.4);border-radius:7px;padding:6px 9px;
+    background:rgba(63,182,232,.06);text-shadow:0 0 8px rgba(63,182,232,.5);
+  }
+  .steps li b{color:var(--text);font-weight:600}
+  .steps li code{white-space:nowrap}
+  .dl-card{
+    margin-top:34px;border:1px solid rgba(63,182,232,.4);border-radius:12px;padding:24px;
+    background:linear-gradient(180deg,rgba(10,25,40,.8),rgba(6,13,22,.8));
+    box-shadow:0 0 40px rgba(63,182,232,.08);
+  }
+  .dl-card .btn{margin-top:4px}
+  .dl-meta{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 2px}
+  .sha{
+    margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    font-family:var(--mono);font-size:.72rem;color:var(--dim);
+  }
+  .sha code{
+    background:rgba(3,8,14,.9);border:1px solid var(--line);border-radius:6px;
+    padding:7px 10px;color:#7fa5bd;word-break:break-all;font-size:.68rem;flex:1;min-width:200px;
+  }
+  .copy-btn{
+    font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;cursor:pointer;
+    color:var(--ice);background:rgba(63,182,232,.08);border:1px solid rgba(63,182,232,.35);
+    border-radius:6px;padding:7px 12px;transition:all .2s;
+  }
+  .copy-btn:hover{background:rgba(63,182,232,.2)}
+
+  /* ---------- beta strip ---------- */
+  .beta-strip{
+    border:1px solid rgba(255,212,121,.32);border-radius:12px;padding:26px 28px;
+    background:linear-gradient(180deg,rgba(48,38,12,.28),rgba(20,16,6,.28));
+    display:flex;gap:20px;align-items:flex-start;
+  }
+  .beta-strip svg{flex-shrink:0;margin-top:3px}
+  .beta-strip h3{font-family:var(--mono);color:var(--warn);letter-spacing:.14em;font-size:.92rem;margin-bottom:8px;text-transform:uppercase}
+  .beta-strip p{color:var(--muted);font-size:.93rem}
+  .beta-strip a{color:var(--warn)}
+
+  /* ---------- source ---------- */
+  .src-card{
+    margin-top:44px;border:1px solid var(--line-bright);border-radius:14px;padding:34px;
+    background:linear-gradient(135deg,rgba(10,21,36,.9),rgba(5,11,20,.9));
+    display:flex;gap:26px;align-items:center;flex-wrap:wrap;
+    box-shadow:0 0 50px rgba(63,182,232,.06);
+  }
+  .src-card .ico{
+    width:58px;height:58px;border-radius:13px;display:flex;align-items:center;justify-content:center;
+    background:rgba(63,182,232,.09);border:1px solid rgba(63,182,232,.32);flex-shrink:0;
+  }
+  .src-card > div{min-width:0}
+  .src-card h3{font-family:var(--mono);color:var(--ice-bright);letter-spacing:.06em;margin-bottom:6px;
+    overflow-wrap:anywhere;font-size:clamp(.95rem,3.4vw,1.17rem)}
+  .src-card p{color:var(--muted);font-size:.93rem;max-width:38em}
+  .src-card .btn{margin-left:auto}
+  @media(max-width:760px){.src-card .btn{margin-left:0}}
+
+  /* ---------- footer ---------- */
+  footer{
+    border-top:1px solid var(--line);padding:56px 0 46px;text-align:center;
+    background:linear-gradient(180deg,transparent,rgba(5,11,20,.8));
+  }
+  .foot-loop{margin-bottom:18px}
+  .foot-loop svg{filter:drop-shadow(0 0 12px rgba(63,182,232,.7));animation:heroGlow 5s ease-in-out infinite}
+  .foot-tag{
+    font-family:var(--mono);letter-spacing:.42em;font-size:.8rem;color:var(--ice);
+    text-transform:uppercase;text-shadow:0 0 14px rgba(63,182,232,.5);
+  }
+  .foot-fine{margin-top:18px;color:var(--dim);font-size:.78rem;font-family:var(--mono);letter-spacing:.06em}
+  .foot-fine a{color:var(--muted)}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+    html{scroll-behavior:auto}
+    .reveal{opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-fixed"></div>
+<div class="bg-grid"></div>
+
+<nav>
+  <div class="nav-in">
+    <a class="logo" href="#top" aria-label="LOOPRITE home">
+      <svg width="26" height="16" viewBox="0 0 52 32" aria-hidden="true"><path d="M6 16c0-8 12-8 20 0s20 8 20 0-12-8-20 0-20 8-20 0z" fill="none" stroke="#5bc9f2" stroke-width="4" stroke-linecap="round"/></svg>
+      LOOPRITE
+    </a>
+    <div class="nav-links">
+      <a href="#what">What it is</a>
+      <a href="#modes">Modes</a>
+      <a href="#android">Android</a>
+      <a href="#source">Source</a>
+      <a class="nav-cta" href="downloads/l00prite-os-0.1.0-beta.apk" download>↓ APK</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="circuit" aria-hidden="true">
+    <svg viewBox="0 0 1400 900" preserveAspectRatio="xMidYMin slice">
+      <g class="traces">
+        <path class="trace" d="M120 80 h190 l40 40 v170 l-30 30 h-140"/>
+        <path class="trace" d="M1280 120 h-220 l-50 50 v130 l40 40 h120"/>
+        <path class="trace" d="M80 520 h150 l60 -60 h180 v-90"/>
+        <path class="trace" d="M1330 560 h-190 l-70 -40 h-160 v-120"/>
+        <path class="trace" d="M700 30 v90 l-60 60 v110"/>
+        <path class="trace" d="M760 40 v70 l70 70 v140"/>
+        <path class="trace" d="M240 700 h220 l60 -60 h160"/>
+        <path class="trace" d="M1180 720 h-260 l-50 -50 h-130"/>
+        <circle class="node" cx="120" cy="80" r="4"/><circle class="node" cx="180" cy="320" r="4"/>
+        <circle class="node" cx="1280" cy="120" r="4"/><circle class="node" cx="1170" cy="340" r="4"/>
+        <circle class="node" cx="80" cy="520" r="4"/><circle class="node" cx="470" cy="370" r="4"/>
+        <circle class="node" cx="1330" cy="560" r="4"/><circle class="node" cx="910" cy="400" r="4"/>
+        <circle class="node" cx="700" cy="30" r="4"/><circle class="node" cx="640" cy="290" r="4"/>
+        <circle class="node" cx="760" cy="40" r="4"/><circle class="node" cx="830" cy="320" r="4"/>
+        <circle class="node" cx="240" cy="700" r="4"/><circle class="node" cx="680" cy="640" r="4"/>
+        <circle class="node" cx="1180" cy="720" r="4"/><circle class="node" cx="740" cy="670" r="4"/>
+      </g>
+      <path class="pulse" d="M120 80 h190 l40 40 v170 l-30 30 h-140"/>
+      <path class="pulse p2" d="M1280 120 h-220 l-50 50 v130 l40 40 h120"/>
+      <path class="pulse p3" d="M240 700 h220 l60 -60 h160"/>
+    </svg>
+  </div>
+
+  <div class="wrap">
+    <span class="beta-pill"><span class="beta-dot"></span> Public beta · v0.1.0</span>
+    <h1>LOOPRITE — loop once, loop right</h1>
+    <img class="brand-img" src="assets/brand-image.png"
+         alt="LOOPRITE — glowing dot-matrix wordmark on a circuit board. Loop once, loop right." >
+    <p class="hero-sub">
+      The operating system for <b>autonomous software engineering</b>. LOOPRITE gives AI coding
+      agents durable, file-based memory and a deterministic execution protocol —
+      <b>vendor-neutral, resumable, and gated by explicit human confirmation</b>. Now running
+      in your pocket.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="downloads/l00prite-os-0.1.0-beta.apk" download>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        <span>Download for Android<small>l00prite-os-0.1.0-beta.apk · 15 MB · arm64</small></span>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        View the source
+      </a>
+    </div>
+    <div class="hero-meta">
+      <span class="chip"><b>BETA</b> · debug-signed build</span>
+      <span class="chip">Android <b>8.0+</b></span>
+      <span class="chip"><b>arm64-v8a</b> devices</span>
+      <span class="chip">MIT-licensed source</span>
+      <span class="chip">No cloud middleman</span>
+    </div>
+  </div>
+</header>
+
+<div class="ticker" aria-label="Works with every major AI coding agent">
+  <div class="ticker-label">one protocol · every agent</div>
+  <div class="ticker-track" aria-hidden="true">
+    <div class="ticker-set">
+      <span>CLAUDE <i>∞</i></span><span>CODEX <i>∞</i></span><span>GPT <i>∞</i></span>
+      <span>GEMINI <i>∞</i></span><span>COPILOT <i>∞</i></span><span>CURSOR <i>∞</i></span>
+      <span>WINDSURF <i>∞</i></span><span>AIDER <i>∞</i></span><span>ZED <i>∞</i></span>
+      <span>QWEN CODE <i>∞</i></span><span>OPENCODE <i>∞</i></span>
+    </div>
+    <div class="ticker-set">
+      <span>CLAUDE <i>∞</i></span><span>CODEX <i>∞</i></span><span>GPT <i>∞</i></span>
+      <span>GEMINI <i>∞</i></span><span>COPILOT <i>∞</i></span><span>CURSOR <i>∞</i></span>
+      <span>WINDSURF <i>∞</i></span><span>AIDER <i>∞</i></span><span>ZED <i>∞</i></span>
+      <span>QWEN CODE <i>∞</i></span><span>OPENCODE <i>∞</i></span>
+    </div>
+  </div>
+</div>
+
+<section id="what">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="kicker">01 · What LOOPRITE does</div>
+      <h2>A small operating system<br>whose hardware is your repo.</h2>
+      <p class="lead">
+        AI coding agents forget everything between sessions, and every vendor locks that
+        memory into its own proprietary state. LOOPRITE fixes both: it puts the agent's
+        <b>memory, plans, events, and safety rules into plain files inside your repository</b> —
+        readable and writable by any agent. Claude can plan, Codex can execute, Gemini can
+        verify and respond to review comments, and whatever ships next can resume all of it
+        from files. No backend. No hosted service. No lock-in.
+      </p>
+    </div>
+    <div class="grid">
+      <div class="card reveal">
+        <span class="tag">memory</span>
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5bc9f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M4 4h16v12H4z"/><path d="M8 8h8M8 12h5"/></svg></div>
+        <h3>Durable memory</h3>
+        <p>The <code>.l00prite/</code> folder holds the blueprint, run ledger, durable decisions,
+        constraints, known failures, and todos — the project's whole working memory as
+        Markdown and JSON, versioned with your code.</p>
+      </div>
+      <div class="card reveal">
+        <span class="tag">processes</span>
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5bc9f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5"/></svg></div>
+        <h3>Loop prompts</h3>
+        <p>Six canonical prompts — resume, heartbeat, event, review, handoff, execute — define
+        exactly how any agent picks up the next unit of work, verifies it, and persists what
+        happened before stopping.</p>
+      </div>
+      <div class="card reveal">
+        <span class="tag">interrupts</span>
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5bc9f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg></div>
+        <h3>Events, not chaos</h3>
+        <p>PR review comments and failed CI runs become first-class JSON events with a real
+        lifecycle — <code>pending → processing → completed</code> — handled one at a time,
+        always treated as untrusted input.</p>
+      </div>
+      <div class="card reveal">
+        <span class="tag">scheduler</span>
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5bc9f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 13.4A9 9 0 1 1 12 3a8.9 8.9 0 0 1 6.4 2.7"/><path d="M12 7v5l3.5 2"/><path d="M17 3h4v4"/></svg></div>
+        <h3>Heartbeat control</h3>
+        <p><code>heartbeat.json</code> carries iteration budgets, continue/pause/stop signals,
+        and review gates — so a loop knows when to keep going and when a human has to look
+        first.</p>
+      </div>
+      <div class="card reveal">
+        <span class="tag">locks</span>
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5bc9f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h3>Cooperative locking</h3>
+        <p>A lock/lease convention (<code>lock.json</code>) keeps agents working close together
+        in time from silently corrupting shared memory — check, acquire, respect, reclaim
+        stale, release.</p>
+      </div>
+      <div class="card reveal">
+        <span class="tag">journal</span>
+        <div class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5bc9f2" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></div>
+        <h3>Verified ledger</h3>
+        <p><code>ledger.md</code> records what actually happened, run by run, with the
+        verification evidence — the commands that ran and what they proved. Progress you can
+        audit, not vibes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="modes" style="background:rgba(5,11,20,.45);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="kicker">02 · Two operating modes</div>
+      <h2>Plan freely. Execute intentionally.</h2>
+      <p class="lead">
+        Autonomy without a gate is a liability. LOOPRITE splits agent work into two modes —
+        and the autonomous one <b>can only be entered through an explicit, in-session human
+        confirmation</b>. Every run. No carry-over grants, and no persisted flag can ever
+        stand in for you.
+      </p>
+    </div>
+    <div class="modes-grid">
+      <div class="mode reveal">
+        <div class="mode-num">Mode 01 — default</div>
+        <h3>Planning Mode</h3>
+        <p>Clarifies requirements, generates a blueprint, scaffolds the repo and its
+        <code>.l00prite/</code> memory — then <b>stops</b>. Planning never executes the
+        project it scaffolds, and always ships Execution Mode disarmed.</p>
+        <ul>
+          <li><b>Blueprint first</b> — goals, tiers, and constraints from a real conversation</li>
+          <li><b>Vendor adapters</b> — AGENTS.md, CLAUDE.md, Cursor/Windsurf rules, Copilot instructions</li>
+          <li><b>Nothing runs</b> — scaffold, hand over, stop</li>
+        </ul>
+      </div>
+      <div class="mode exec reveal">
+        <div class="mode-num">Mode 02 — armed by you</div>
+        <h3>Execution Mode</h3>
+        <p>Reads the blueprint and iterates autonomously — plan a unit, execute it, verify it
+        with recorded evidence, persist memory, repeat — until Definition of Done or a
+        <b>run boundary</b> stops it.</p>
+        <ul>
+          <li><b>Pre-flight gate</b> — goal, budget, boundaries and scope shown before you confirm</li>
+          <li><b>Nine run boundaries</b> — from <code>iteration_limit_reached</code> to <code>destructive_operation_required</code>, every exit is resumable</li>
+          <li><b>Per-action approval</b> — push, merge, deploy, and credentials each need a fresh yes</li>
+          <li><b>Self-modification guard</b> — the loop can never raise its own limits</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="term reveal" role="img" aria-label="Terminal showing the Execution Mode pre-flight gate: the run starts only after a human types EXECUTE">
+      <div class="term-bar"><i></i><i></i><i></i><span>execute-loop — pre-flight</span></div>
+      <div class="term-body" id="term-body"><span class="c-dim">$</span> <span class="c-ice">l00prite</span> execute-loop
+</div>
+    </div>
+  </div>
+</section>
+
+<section id="android">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="kicker">03 · L00prite OS for Android</div>
+      <h2>The whole control plane,<br>running on your phone.</h2>
+      <p class="lead">
+        The beta APK ships the <b>unmodified LOOPRITE gateway</b> as a native arm64 binary and
+        runs it entirely on-device — setup wizard, dashboard, playground, and autonomous runs
+        in a WebView on <code>127.0.0.1</code>. Your provider keys are sealed by an
+        Android-Keystore-wrapped master key and <b>never leave the device</b>. There is no
+        LOOPRITE cloud: your phone <i>is</i> the server.
+      </p>
+    </div>
+
+    <div class="android-grid">
+      <div class="reveal">
+        <div class="phone" aria-hidden="true">
+          <div class="phone-screen">
+            <div class="ph-status"><span>13:37</span><span>▲ ● ▮</span></div>
+            <div class="ph-head">
+              <svg width="18" height="11" viewBox="0 0 52 32"><path d="M6 16c0-8 12-8 20 0s20 8 20 0-12-8-20 0-20 8-20 0z" fill="none" stroke="#5bc9f2" stroke-width="4" stroke-linecap="round"/></svg>
+              <b>L00PRITE OS</b><span>● GATEWAY LIVE</span>
+            </div>
+            <div class="ph-sec">
+              <div class="ph-label">Run · fix-search-endpoint</div>
+              <div class="ph-row"><span>iteration</span><b>4 / 10</b></div>
+              <div class="ph-row"><span>unit</span><span>verify: go test ./…</span></div>
+              <div class="ph-row"><span>boundaries</span><span class="ok">9 armed</span></div>
+              <div class="ph-bar"><i></i></div>
+            </div>
+            <div class="ph-sec">
+              <div class="ph-label">Approvals inbox</div>
+              <div class="ph-row"><span>git push origin fix/search</span><span class="warn">awaiting you</span></div>
+              <div class="ph-row"><span>ledger append</span><span class="ok">auto</span></div>
+            </div>
+            <div class="ph-sec">
+              <div class="ph-label">Routing</div>
+              <div class="ph-row"><span>plan</span><b>auto:architect</b></div>
+              <div class="ph-row"><span>code</span><b>auto:writer</b></div>
+              <div class="ph-row"><span>review</span><b>auto:reviewer</b></div>
+            </div>
+            <div class="ph-exec">TYPE “EXECUTE” TO START</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <ol class="steps reveal">
+          <li><b>Download the APK</b> below — or grab it from the
+            <a href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">source repo</a>
+            and build it yourself with <code>cli-os/scripts/build-apk.sh</code>.</li>
+          <li><b>Allow the install.</b> This beta is sideloaded: Android will ask you to permit
+            installs from your browser (Settings → “Install unknown apps”). That prompt is
+            expected for any app outside the Play Store.</li>
+          <li><b>Open L00prite OS.</b> The gateway boots as a foreground service and the setup
+            wizard walks you through your vault, your first AI provider, and your first token
+            — keys stay on-device, sealed by the Android Keystore.</li>
+          <li><b>Import a repo &amp; run.</b> Clone from a URL or import from device storage,
+            open the Runs view, review the pre-flight, and type <code>EXECUTE</code>. Pushes,
+            merges, and anything destructive still wait for your explicit approval.</li>
+        </ol>
+
+        <div class="dl-card reveal">
+          <a class="btn btn-primary" href="downloads/l00prite-os-0.1.0-beta.apk" download>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            <span>Download l00prite-os-0.1.0-beta.apk<small>15 MB · signed · SHA-256 verifiable</small></span>
+          </a>
+          <div class="dl-meta">
+            <span class="chip">Android <b>8.0+</b> (API 26)</span>
+            <span class="chip"><b>arm64-v8a</b> phones &amp; tablets</span>
+            <span class="chip">APK signature <b>v2 + v3</b></span>
+          </div>
+          <div class="sha">
+            <span>SHA-256</span>
+            <code id="sha-val">ef9f8a025cbc93583f36c30d815e9cc76c69bbfbb33d2f055511d7dd4be36cdf</code>
+            <button class="copy-btn" id="copy-sha" type="button">COPY</button>
+            <a href="downloads/SHA256SUMS" style="font-size:.7rem;color:var(--dim)">SHA256SUMS ↗</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="beta" style="padding-top:0">
+  <div class="wrap">
+    <div class="beta-strip reveal">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ffd479" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <div>
+        <h3>This is beta software</h3>
+        <p>
+          LOOPRITE is under active development and this Android build is a <b>beta</b>: it is
+          debug-signed, distributed outside the Play Store, and rough edges are expected.
+          Point it at repos you can afford to experiment on, keep Execution Mode's approval
+          prompts on, and expect breaking changes between releases. Found something weird?
+          <a href="https://github.com/jackofall1232/l00prite/issues" target="_blank" rel="noopener">Open an issue</a> —
+          beta reports shape the release.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="source" style="padding-top:24px">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="kicker">04 · Open source</div>
+      <h2>Built in the open, on l00prite.</h2>
+      <p class="lead">
+        LOOPRITE is built off the <b>l00prite</b> source code — the vendor-neutral protocol,
+        the gateway, the run engine, and this very APK pipeline are all MIT-licensed and
+        public. Read the prompts your agents will follow. Audit the run boundaries. Build the
+        APK from source and diff the checksum. That's the point.
+      </p>
+    </div>
+    <div class="src-card reveal">
+      <div class="ico">
+        <svg width="28" height="28" viewBox="0 0 16 16" fill="#5bc9f2" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </div>
+      <div>
+        <h3>github.com/jackofall1232/l00prite</h3>
+        <p>Protocol spec, canonical loop prompts, vendor adapters, the Go gateway, the run
+        engine, validators, and the hermetic Android build — one repo, MIT license.</p>
+      </div>
+      <a class="btn btn-ghost" href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">Explore the code →</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-loop">
+      <svg width="72" height="40" viewBox="0 0 52 32" aria-hidden="true"><path d="M6 16c0-8 12-8 20 0s20 8 20 0-12-8-20 0-20 8-20 0z" fill="none" stroke="#5bc9f2" stroke-width="3.4" stroke-linecap="round"/></svg>
+    </div>
+    <div class="foot-tag">Loop once ∞ Loop right</div>
+    <div class="foot-fine">
+      LOOPRITE · beta · built from the MIT-licensed
+      <a href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">l00prite</a> source
+    </div>
+  </div>
+</footer>
+
+<script>
+  // reveal on scroll
+  (function(){
+    var els=document.querySelectorAll('.reveal');
+    if(!('IntersectionObserver' in window)){els.forEach(function(e){e.classList.add('in')});return}
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target)}});
+    },{threshold:.12});
+    els.forEach(function(e){io.observe(e)});
+  })();
+
+  // copy checksum
+  (function(){
+    var btn=document.getElementById('copy-sha');
+    btn.addEventListener('click',function(){
+      var t=document.getElementById('sha-val').textContent.trim();
+      function done(ok){btn.textContent=ok?'COPIED ✓':'COPY FAILED';setTimeout(function(){btn.textContent='COPY'},1800)}
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(t).then(function(){done(true)},function(){done(false)});
+      }else{done(false)}
+    });
+  })();
+
+  // terminal typing (typed once when scrolled into view)
+  (function(){
+    var body=document.getElementById('term-body');
+    var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var lines=[
+      ['',''],
+      ['c-glow','══════════ EXECUTION MODE · PRE-FLIGHT ══════════'],
+      ['','  goal              <i class="c-ice">ship v0.2 search endpoint</i>'],
+      ['','  planned units     <i class="c-ice">6</i>'],
+      ['','  iteration budget  <i class="c-ice">10</i>'],
+      ['','  run boundaries    <i class="c-ice">9 armed</i>'],
+      ['','  files in scope    <i class="c-dim">internal/api/ · internal/search/ · docs/</i>'],
+      ['','  verification      <i class="c-dim">go test ./...  ·  validate-l00prite.js</i>'],
+      ['',''],
+      ['c-warn','  Execution Mode is DISARMED by default.'],
+      ['c-warn','  No saved flag can confirm this run. Only you can.'],
+      ['',''],
+      ['','  <span class="c-dim">confirm to arm ›</span> <b class="c-ice">EXECUTE</b>'],
+      ['',''],
+      ['c-ok','  ✓ confirmed by human · iteration 1/10 begins'],
+      ['','  <span class="c-dim">[unit 1]</span> plan → execute → verify → persist'],
+    ];
+    var rendered=false;
+    function render(instant){
+      if(rendered)return;rendered=true;
+      if(instant){
+        lines.forEach(function(l){
+          var div=document.createElement('div');
+          if(l[0])div.className=l[0];
+          div.innerHTML=l[1]||' ';
+          body.appendChild(div);
+        });
+        return;
+      }
+      var i=0;
+      var caret=document.createElement('span');caret.className='caret';
+      function next(){
+        if(i>=lines.length){body.appendChild(caret);return}
+        var l=lines[i++];
+        var div=document.createElement('div');
+        if(l[0])div.className=l[0];
+        div.innerHTML=l[1]||' ';
+        body.appendChild(div);
+        setTimeout(next, l[1]===''?90:210);
+      }
+      setTimeout(next,350);
+    }
+    if(reduced||!('IntersectionObserver' in window)){render(true);return}
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(en){if(en.isIntersecting){render(false);io.disconnect()}});
+    },{threshold:.35});
+    io.observe(body);
+  })();
+</script>
+</body>
+</html>
