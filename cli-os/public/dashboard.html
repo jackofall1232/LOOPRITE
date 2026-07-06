@@ -75,6 +75,8 @@
   .btn:hover{border-color:var(--stroke-2);background:var(--panel-2);}
   .btn:active{transform:translateY(1px);}
   .btn.primary{background:linear-gradient(180deg,#5a94ff,#3f7cff);border-color:rgba(79,140,255,.5);color:#fff;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .btn:disabled:active{transform:none;}
   .btn.sm{padding:6px 10px;font-size:12px;}
   #nav-toggle{display:none;}
   #nav-backdrop{position:fixed;inset:0;z-index:29;background:rgba(6,9,13,.6);}
@@ -1043,10 +1045,10 @@
           <option value="privacy">privacy</option>
         </select></div>
       <div id="cr-privacy-note" class="note warn hidden">Privacy requires an operator-defined <span class="mono">routing.profiles.privacy</span> provider allowlist in <span class="mono">config.json</span> — otherwise pre-flight will block with a blocker.</div>
+      <div class="field"><label>Command allowlist <span class="opt">— required; the first line is the done-check that must pass before the goal counts as met</span></label><textarea id="cr-allowlist" rows="3" placeholder="one command per line, e.g.&#10;go test ./...&#10;npm test"></textarea></div>
       <details style="margin-top:14px">
         <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2)">Advanced</summary>
         <div class="field"><label>Max iterations <span class="opt">— optional, server default otherwise</span></label><input type="text" id="cr-maxiter" placeholder="server default"></div>
-        <div class="field"><label>Command allowlist <span class="opt">— optional, one per line</span></label><textarea id="cr-allowlist" rows="3" placeholder="one command per line, e.g.&#10;go test ./...&#10;npm test"></textarea></div>
         <div class="field"><label>Gates <span class="opt">— per-action permission for each class</span></label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:6px">
             ${GATE_CLASSES.map(([cls,label])=>gateSelectField(cls,label)).join("")}
@@ -1066,6 +1068,8 @@
     submitBtn.onclick=async()=>{
       const goal=document.getElementById("cr-goal").value.trim();
       if(!goal){ note.innerHTML=`<div class="note err">Describe the goal for this run.</div>`; return; }
+      const allowlist=document.getElementById("cr-allowlist").value.split("\n").map(s=>s.trim()).filter(Boolean);
+      if(!allowlist.length){ note.innerHTML=`<div class="note err">Name at least one command — its first line is the done-check the engine runs to confirm the goal was met (e.g. <span class="mono">go test ./...</span>). Pre-flight blocks without one.</div>`; return; }
       let repoId=repoSel.value;
       if(repoId==="__clone"){
         const cid=document.getElementById("cr-clone-id").value.trim(), curl=document.getElementById("cr-clone-url").value.trim();
@@ -1080,11 +1084,9 @@
       }
       const gates={};
       GATE_CLASSES.forEach(([cls])=>{ gates[cls]=document.getElementById("cr-gate-"+cls).value; });
-      const payload={repo:repoId, goal, objective:objSel.value, gates};
+      const payload={repo:repoId, goal, objective:objSel.value, gates, command_allowlist:allowlist};
       const maxIterRaw=document.getElementById("cr-maxiter").value.trim();
       if(maxIterRaw){ const n=parseInt(maxIterRaw,10); if(Number.isInteger(n) && n>0) payload.max_iterations=n; }
-      const allowlist=document.getElementById("cr-allowlist").value.split("\n").map(s=>s.trim()).filter(Boolean);
-      if(allowlist.length) payload.command_allowlist=allowlist;
       busy(submitBtn,"Creating…");
       const {res,data}=await api("POST","/v1/runs",payload);
       if(!res.ok){ unbusy(submitBtn,"Create run"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not create the run."))}</div>`; return; }
