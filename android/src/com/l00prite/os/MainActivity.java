@@ -216,6 +216,12 @@ public class MainActivity extends Activity {
         if (importThread != null) {
             importThread.interrupt();
         }
+        // Every configuration change (e.g. rotation; this Activity declares no
+        // android:configChanges) tears down and recreates MainActivity, so without an explicit
+        // destroy() the old WebView's native Chromium resources are never released.
+        if (webView != null) {
+            webView.destroy();
+        }
         super.onDestroy();
     }
 
@@ -223,6 +229,9 @@ public class MainActivity extends Activity {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (activityDestroyed) {
+                    return;
+                }
                 if (succeeded) {
                     webView.loadUrl(BASE_URL + "?ss=" + setupSecret);
                     webView.setVisibility(View.VISIBLE);

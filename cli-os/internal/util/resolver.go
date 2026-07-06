@@ -88,7 +88,14 @@ func normalizeDNSAddr(s string) (string, bool) {
 		// whole string as the host and default the port instead of rejecting it.
 		host, port = s, "53"
 	}
-	if net.ParseIP(host) == nil {
+	// Android commonly hands out link-local IPv6 DNS servers with a zone identifier suffix (e.g.
+	// "fe80::1%wlan0"), which net.ParseIP does not understand. Validate against the address alone
+	// but keep the zone on the address net.Dial actually needs to reach the right interface.
+	ipPart := host
+	if idx := strings.IndexByte(host, '%'); idx != -1 {
+		ipPart = host[:idx]
+	}
+	if net.ParseIP(ipPart) == nil {
 		return "", false
 	}
 	return net.JoinHostPort(host, port), true

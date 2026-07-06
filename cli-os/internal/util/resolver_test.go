@@ -153,6 +153,11 @@ func TestNormalizeDNSAddr(t *testing.T) {
 		{"8.8.8.8", "8.8.8.8:53", true},
 		{"8.8.8.8:5353", "8.8.8.8:5353", true},
 		{"::1", "[::1]:53", true},
+		// Android commonly reports link-local IPv6 DNS servers with a zone identifier suffix
+		// (e.g. "fe80::1%wlan0"); net.ParseIP alone rejects these, but the zone must survive into
+		// the dial address so the resolver reaches the right interface.
+		{"fe80::1%wlan0", "[fe80::1%wlan0]:53", true},
+		{"[fe80::1%wlan0]:547", "[fe80::1%wlan0]:547", true},
 		{"not-an-ip", "", false},
 		{"", "", false},
 	}

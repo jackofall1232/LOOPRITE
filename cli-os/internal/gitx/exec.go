@@ -30,10 +30,15 @@ func (execClient) Kind() string { return "exec" }
 // combined output alongside whatever error exec.Cmd.CombinedOutput produced (untyped-error-safe:
 // callers that need the *exec.ExitError, like the model-facing git_command tool, run their own
 // exec.Command directly rather than going through this seam — see tools.go's gitCommand).
+//
+// LC_ALL=C forces git's own output to English regardless of the host's locale: Commit,
+// identityMissing, and Log all recognize failure modes ("nothing to commit", "Please tell me who
+// you are", the empty-repo log marker) by matching English substrings in this output, and a
+// localized git build would silently break every one of those checks.
 func (c execClient) run(ctx context.Context, repo string, args ...string) (string, error) {
 	full := append([]string{"-C", repo}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = util.ScrubSecretEnv(os.Environ())
+	cmd.Env = append(util.ScrubSecretEnv(os.Environ()), "LC_ALL=C")
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
