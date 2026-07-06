@@ -886,3 +886,66 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** see failures.md.
 - **Lock:** lock-20260705-212423-claude-android-apk-pass RELEASED at session end
   (2026-07-05T22:47Z), per LOCKING.md rule 5.
+
+### Run 2026-07-06T00:05:00Z — Claude (Sonnet 5), branch claude/looprite-android-apk-4mth8g — PR #1 CI fix + bot review response
+- **Goal:** Fix the first live `android-apk` CI run's failure and address all bot review
+  findings (Gemini Code Assist + Copilot) on PR #1.
+- **Triggering event:** GitHub webhook — CI check `Build & verify APK (real Android SDK)`
+  failed (exit 127); Gemini Code Assist review (7 comments) and Copilot review (3
+  comments) posted on the PR.
+- **Decision:** All 10 findings were small, high-confidence, non-architectural — fixed
+  directly without asking, per the subscription's stated authority.
+- **Completed work:**
+  - CI fix: `sdkmanager` is not on PATH on `ubuntu-latest` runners despite `ANDROID_HOME`
+    being preinstalled; resolved explicitly from
+    `$ANDROID_HOME/cmdline-tools/{latest,*}/bin/sdkmanager`.
+  - Gemini (6 code comments, 1 summary — all addressed): cached `gitx.Detect()`'s
+    exec-vs-gogit decision at process start instead of re-running `exec.LookPath` on every
+    call; `gogit.Commit()` now explicitly maps `git.ErrEmptyCommit` to `("", nil)`;
+    `commitSignature()` resolves name/email independently across local-then-global config
+    scopes (local wins, matching git's own precedence — also implements the local-config
+    lookup the original doc comment had promised but the code didn't do); DNS dialer loop
+    checks `ctx.Err()` before each server dial; `build-apk.sh`'s android-all version grep
+    no longer aborts the whole script under `set -e -o pipefail` on a metadata-format miss.
+  - Copilot (3 comments, all addressed): `MainActivity`'s health-poll thread is now a field,
+    interrupted in `onDestroy()` (closes a leak/stale-callback race across activity
+    recreation); `androidFallback()` no longer treats a non-ENOENT stat failure as "missing"
+    (regression test added, root-aware skip since permission checks don't bind at euid 0 —
+    confirmed this container runs as root); `commitSignature` doc comment now accurately
+    describes the local-over-global resolution (same fix as the Gemini duplicate finding).
+  - Resolved all 9 GitHub review threads (all fixes landed in the pushed diff; nothing
+    ambiguous enough to need a reply).
+- **Changed files:** `.github/workflows/android-apk.yml`,
+  `android/src/com/l00prite/os/{GatewayService,MainActivity}.java`,
+  `cli-os/internal/gitx/{gitx,gitx_test,gogit}.go`,
+  `cli-os/internal/util/{resolver,resolver_test}.go`, `cli-os/scripts/build-apk.sh`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./... && go test ./...` ·
+    `exit_code: 0` · `summary: all packages ok; one test needed updating (gitx_test's
+    Detect() PATH-clearing test now exercises the underlying detectOnce() directly since
+    Detect() is cached) — new resolver regression test for the non-ENOENT stat case also
+    passes (correctly skips under root)` · 2026-07-06T00:12Z.
+  - `command: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./cmd/l00prite` ·
+    `exit_code: 0` · `summary: android build unaffected` · 2026-07-06T00:12Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` (0 FAIL lines) ·
+    2026-07-06T00:13Z.
+  - `command: python3 -c "import yaml; yaml.safe_load(open('.github/workflows/android-apk.yml'))"`
+    · `exit_code: 0` · `summary: workflow YAML re-parses after the sdkmanager fix` ·
+    2026-07-06T00:13Z.
+  - `command: bash cli-os/scripts/build-apk.sh` · `exit_code: 0` · `summary: APK
+    reassembles and re-signs cleanly after the Java/script fixes (sha256
+    4c0ff6482d7c...)` · 2026-07-06T00:14Z.
+- **Response drafted/sent:** none needed — all 9 review threads resolved by fix, no reply
+  required.
+- **Event status:** completed (CI fix + both reviews addressed); PR remains open pending
+  the next CI run and maintainer merge decision.
+- **Failures:** none in this unit.
+- **Decisions:** none beyond the fixes themselves; no architectural changes.
+- **Confidence:** High — every finding was independently reproducible/verifiable (the
+  cache-vs-test interaction was caught by the existing test suite itself) and all
+  verification commands above are green.
+- **Next action:** watch for the next CI run's result; re-check PR mergeable state; a
+  ~12-minute check-in is already scheduled via send_later.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-000500-claude-android-apk-review-fixes held for this run;
+  released at the end of this turn.
