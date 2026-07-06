@@ -27,9 +27,14 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
+	"github.com/jackofall1232/l00prite/cli-os/internal/util"
 )
 
 // GateRequest describes an action that was NOT executed because it needs per-action human
@@ -56,7 +61,14 @@ type Toolbox struct {
 	Denylist  []string // parsed Autonomous-Edit Denylist globs from the target repo's constraints.md
 	Allowlist []string // command allowlist confirmed at pre-flight
 	Branch    string   // the run branch (git ops constrained to it)
+	// Git selects the exec-git/go-git seam (internal/gitx) for the engine-driven git helpers and
+	// the git_command tool's Kind() check. Nil defaults to gitx.Detect() (a fresh, cheap decision)
+	// so a Toolbox built without wiring one — every existing test literal — keeps working unchanged.
+	Git gitx.Client
 }
+
+// gitClient returns tb.Git, defaulting to gitx.Detect() when unset.
+func (tb *Toolbox) gitClient() gitx.Client { return gitOrDetect(tb.Git) }
 
 // ---- limits ----
 
@@ -533,6 +545,36 @@ func (tb *Toolbox) searchFiles(args map[string]any) ToolOutcome {
 
 // ---- run_command ----
 
+var (
+	shellPathOnce sync.Once
+	shellPathVal  string
+)
+
+// shellPath resolves the POSIX shell run_command execs, once per process (Android G3 — see
+// docs/android-architecture.md §4). Desktop always has /bin/sh, so LookPath("sh") finds it first
+// and behavior there is unchanged; stock Android ships no /bin/sh at all — its shell lives at
+// /system/bin/sh — so a hardcoded "/bin/sh" would make run_command unconditionally fail on-device.
+// LookPath covers any host with sh anywhere on PATH; the two absolute-path checks cover a host
+// with sh installed but not on PATH (Android's case, PATH notwithstanding).
+func shellPath() string {
+	shellPathOnce.Do(func() {
+		if p, err := exec.LookPath("sh"); err == nil {
+			shellPathVal = p
+			return
+		}
+		if _, err := os.Stat("/bin/sh"); err == nil {
+			shellPathVal = "/bin/sh"
+			return
+		}
+		if _, err := os.Stat("/system/bin/sh"); err == nil {
+			shellPathVal = "/system/bin/sh"
+			return
+		}
+		shellPathVal = "/bin/sh" // last resort: matches pre-G3 behavior when nothing resolves
+	})
+	return shellPathVal
+}
+
 func (tb *Toolbox) runCommand(ctx context.Context, args map[string]any, approved bool) ToolOutcome {
 	command := strings.TrimSpace(argString(args, "command"))
 	if command == "" {
@@ -564,12 +606,15 @@ func (tb *Toolbox) runCommand(ctx context.Context, args map[string]any, approved
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(cctx, "cmd", "/C", command)
 	} else {
-		cmd = exec.CommandContext(cctx, "/bin/sh", "-c", command)
+		cmd = exec.CommandContext(cctx, shellPath(), "-c", command)
 	}
 	cmd.Dir = tb.Root
-	// os.Environ() unchanged: this is the operator's own machine; provider keys are NOT in the
-	// gateway process env by design — do not filter, do not add.
-	cmd.Env = os.Environ()
+	// Scrub the two secret env vars that must never reach a model-directed shell command (Android
+	// G8 — see docs/android-architecture.md §4): LOOPRITE_MASTER_KEY (vault) and
+	// LOOPRITE_SETUP_SECRET (first-run gate). Everything else in os.Environ() passes through
+	// unfiltered — this is the operator's own machine, and provider keys are NOT in the gateway
+	// process env by design, so there is nothing else here that needs protecting.
+	cmd.Env = util.ScrubSecretEnv(os.Environ())
 
 	out, runErr := cmd.CombinedOutput()
 	return ToolOutcome{Result: formatCmdResult(out, runErr, cctx, cmdOutputCap, timeout)}
@@ -637,6 +682,23 @@ func (tb *Toolbox) gitCommand(ctx context.Context, args map[string]any, approved
 		return ToolOutcome{Result: fmt.Sprintf(
 			"ERROR: refusing git global flag %q as args[0]; pass a subcommand (status/diff/log/add/commit/show/branch)", sub)}
 	}
+	// git_command is arbitrary passthrough, which only the exec-git implementation can offer — the
+	// pure-Go go-git fallback (Android, no git binary; see internal/gitx) implements the specific
+	// primitives EnsureRunBranch/CommitUnit/CurrentDiff need, not an arbitrary subcommand. Under
+	// this Kind(), gitCommandGogit serves a conservative, exact-match read-only subset of
+	// status/diff/log/show instead of refusing everything outright; anything outside that subset
+	// still falls to the plain ERROR below (not a Gate: no human approval can supply a git binary
+	// that isn't there). The subset itself never gates — reached here, before the approval switch
+	// below is ever consulted, exactly like status/diff/log/show already run gate-free on the exec
+	// path (see that switch's case a few lines down).
+	if tb.gitClient().Kind() != "exec" {
+		if out, ok := tb.gitCommandGogit(sub, list); ok {
+			return out
+		}
+		return ToolOutcome{Result: "ERROR: git passthrough requires the git binary on this host; " +
+			"the read-only subset (status, diff, log, show) still works in its basic argument forms " +
+			"via the built-in pure-Go git"}
+	}
 	if !approved {
 		gated := false
 		switch sub {
@@ -668,9 +730,114 @@ func (tb *Toolbox) gitCommand(ctx context.Context, args map[string]any, approved
 	defer cancel()
 	full := append([]string{"-C", tb.Root}, list...)
 	cmd := exec.CommandContext(cctx, "git", full...)
-	cmd.Env = os.Environ()
+	cmd.Env = util.ScrubSecretEnv(os.Environ()) // Android G8: never leak the vault/setup secrets
 	out, runErr := cmd.CombinedOutput()
 	return ToolOutcome{Result: formatCmdResult(out, runErr, cctx, gitOutputCap, gitTimeoutSec)}
+}
+
+// logNArg matches git log's bare "-<N>" shorthand for "-n <N>" (e.g. "-5"): a leading dash
+// followed by digits with no leading zero, so a malformed count ("-0", "-05") never silently
+// matches and instead falls through to the hard refusal below.
+var logNArg = regexp.MustCompile(`^-[1-9][0-9]*$`)
+
+// gitCommandGogit serves the conservative, exact-match read-only subset of git_command that the
+// pure-Go go-git fallback (Kind()=="gogit") can offer without a git binary: status (no extra
+// args), diff / diff HEAD, log in its bare/-n N/--max-count=N/-N shorthand forms, and show <ref>
+// (exactly one ref, no flags). ok is false for anything outside this exact contract — an
+// unrecognized flag or extra argument is never interpreted as "probably fine"; the caller falls
+// through to the existing hard refusal instead. None of these gate: they are strictly read-only,
+// the same reason status/diff/log/show already run without approval on the exec path (the switch
+// a few lines above this function in gitCommand) — this function is called, and returns directly,
+// before that switch is ever reached, so the no-approval property holds here too.
+func (tb *Toolbox) gitCommandGogit(sub string, list []string) (ToolOutcome, bool) {
+	rest := list[1:]
+	switch {
+	case sub == "status" && len(rest) == 0:
+		out, err := tb.gitClient().StatusPorcelain(tb.Root)
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	// Bare `diff` is intentionally serviced here as `diff HEAD` (gitClient().DiffHead runs
+	// `git diff HEAD` under the exec client, i.e. working-tree-vs-HEAD, which is a superset of
+	// plain `git diff`'s working-tree-vs-index and additionally includes staged changes). That is
+	// a deliberate divergence from what bare `git diff` means on the exec-git backend a few lines
+	// above in gitCommand: gitx.Client has no working-tree-vs-index primitive to offer, and
+	// answering with the (truthful, merely broader) HEAD-relative diff beats refusing outright.
+	// A model relying on git_command for exact index-vs-worktree staging state will see different
+	// output between an exec-git host and this gogit host for the identical `diff` call.
+	case sub == "diff" && (len(rest) == 0 || (len(rest) == 1 && rest[0] == "HEAD")):
+		out, err := tb.gitClient().DiffHead(tb.Root)
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	case sub == "log":
+		n, ok := gitLogLimitArgs(rest)
+		if !ok {
+			return ToolOutcome{}, false
+		}
+		out, err := tb.gitClient().Log(tb.Root, n)
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	case sub == "show" && len(rest) == 1 && !strings.HasPrefix(rest[0], "-"):
+		out, err := tb.gitClient().Show(tb.Root, rest[0])
+		if err != nil {
+			return errResult(err), true
+		}
+		return ToolOutcome{Result: formatGitResult(out)}, true
+
+	default:
+		return ToolOutcome{}, false
+	}
+}
+
+// gitLogLimitArgs reports the commit limit for one of the four accepted `git log` argument
+// shapes: bare (rest empty -> 0, so gitx.Client.Log applies its own default), "-n <positive int>",
+// "--max-count=<positive int>", or the bare "-<positive int>" shorthand. ok is false for anything
+// else, including a non-positive or unparseable count — the caller falls through to the hard
+// refusal rather than guessing what was meant.
+func gitLogLimitArgs(rest []string) (limit int, ok bool) {
+	switch {
+	case len(rest) == 0:
+		return 0, true
+	case len(rest) == 2 && rest[0] == "-n":
+		n, err := strconv.Atoi(rest[1])
+		return n, err == nil && n > 0
+	case len(rest) == 1 && strings.HasPrefix(rest[0], "--max-count="):
+		n, err := strconv.Atoi(strings.TrimPrefix(rest[0], "--max-count="))
+		return n, err == nil && n > 0
+	case len(rest) == 1 && logNArg.MatchString(rest[0]):
+		n, err := strconv.Atoi(strings.TrimPrefix(rest[0], "-"))
+		return n, err == nil && n > 0
+	default:
+		return 0, false
+	}
+}
+
+// formatGitResult renders a gitx-served (gogit) git_command result the same way formatCmdResult
+// renders an exec-git one — an "exit_code: 0" line first (there is no real child-process exit
+// code here, but the model-facing shape stays identical either way so the model sees one
+// consistent format regardless of which gitx.Client implementation served the call), then the
+// (capped) output, using the same gitOutputCap and the same truncation note text.
+func formatGitResult(out string) string {
+	truncated := false
+	if len(out) > gitOutputCap {
+		out = out[:gitOutputCap]
+		truncated = true
+	}
+	var b strings.Builder
+	b.WriteString("exit_code: 0\n")
+	b.WriteString(out)
+	if truncated {
+		b.WriteString("\n… [truncated: output exceeds cap]")
+	}
+	return b.String()
 }
 
 // gitBranchArgsAreSafe reports whether `git branch <rest...>` only lists (no args) or creates one
@@ -701,14 +868,30 @@ func classifyGitSub(sub string) string {
 }
 
 // ---- engine-driven git helpers (NOT model tools; return Go errors) ----
+//
+// These go through a gitx.Client (internal/gitx) rather than shelling out to "git" directly, so
+// they keep working when no git binary is on the host (Android — docs/android-architecture.md
+// §4 G4) via the pure-Go go-git fallback. Every call site in this codebase passes the engine's own
+// gitx.Client (Engine.Git); a nil client (as every pre-G4 test literal still passes implicitly by
+// omission) defaults to gitx.Detect() so nothing that called these before G4 existed had to change
+// its behavior, only its signature.
+
+// gitOrDetect returns git, defaulting to gitx.Detect() when nil.
+func gitOrDetect(git gitx.Client) gitx.Client {
+	if git == nil {
+		return gitx.Detect()
+	}
+	return git
+}
 
 // EnsureRunBranch verifies the repo has a commit and a clean worktree, then creates/moves to
 // the run branch. Called by the engine before the first iteration.
-func EnsureRunBranch(root, branch string) error {
-	if _, err := runGit(root, "rev-parse", "--verify", "HEAD"); err != nil {
+func EnsureRunBranch(git gitx.Client, root, branch string) error {
+	git = gitOrDetect(git)
+	if _, err := git.RevParseHead(root); err != nil {
 		return fmt.Errorf("repository has no commits")
 	}
-	out, err := runGit(root, "status", "--porcelain")
+	out, err := git.StatusPorcelain(root)
 	if err != nil {
 		return fmt.Errorf("git status failed: %w", err)
 	}
@@ -717,35 +900,29 @@ func EnsureRunBranch(root, branch string) error {
 	if dirty := dirtyPathsOutsideL00prite(out); len(dirty) > 0 {
 		return fmt.Errorf("working tree is not clean")
 	}
-	if _, err := runGit(root, "checkout", "-B", branch); err != nil {
+	if err := git.CheckoutNewBranch(root, branch); err != nil {
 		return fmt.Errorf("git checkout -B %s failed: %w", branch, err)
 	}
 	return nil
 }
 
 // CommitUnit stages everything and commits with message. "nothing to commit" is not an error:
-// it returns ("", nil). On a real commit it returns the new HEAD hash.
-func CommitUnit(root, message string) (string, error) {
-	if _, err := runGit(root, "add", "-A"); err != nil {
+// it returns ("", nil) (both gitx implementations detect this themselves — see internal/gitx). On
+// a real commit it returns the new HEAD hash.
+func CommitUnit(git gitx.Client, root, message string) (string, error) {
+	git = gitOrDetect(git)
+	if err := git.AddAll(root); err != nil {
 		return "", err
 	}
-	out, err := runGit(root, "commit", "-m", message)
-	if err != nil {
-		if strings.Contains(out, "nothing to commit") || strings.Contains(err.Error(), "nothing to commit") {
-			return "", nil
-		}
-		return "", err
-	}
-	hash, err := runGit(root, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(hash), nil
+	return git.Commit(root, message)
 }
 
-// CurrentDiff returns `git diff HEAD`, capped at maxBytes (used by the reviewer role).
-func CurrentDiff(root string, maxBytes int) (string, error) {
-	out, err := runGit(root, "diff", "HEAD")
+// CurrentDiff returns a diff of the worktree against HEAD, capped at maxBytes (used by the
+// reviewer role). Under the go-git fallback this may be a file-status summary rather than a
+// hunk-level unified diff — see gitx.Client.DiffHead's doc comment.
+func CurrentDiff(git gitx.Client, root string, maxBytes int) (string, error) {
+	git = gitOrDetect(git)
+	out, err := git.DiffHead(root)
 	if err != nil {
 		return "", err
 	}
@@ -753,21 +930,6 @@ func CurrentDiff(root string, maxBytes int) (string, error) {
 		out = out[:maxBytes] + "\n… [truncated]"
 	}
 	return out, nil
-}
-
-// runGit runs `git -C root <args...>` with a bounded timeout. On failure it returns the
-// combined output alongside an error that includes it (so callers can inspect both).
-func runGit(root string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeoutSec*time.Second)
-	defer cancel()
-	full := append([]string{"-C", root}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
 }
 
 // ---- shared helpers ----

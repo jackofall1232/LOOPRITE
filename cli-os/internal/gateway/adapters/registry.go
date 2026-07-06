@@ -58,7 +58,7 @@ type Candidate struct {
 	PriceTier    int
 }
 
-var aliases = map[string]string{"glm": "zhipu", "z.ai": "zhipu", "ollama": "local", "local-models": "local"}
+var aliases = map[string]string{"glm": "zhipu", "z.ai": "zhipu", "ollama": "local", "local-models": "local", "google": "gemini"}
 
 var manifests = loadManifests()
 

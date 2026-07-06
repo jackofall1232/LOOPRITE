@@ -137,13 +137,32 @@
 
   <div class="card" id="card"><div class="muted">Loading setup…</div></div>
 
-  <div class="foot">Nothing here is fabricated — every step writes real state the CLI can also read.
-    Prefer the terminal? <span class="mono">l00prite init · provider add · token mint · serve</span> does the same.</div>
+  <div class="foot">Nothing here is fabricated — every step writes the same real state, however this
+    gateway was started (CLI, Docker, or an app like L00prite OS). On a CLI install, the equivalent
+    commands are <span class="mono">l00prite init · provider add · token mint · serve</span>.</div>
 </div>
 
 <script>
 "use strict";
 (function(){
+  // Android G7 (docs/android-architecture.md §4): when the wrapper generates a per-install
+  // LOOPRITE_SETUP_SECRET, it hands this page the secret ONCE via a "?ss=..." query param (any
+  // co-installed app can also reach 127.0.0.1, so pre-latch setup needs its own gate). Read it
+  // once, strip it from the address bar immediately (so it never lingers in browser history or a
+  // screenshot), and keep it only in this closure — never localStorage. On a desktop install with
+  // no LOOPRITE_SETUP_SECRET set, ss is simply absent and this is a no-op.
+  let setupSecret = "";
+  try {
+    const qp = new URLSearchParams(location.search);
+    const ss = qp.get("ss");
+    if (ss) {
+      setupSecret = ss;
+      qp.delete("ss");
+      const rest = qp.toString();
+      history.replaceState(null, "", location.pathname + (rest ? "?"+rest : "") + location.hash);
+    }
+  } catch(e) {}
+
   // ---- step model ----
   const STEPS = ["welcome","vault","provider","network","token","done"];
   const LABELS = {welcome:"Welcome",vault:"Vault",provider:"Provider",network:"Network",token:"Token",done:"Done"};
@@ -156,6 +175,7 @@
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   async function api(method, path, body){
     const opt = {method, headers:{}};
+    if(setupSecret && path.startsWith("/v1/setup/")) opt.headers["x-l00prite-setup-secret"]=setupSecret;
     if(body!==undefined){ opt.headers["content-type"]="application/json"; opt.body=JSON.stringify(body); }
     const res = await fetch(path, opt);
     let data=null; try{ data = await res.json(); }catch(e){}
@@ -232,7 +252,7 @@
       <div class="radios" id="modes">
         <label class="radio sel"><input type="radio" name="vmode" value="generate" checked>
           <div><div class="rt">Generate one for me <span class="muted">(recommended)</span></div>
-          <div class="rd">A fresh 32-byte key is created and written to the data dir with 0600 permissions.</div></div></label>
+          <div class="rd">A fresh 32-byte key is generated and written to a 0600-permission file in the data dir (or, on app installs like Android, kept in an environment variable the app keeps private).</div></div></label>
         <label class="radio"><input type="radio" name="vmode" value="own">
           <div><div class="rt">Provide my own key</div>
           <div class="rd">Paste a base64-encoded 32-byte key (e.g. to reuse an existing vault).</div></div></label>

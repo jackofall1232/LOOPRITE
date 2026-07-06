@@ -75,7 +75,11 @@
   .btn:hover{border-color:var(--stroke-2);background:var(--panel-2);}
   .btn:active{transform:translateY(1px);}
   .btn.primary{background:linear-gradient(180deg,#5a94ff,#3f7cff);border-color:rgba(79,140,255,.5);color:#fff;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .btn:disabled:active{transform:none;}
   .btn.sm{padding:6px 10px;font-size:12px;}
+  #nav-toggle{display:none;}
+  #nav-backdrop{position:fixed;inset:0;z-index:29;background:rgba(6,9,13,.6);}
 
   .content{padding:22px 26px 46px;display:flex;flex-direction:column;gap:20px;max-width:1680px;width:100%;}
   .page-head h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.3px;}
@@ -171,6 +175,8 @@
 
   .list .row{display:flex;align-items:center;gap:11px;padding:11px 4px;border-bottom:1px solid var(--stroke);}
   .list .row:last-child{border-bottom:none;}
+  .list .row.clickable{cursor:pointer;border-radius:9px;}
+  .list .row.clickable:hover{background:rgba(255,255,255,.035);}
   .list .r-ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;border:1px solid var(--stroke);}
   .list .r-ic.ok{color:#84f0b3;background:rgba(0,200,83,.1);}
   .list .r-ic.warn{color:#ffd27a;background:rgba(255,179,0,.1);}
@@ -206,6 +212,8 @@
   .btn.danger:hover{background:rgba(244,67,54,.1);border-color:rgba(244,67,54,.6);}
   .modal{position:fixed;inset:0;z-index:120;display:grid;place-items:start center;padding:32px 20px;background:rgba(6,9,13,.82);backdrop-filter:blur(6px);overflow-y:auto;}
   .modal .box{width:100%;max-width:520px;margin:auto;}
+  .modal.wide .box{max-width:760px;}
+  @media (max-width:800px){ .modal.wide .box{max-width:none;} }
   .modal h3{margin:12px 0 4px;font-size:19px;font-weight:700;letter-spacing:-.2px;}
   .modal .sub{color:var(--text-2);font-size:13px;margin:4px 0 6px;}
   .field{margin-top:14px;}
@@ -238,7 +246,12 @@
   @media (max-width:680px){ .msg{max-width:100%;} .play-select{max-width:150px;} }
 
   @media (max-width:1180px){ .grid-main{grid-template-columns:1fr;} .charts{grid-template-columns:1fr;} .hero{grid-template-columns:1fr;} }
-  @media (max-width:1000px){ .sidebar{display:none;} .kpi-grid{grid-template-columns:repeat(2,1fr);} .cost-head{grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:1000px){
+    .sidebar{position:fixed;inset:0 auto 0 0;transform:translateX(-100%);transition:transform .2s ease;z-index:31;}
+    .sidebar.open{transform:translateX(0);}
+    .kpi-grid{grid-template-columns:repeat(2,1fr);} .cost-head{grid-template-columns:repeat(2,1fr);}
+    #nav-toggle{display:inline-flex;}
+  }
   @media (max-width:680px){ .content{padding:16px;} .repo-grid,.prov-grid{grid-template-columns:1fr;} .kpi-grid{grid-template-columns:1fr 1fr;} .top-title{display:none;} }
   @media (prefers-color-scheme:light){
     :root{--bg:#F5F7FB;--panel:rgba(10,20,40,.03);--panel-2:rgba(10,20,40,.05);--stroke:rgba(10,20,40,.11);--stroke-2:rgba(10,20,40,.2);--text:#0E1726;--text-2:#465064;--text-3:#7A8698;
@@ -267,10 +280,13 @@
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.3l2.8 1.7"/></symbol>
   <symbol id="i-fork" viewBox="0 0 24 24"><circle cx="6" cy="5.5" r="2.4"/><circle cx="18" cy="5.5" r="2.4"/><circle cx="12" cy="18.5" r="2.4"/><path d="M6 8v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V8"/><line x1="12" y1="13" x2="12" y2="16"/></symbol>
   <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5c0 4.14-4.03 7.5-9 7.5-1.02 0-2-.14-2.92-.4L4.5 20l1.15-3.44C4.24 15.24 3.4 13.46 3.4 11.5 3.4 7.36 7.03 4 12 4s9 3.36 9 7.5z"/><line x1="8.5" y1="10.5" x2="15.5" y2="10.5"/><line x1="8.5" y1="13.5" x2="13" y2="13.5"/></symbol>
+  <symbol id="i-run" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></symbol>
 </defs></svg>
 
 <div class="app">
-  <aside class="sidebar">
+  <div id="nav-backdrop" class="hidden"></div>
+  <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="logo">∞</div>
       <div><div class="name">l00prite</div><div class="sub">CLI&#8209;OS</div></div>
@@ -282,6 +298,7 @@
       <a data-goto="sec-providers"><svg class="ico"><use href="#i-server"/></svg><span>Providers</span></a>
       <a data-goto="sec-cost"><svg class="ico"><use href="#i-card"/></svg><span>Costs</span></a>
       <a data-goto="sec-repos"><svg class="ico"><use href="#i-branch"/></svg><span>Repositories</span></a>
+      <a data-goto="sec-runs"><svg class="ico"><use href="#i-run"/></svg><span>Runs</span></a>
       <a data-goto="sec-activity"><svg class="ico"><use href="#i-logs"/></svg><span>Activity</span></a>
       <a data-goto="sec-tokens"><svg class="ico"><use href="#i-key"/></svg><span>Tokens</span></a>
     </nav>
@@ -295,6 +312,7 @@
 
   <div class="main">
     <header class="topbar">
+      <button class="btn sm" id="nav-toggle" aria-label="Menu"><svg class="ico" style="width:15px;height:15px"><use href="#i-menu"/></svg></button>
       <div class="top-title">Control plane</div>
       <div class="top-right">
         <span class="chip" id="principal-chip" style="display:none"></span>
@@ -337,6 +355,16 @@
           </div>
         </div>
         <div id="providers-body"></div>
+      </section>
+
+      <section id="sec-runs">
+        <div class="sec-head"><h2>Runs</h2>
+          <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
+            <span class="meta" id="runs-meta"></span>
+            <button class="btn sm primary" id="new-run-btn" style="display:none"><svg class="ico" style="width:15px;height:15px"><use href="#i-run"/></svg> New run</button>
+          </div>
+        </div>
+        <div id="runs-body"></div>
       </section>
 
       <div class="grid-main">
@@ -404,7 +432,7 @@
 "use strict";
 (function(){
   const TOKEN_KEY="l00prite_token";
-  const S={ token:null, summary:null, timer:null };
+  const S={ token:null, summary:null, timer:null, runs:null };
   const $ = id => document.getElementById(id);
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const num = n => (n==null?0:Number(n)).toLocaleString(undefined,{maximumFractionDigits:0});
@@ -439,6 +467,7 @@
     hideOverlay();
     S.summary=r.data; render();
     loadModels();
+    loadRuns();
   }
 
   function render(){
@@ -446,6 +475,7 @@
     $("disconnect-btn").style.display="";
     $("add-provider-btn").style.display="";
     $("add-repo-btn").style.display="";
+    $("new-run-btn").style.display="";
     // header
     const providersOnline=(d.system&&d.system.providers_healthy)||0, providersTotal=(d.system&&d.system.providers_total)||0;
     const repos=(d.repos||[]).length, spendToday=(d.spend&&d.spend.today_committed_usd)||0;
@@ -661,6 +691,37 @@
         <div class="r-main"><div class="r-t mono">${esc(x.action)}${x.detail?` <span style="color:var(--text-3)">${esc(String(x.detail).slice(0,40))}</span>`:""}</div><div class="r-meta">${esc(x.actor||"—")} · ${ago(x.ts)}</div></div></div>`).join("");
   }
 
+  // ---- runs (list) ----
+  // Runs live outside /v1/dashboard/summary — a separate fire-and-forget fetch, same pattern as
+  // loadModels(), so a slow runs list can never block the rest of the dashboard from rendering.
+  async function loadRuns(){
+    const {res,data}=await api("GET","/v1/runs/list");
+    if(!res.ok) return;
+    S.runs=(data&&data.runs)||[];
+    renderRuns(S.runs);
+  }
+  function runStatusCls(status){
+    if(status==="done") return "ok";
+    if(status==="running"||status==="waiting_approval"||status==="draft"||status==="ready") return "info";
+    return "warn"; // stopped/interrupted/blocked
+  }
+  function renderRuns(list){
+    list=list||[];
+    $("runs-meta").textContent = list.length? list.length+" total":"";
+    if(!list.length){ $("runs-body").innerHTML=`<div class="empty"><b>No runs yet.</b> Create one to let L00prite work on a registered repository end-to-end.<div style="margin-top:12px"><button class="btn primary sm" data-action="run-add">Create a run</button></div></div>`; return; }
+    $("runs-body").innerHTML = `<div class="list">${list.map(runRow).join("")}</div>`;
+  }
+  function runRow(r){
+    const cls=runStatusCls(r.status);
+    const goal=String(r.goal||""); const goalShort = goal.length>60 ? goal.slice(0,60)+"…" : goal;
+    const started=r.started_at||r.created_at;
+    return `<div class="row clickable" data-run="${esc(r.id)}" tabindex="0" role="button">
+      <div class="r-ic ${cls}"><svg class="ico" style="width:15px;height:15px"><use href="#i-run"/></svg></div>
+      <div class="r-main"><div class="r-t"><b>${esc(r.repo)}</b> — ${esc(goalShort)}</div>
+        <div class="r-meta">${esc(r.status)} · iteration ${num(r.current_iteration)}/${num(r.max_iterations)} · ${esc(r.objective||"balanced")} · ${ago(started)}</div></div>
+      <div class="r-right">${esc(usd(r.cost_usd))}</div></div>`;
+  }
+
   // ---- provider management (Part E) ----
   // Every call carries the same Bearer token the dashboard already uses — the management endpoints share
   // the exact auth of every other data endpoint. A key is never sent back by the server, so it never
@@ -686,7 +747,8 @@
   }
   function findProvider(name){ return ((S.summary&&S.summary.providers)||[]).find(p=>p.name===name); }
   function openModal(html){ $("modal-body").innerHTML=html; $("modal").classList.remove("hidden"); }
-  function closeModal(){ $("modal").classList.add("hidden"); $("modal-body").innerHTML=""; }
+  function openWideModal(html){ openModal(html); $("modal").classList.add("wide"); }
+  function closeModal(){ stopRunPoll(); $("modal").classList.add("hidden"); $("modal").classList.remove("wide"); $("modal-body").innerHTML=""; }
   async function afterMutation(){ closeModal(); await refresh(); }
   function busy(btn,label){ btn.dataset.old=btn.innerHTML; btn.disabled=true; btn.innerHTML=`<span class="spin"></span> ${esc(label)}`; }
   function unbusy(btn,label){ btn.disabled=false; btn.innerHTML=label||btn.dataset.old||""; }
@@ -853,44 +915,81 @@
   }
 
   // ---- repository management ----
-  // Registering a repo points the gateway at a path on ITS OWN filesystem; the server verifies the
-  // directory exists before storing anything, so a typo fails right here in the modal.
+  // Registering a repo points the gateway at a path on ITS OWN filesystem, or clones one from a
+  // URL into a managed workspace dir; the server verifies before storing anything, so a typo
+  // fails right here in the modal. finishRegister() is the shared success path for both.
+  function finishRegister(data, btn, note, label){
+    const mem=(data&&data.memory)||{};
+    if(!mem.present_count){
+      // Registered fine, but be honest that there's no memory to inject yet. The repo is already
+      // stored server-side, so refresh the list/picker NOW — any way the user dismisses this
+      // modal (Done, Esc, backdrop, Cancel) must leave the UI consistent.
+      unbusy(btn,label);
+      note.innerHTML=`<div class="note warn"><b>Registered.</b> No <span class="mono">.l00prite</span> memory found in that folder yet — requests work, and memory is injected as soon as the folder exists.</div>`;
+      btn.textContent="Done"; btn.onclick=()=>closeModal();
+      refresh();
+      return;
+    }
+    afterMutation();
+  }
   function addRepo(){
     const project=(S.summary&&S.summary.principal&&S.summary.principal.project)||"default";
     openModal(`
       <div class="eyebrow"><span class="tick"></span> Register repository</div>
       <h3>Connect a repository</h3>
-      <div class="sub">Point the gateway at a repo on <b>the machine running the gateway</b>. Requests that name this
-        repo (the <span class="mono">x-l00prite-repo</span> header, a repo-scoped token, or the Playground's repo picker)
-        get its <span class="mono">.l00prite</span> memory injected.</div>
-      <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-id" placeholder="myrepo" autocomplete="off"></div>
-      <div class="field"><label>Path on the gateway host</label><input type="text" id="rp-root" placeholder="/home/you/projects/myrepo" autocomplete="off"></div>
-      <div class="field"><label>Project <span class="opt">— only same-project tokens can use a repo; this token's project is <span class="mono">${esc(project)}</span></span></label>
-        <input type="text" id="rp-project" value="${esc(project)}" autocomplete="off"></div>
+      <div class="sub">Requests that name this repo (the <span class="mono">x-l00prite-repo</span> header, a
+        repo-scoped token, or the Playground's repo picker) get its <span class="mono">.l00prite</span> memory injected.</div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn sm primary" id="rp-tab-clone" style="flex:1">Clone from a URL</button>
+        <button class="btn sm" id="rp-tab-path" style="flex:1">Register an existing path</button>
+      </div>
+      <div id="rp-clone-group">
+        <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-clone-id" placeholder="myrepo" autocomplete="off"></div>
+        <div class="field"><label>Git URL</label><input type="text" id="rp-clone-url" placeholder="https://github.com/you/myrepo.git" autocomplete="off"></div>
+      </div>
+      <div id="rp-path-group" class="hidden">
+        <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-id" placeholder="myrepo" autocomplete="off"></div>
+        <div class="field"><label>Path <span class="opt">— an absolute path already on this machine</span></label><input type="text" id="rp-root" placeholder="an absolute path already on this machine" autocomplete="off">
+          <div style="margin-top:6px;font-size:11.5px;color:var(--text-3)">On most installs, cloning a repo above is simpler than pointing at an existing local path.</div></div>
+        <div class="field"><label>Project <span class="opt">— only same-project tokens can use a repo; this token's project is <span class="mono">${esc(project)}</span></span></label>
+          <input type="text" id="rp-project" value="${esc(project)}" autocomplete="off"></div>
+      </div>
       <div id="rp-note"></div>
-      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Register</button></div>`);
-    const idIn=document.getElementById("rp-id"), rootIn=document.getElementById("rp-root");
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Clone &amp; register</button></div>`);
+    const cloneGroup=document.getElementById("rp-clone-group"), pathGroup=document.getElementById("rp-path-group");
+    const tabClone=document.getElementById("rp-tab-clone"), tabPath=document.getElementById("rp-tab-path");
     const note=document.getElementById("rp-note"), btn=document.getElementById("rp-add");
-    idIn.focus();
+    let mode="clone";
+    function syncTabs(){
+      cloneGroup.classList.toggle("hidden", mode!=="clone");
+      pathGroup.classList.toggle("hidden", mode!=="path");
+      tabClone.classList.toggle("primary", mode==="clone");
+      tabPath.classList.toggle("primary", mode==="path");
+      btn.textContent = mode==="clone" ? "Clone & register" : "Register";
+      note.innerHTML="";
+    }
+    tabClone.onclick=()=>{ mode="clone"; syncTabs(); document.getElementById("rp-clone-id").focus(); };
+    tabPath.onclick=()=>{ mode="path"; syncTabs(); document.getElementById("rp-id").focus(); };
+    syncTabs();
+    document.getElementById("rp-clone-id").focus();
     btn.onclick=async()=>{
-      const id=idIn.value.trim(), root=rootIn.value.trim(), project=document.getElementById("rp-project").value.trim();
+      if(mode==="clone"){
+        const id=document.getElementById("rp-clone-id").value.trim(), url=document.getElementById("rp-clone-url").value.trim();
+        if(!id){ note.innerHTML=`<div class="note err">Give the repo a short id.</div>`; return; }
+        if(!url){ note.innerHTML=`<div class="note err">Enter the repo's git URL.</div>`; return; }
+        busy(btn,"Cloning…");
+        const {res,data}=await api("POST","/v1/repos/clone",{id, url});
+        if(!res.ok){ unbusy(btn,"Clone & register"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not clone the repo."))}</div>`; return; }
+        finishRegister(data, btn, note, "Clone & register");
+        return;
+      }
+      const id=document.getElementById("rp-id").value.trim(), root=document.getElementById("rp-root").value.trim(), project=document.getElementById("rp-project").value.trim();
       if(!id){ note.innerHTML=`<div class="note err">Give the repo a short id.</div>`; return; }
       if(!root){ note.innerHTML=`<div class="note err">Enter the repo's path on the gateway host.</div>`; return; }
       busy(btn,"Registering…");
       const {res,data}=await api("POST","/v1/repos",{id, root, project});
       if(!res.ok){ unbusy(btn,"Register"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not register the repo."))}</div>`; return; }
-      const mem=(data&&data.memory)||{};
-      if(!mem.present_count){
-        // Registered fine, but be honest that there's no memory to inject yet. The repo is already
-        // stored server-side, so refresh the list/picker NOW — any way the user dismisses this
-        // modal (Done, Esc, backdrop, Cancel) must leave the UI consistent.
-        unbusy(btn,"Register");
-        note.innerHTML=`<div class="note warn"><b>Registered.</b> No <span class="mono">.l00prite</span> memory found in that folder yet — requests work, and memory is injected as soon as the folder exists.</div>`;
-        btn.textContent="Done"; btn.onclick=()=>closeModal();
-        refresh();
-        return;
-      }
-      afterMutation();
+      finishRegister(data, btn, note, "Register");
     };
   }
   function removeRepo(id){
@@ -909,6 +1008,344 @@
       const {res,data}=await api("POST","/v1/repos/remove",{id});
       if(!res.ok){ unbusy(e.target,"Remove repo"); document.getElementById("rr-note").innerHTML=`<div class="note err">${esc(mErr(data,"Could not remove the repo."))}</div>`; return; }
       afterMutation();
+    };
+  }
+
+  // ---- run creation ----
+  const GATE_CLASSES=[["push","Push"],["merge","Merge"],["deploy","Deploy"],["credential_change","Credential change"],["destructive","Destructive"],["outside_repo","Outside repo"]];
+  // Shared id->label lookup so gate names read the same everywhere a non-engineer reviews or acts on
+  // them: the create-run modal, the pre-flight gate pills, and the live approval cards.
+  const GATE_LABELS=Object.fromEntries(GATE_CLASSES);
+  const GATE_ACTION_LABELS={require_approval:"Require approval", deny:"Deny"};
+  function gateLabel(cls){ return GATE_LABELS[cls]||cls; }
+  function gateActionLabel(action){ return GATE_ACTION_LABELS[action]||action; }
+  function gateSelectField(cls,label){
+    return `<div><div style="font-size:11px;color:var(--text-3);margin-bottom:4px">${esc(label)}</div>
+      <select id="cr-gate-${esc(cls)}"><option value="require_approval" selected>${esc(gateActionLabel("require_approval"))}</option><option value="deny">${esc(gateActionLabel("deny"))}</option></select></div>`;
+  }
+  function createRunModal(){
+    const repos=(S.summary&&S.summary.repos)||[];
+    const repoOpts = repos.map(r=>`<option value="${esc(r.id)}">${esc(r.id)}</option>`).join("")+`<option value="__clone">+ Clone a new repo from a URL…</option>`;
+    openWideModal(`
+      <div class="eyebrow"><span class="tick"></span> New run</div>
+      <h3>Create a run</h3>
+      <div class="sub">A run works one confirmed goal against one registered repo, through the l00prite Execution Mode protocol. Nothing runs until you explicitly Start it on the next screen.</div>
+      <div class="field"><label>Repository</label><select id="cr-repo">${repoOpts}</select></div>
+      <div id="cr-clone-fields" class="hidden">
+        <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="cr-clone-id" placeholder="myrepo" autocomplete="off"></div>
+        <div class="field"><label>Git URL</label><input type="text" id="cr-clone-url" placeholder="https://github.com/you/myrepo.git" autocomplete="off"></div>
+      </div>
+      <div class="field"><label>Goal</label><textarea id="cr-goal" rows="3" placeholder="Describe what you want built…"></textarea></div>
+      <div class="field"><label>Objective</label>
+        <select id="cr-objective">
+          <option value="balanced" selected>balanced</option>
+          <option value="quality">quality</option>
+          <option value="cost">cost</option>
+          <option value="speed">speed</option>
+          <option value="privacy">privacy</option>
+        </select></div>
+      <div id="cr-privacy-note" class="note warn hidden">Privacy requires an operator-defined <span class="mono">routing.profiles.privacy</span> provider allowlist in <span class="mono">config.json</span> — otherwise pre-flight will block with a blocker.</div>
+      <div class="field"><label>Command allowlist <span class="opt">— required; the first line is the done-check that must pass before the goal counts as met</span></label><textarea id="cr-allowlist" rows="3" placeholder="one command per line, e.g.&#10;go test ./...&#10;npm test"></textarea></div>
+      <details style="margin-top:14px">
+        <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2)">Advanced</summary>
+        <div class="field"><label>Max iterations <span class="opt">— optional, server default otherwise</span></label><input type="text" id="cr-maxiter" placeholder="server default"></div>
+        <div class="field"><label>Gates <span class="opt">— per-action permission for each class</span></label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:6px">
+            ${GATE_CLASSES.map(([cls,label])=>gateSelectField(cls,label)).join("")}
+          </div>
+        </div>
+      </details>
+      <div id="cr-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="cr-submit">Create run</button></div>`);
+    const repoSel=document.getElementById("cr-repo"), cloneFields=document.getElementById("cr-clone-fields");
+    const objSel=document.getElementById("cr-objective"), privacyNote=document.getElementById("cr-privacy-note");
+    const note=document.getElementById("cr-note"), submitBtn=document.getElementById("cr-submit");
+    function syncCloneFields(){ cloneFields.classList.toggle("hidden", repoSel.value!=="__clone"); }
+    function syncPrivacyNote(){ privacyNote.classList.toggle("hidden", objSel.value!=="privacy"); }
+    repoSel.onchange=syncCloneFields; objSel.onchange=syncPrivacyNote;
+    syncCloneFields(); syncPrivacyNote();
+    repoSel.focus();
+    submitBtn.onclick=async()=>{
+      const goal=document.getElementById("cr-goal").value.trim();
+      if(!goal){ note.innerHTML=`<div class="note err">Describe the goal for this run.</div>`; return; }
+      const allowlist=document.getElementById("cr-allowlist").value.split("\n").map(s=>s.trim()).filter(Boolean);
+      if(!allowlist.length){ note.innerHTML=`<div class="note err">Name at least one command — its first line is the done-check the engine runs to confirm the goal was met (e.g. <span class="mono">go test ./...</span>). Pre-flight blocks without one.</div>`; return; }
+      let repoId=repoSel.value;
+      if(repoId==="__clone"){
+        const cid=document.getElementById("cr-clone-id").value.trim(), curl=document.getElementById("cr-clone-url").value.trim();
+        if(!cid){ note.innerHTML=`<div class="note err">Give the cloned repo a short id.</div>`; return; }
+        if(!curl){ note.innerHTML=`<div class="note err">Enter the repo's git URL.</div>`; return; }
+        busy(submitBtn,"Cloning…");
+        const {res,data}=await api("POST","/v1/repos/clone",{id:cid, url:curl});
+        if(!res.ok){ unbusy(submitBtn,"Create run"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not clone the repo."))}</div>`; return; }
+        repoId=cid;
+      } else if(!repoId){
+        note.innerHTML=`<div class="note err">Choose a repository.</div>`; return;
+      }
+      const gates={};
+      GATE_CLASSES.forEach(([cls])=>{ gates[cls]=document.getElementById("cr-gate-"+cls).value; });
+      const payload={repo:repoId, goal, objective:objSel.value, gates, command_allowlist:allowlist};
+      const maxIterRaw=document.getElementById("cr-maxiter").value.trim();
+      if(maxIterRaw){ const n=parseInt(maxIterRaw,10); if(Number.isInteger(n) && n>0) payload.max_iterations=n; }
+      busy(submitBtn,"Creating…");
+      const {res,data}=await api("POST","/v1/runs",payload);
+      if(!res.ok){ unbusy(submitBtn,"Create run"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not create the run."))}</div>`; return; }
+      closeModal();
+      loadRuns();
+      openRunDetail(data.run.id, data.run, data.preflight);
+    };
+  }
+
+  // ---- run detail: pre-flight / live / exit ----
+  let runPollTimer=null, runEventCursor=0, runPollGen=0;
+  function isLiveStatus(run){ return run&&(run.status==="running"||run.status==="waiting_approval"); }
+  function isExitStatus(run){ return run&&(run.status==="done"||run.status==="stopped"||run.status==="interrupted"); }
+  // Bumping the generation whenever polling stops — including from closeModal, on every close path —
+  // gives any already-in-flight fetch (a poll tick, or the initial load below) a cheap way to notice
+  // its modal session has ended and skip rendering, instead of resurrecting a dismissed modal.
+  function stopRunPoll(){ runPollGen++; if(runPollTimer){ clearInterval(runPollTimer); runPollTimer=null; } }
+
+  async function openRunDetail(id, knownRun, knownPreflight){
+    if(knownRun){ dispatchRunView(knownRun, knownPreflight, []); return; }
+    stopRunPoll();
+    const gen=runPollGen;
+    openWideModal(`<div class="eyebrow"><span class="tick"></span> Run</div><h3>Loading run…</h3>
+      <div style="display:flex;align-items:center;gap:10px;padding:22px 2px;color:var(--text-2)"><span class="spin"></span> Fetching <span class="mono">${esc(id)}</span>…</div>
+      <div class="modal-actions"><div class="spacer"></div><button class="btn" data-close>Close</button></div>`);
+    const {res,data}=await api("GET","/v1/runs/get?id="+encodeURIComponent(id));
+    if(gen!==runPollGen) return; // modal was closed (or superseded) while this fetch was in flight — do not resurrect it
+    if(!res.ok || !data || !data.run){
+      openWideModal(`<div class="eyebrow"><span class="tick"></span> Run</div><h3>Couldn't load run <span class="mono">${esc(id)}</span></h3>
+        <div class="note err" style="margin-top:10px">${esc(mErr(data,"Could not load that run."))}</div>
+        <div class="modal-actions"><div class="spacer"></div><button class="btn" data-close>Close</button></div>`);
+      return;
+    }
+    dispatchRunView(data.run, data.preflight, data.pending_approvals||[]);
+  }
+  function dispatchRunView(run, preflight, pending){
+    stopRunPoll();
+    if(isLiveStatus(run)){ renderLiveRun(run, pending||[]); startRunPoll(run.id); }
+    else if(isExitStatus(run)){ renderExitView(run); }
+    else { renderPreflightStep(run, preflight||{}); }
+  }
+
+  function renderPreflightStep(run, pf){
+    pf=pf||{};
+    const blockers=pf.blockers||[], notes=pf.notes||[], team=pf.team||[], units=pf.planned_units||[];
+    const hasBlockers=blockers.length>0;
+    const teamRows = team.length ? team.map(t=>`<tr><td>${esc(t.role)}</td><td>${esc(t.profile)}</td><td>${esc(t.provider)}</td><td>${esc(t.model)}</td><td style="color:var(--text-3)">${esc(t.reason)}</td></tr>`).join("") : `<tr><td colspan="5" style="color:var(--text-3)">—</td></tr>`;
+    const unitsHtml = units.length ? `<ul style="margin:6px 0 0;padding-left:18px">${units.map(u=>`<li>${esc(u.text)}</li>`).join("")}</ul>` : `<div style="color:var(--text-3)">—</div>`;
+    const allowHtml = (pf.command_allowlist||[]).length ? `<ul class="mono" style="margin:6px 0 0;padding-left:18px;font-size:12px">${pf.command_allowlist.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>` : `<div style="color:var(--text-3)">—</div>`;
+    const gatesEntries=Object.entries(pf.gates||{});
+    const gatesHtml = gatesEntries.length ? gatesEntries.map(([k,v])=>`<span class="pill idle" style="margin:2px 6px 2px 0"><span class="d"></span>${esc(gateLabel(k))}: ${esc(gateActionLabel(v))}</span>`).join("") : `<div style="color:var(--text-3)">—</div>`;
+    const pathsHtml = (pf.likely_changed_paths||[]).length ? `<div class="mono" style="font-size:12px;color:var(--text-2)">${pf.likely_changed_paths.map(p=>esc(p)).join(", ")}</div>` : `<div style="color:var(--text-3)">—</div>`;
+    const permHtml = (pf.per_action_permission||[]).length ? pf.per_action_permission.map(c=>`<span class="pill idle" style="margin:2px 6px 2px 0">${esc(c)}</span>`).join("") : `<div style="color:var(--text-3)">—</div>`;
+    const denyHtml = (pf.denylist||[]).length ? `<div class="mono" style="font-size:11.5px;color:var(--text-2);line-height:1.7">${pf.denylist.map(g=>esc(g)).join("<br>")}</div>` : `<div style="color:var(--text-3)">—</div>`;
+    const notesHtml = notes.map(n=>`<div class="note">${esc(n)}</div>`).join("");
+    const blockersHtml = blockers.map(b=>`<div class="note err">${esc(b)}</div>`).join("");
+    openWideModal(`
+      <div class="eyebrow"><span class="tick"></span> Pre-flight</div>
+      <h3>Run pre-flight — <span class="mono">${esc(run.id)}</span></h3>
+      <div class="sub"><b>${esc(run.repo)}</b> · objective ${esc(pf.objective||run.objective||"balanced")}</div>
+      <div class="field"><label>Goal</label><div>${esc(pf.goal||run.goal||"")}</div></div>
+      <div class="field"><label>Definition of Done</label><div>${esc(pf.definition_of_done||"—")}</div></div>
+      <div class="field"><label>Team</label>
+        <div style="overflow-x:auto"><table class="mono" style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="color:var(--text-3);text-align:left"><th>Role</th><th>Profile</th><th>Provider</th><th>Model</th><th>Reason</th></tr></thead>
+          <tbody>${teamRows}</tbody>
+        </table></div></div>
+      <div class="field"><label>Planned units</label>${unitsHtml}</div>
+      <div class="field"><label>Branch</label><div class="mono">${esc(pf.branch||"—")}</div></div>
+      <div class="field"><label>Command allowlist</label>${allowHtml}</div>
+      <div class="field"><label>Gates</label>${gatesHtml}</div>
+      <div class="field"><label>No-progress threshold</label><div>${esc(pf.no_progress_threshold!=null?pf.no_progress_threshold:"—")}</div></div>
+      <div class="field"><label>Likely changed paths</label>${pathsHtml}</div>
+      <div class="field"><label>Per-action permission</label>${permHtml}</div>
+      <div class="field"><label>Autonomous-Edit Denylist</label>${denyHtml}</div>
+      ${notes.length?`<div class="field"><label>Notes</label>${notesHtml}</div>`:""}
+      ${blockers.length?`<div class="field"><label>Blockers</label>${blockersHtml}</div>`:""}
+      <div id="pf-note"></div>
+      ${hasBlockers
+        ? `<div class="field"><label>Blocked — resolve before Start</label><div style="color:var(--text-2);font-size:12.5px">Start is disabled while blockers are present. Rebuild the pre-flight after resolving them.</div></div>`
+        : `<div class="field"><label>Type <span class="mono">EXECUTE</span> to arm and start this run — nothing runs until you do.</label><input type="text" id="run-confirm-input" placeholder="Type EXECUTE" autocomplete="off"></div>`}
+      <div class="modal-actions">
+        <button class="btn" data-close>Close</button>
+        <button class="btn" id="pf-rebuild">Rebuild pre-flight</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="run-start-btn" disabled>Start</button>
+      </div>`);
+    const rebuildBtn=$("pf-rebuild"), startBtn=$("run-start-btn"), noteEl=$("pf-note");
+    rebuildBtn.onclick=async()=>{
+      busy(rebuildBtn,"Rebuilding…");
+      const {res,data}=await api("POST","/v1/runs/preflight",{id:run.id});
+      unbusy(rebuildBtn,"Rebuild pre-flight");
+      if(!res.ok){ noteEl.innerHTML=`<div class="note err">${esc(mErr(data,"Could not rebuild the pre-flight."))}</div>`; return; }
+      renderPreflightStep(data.run, data.preflight);
+    };
+    if(!hasBlockers){
+      const confirmInp=$("run-confirm-input");
+      confirmInp.addEventListener("input",()=>{ startBtn.disabled = confirmInp.value.trim()!=="EXECUTE"; });
+      confirmInp.focus();
+      startBtn.onclick=async()=>{
+        busy(startBtn,"Starting…");
+        const {res,data}=await api("POST","/v1/runs/start",{id:run.id, confirm:"EXECUTE"});
+        if(!res.ok){ unbusy(startBtn,"Start"); noteEl.innerHTML=`<div class="note err">${esc(mErr(data,"Could not start the run."))} Try Rebuild pre-flight.</div>`; return; }
+        loadRuns();
+        dispatchRunView(data.run, null, []);
+      };
+    }
+  }
+
+  function updateLiveHeader(run){
+    const pill=$("run-status-pill");
+    if(pill){ pill.className="pill "+(run.status==="waiting_approval"?"warn":"accent"); pill.innerHTML=`<span class="d"></span>${esc(run.status)}`; }
+    const it=$("run-iter-txt"); if(it) it.textContent = num(run.current_iteration)+"/"+num(run.max_iterations);
+    const ct=$("run-cost-txt"); if(ct) ct.textContent = usd(run.cost_usd);
+  }
+  function renderApprovals(list){
+    const wrap=$("run-approvals"); if(!wrap) return;
+    const pend=(list||[]).filter(a=>a.status==="pending");
+    if(!pend.length){ wrap.innerHTML=`<div class="empty" style="padding:14px">No approvals pending.</div>`; return; }
+    wrap.innerHTML = pend.map(a=>`
+      <div class="note warn" style="text-align:left" data-approval="${esc(a.id)}">
+        <div style="font-weight:650">${esc(gateLabel(a.class))} — ${esc(a.action)}</div>
+        <pre class="mono" style="white-space:pre-wrap;font-size:11.5px;margin:6px 0;background:rgba(0,0,0,.15);padding:8px;border-radius:8px">${esc(JSON.stringify(a.args||{}))}</pre>
+        <input type="text" class="ap-note" placeholder="optional note" style="width:100%;padding:8px 10px;border-radius:8px;background:var(--input-bg);border:1px solid var(--stroke);color:var(--text);font-size:12px;margin-bottom:8px">
+        <div style="display:flex;gap:8px">
+          <button class="btn sm" data-approve="allow" data-id="${esc(a.id)}">Allow</button>
+          <button class="btn sm danger" data-approve="deny" data-id="${esc(a.id)}">Deny</button>
+        </div>
+      </div>`).join("");
+  }
+  function wireApprovalHandlers(runId){
+    const wrap=$("run-approvals"); if(!wrap) return;
+    wrap.addEventListener("click", async e=>{
+      const b=e.target.closest("[data-approve]"); if(!b) return;
+      const decision=b.dataset.approve, approvalId=b.dataset.id;
+      const card=b.closest("[data-approval]"); const noteInp=card?card.querySelector(".ap-note"):null;
+      const decisionNote=noteInp?noteInp.value.trim():"";
+      busy(b, decision==="allow"?"Allowing…":"Denying…");
+      const {res}=await api("POST","/v1/runs/approve",{id:runId, approval_id:approvalId, decision, note:decisionNote});
+      if(!res.ok){ unbusy(b, decision==="allow"?"Allow":"Deny"); return; }
+      if(card) card.remove(); // optimistic — the next poll reconciles the inbox
+    });
+  }
+  function eventLineHtml(ev){
+    const p=ev.payload||{};
+    switch(ev.kind){
+      case "iteration_started": return `<div class="msg assistant">Iteration ${esc(p.iteration)}/${esc(p.max)} started</div>`;
+      case "unit_selected": return `<div class="msg assistant">${esc(p.text||"")}</div>`;
+      case "model_turn": {
+        const role=p.role?esc(p.role)+" → ":"";
+        const dest=[p.provider,p.model].filter(Boolean).map(x=>esc(x)).join("/");
+        return `<div class="msg assistant mono">${role}${dest}</div>`;
+      }
+      case "tool_call": return `<div class="msg assistant mono">tool: ${esc(p.tool||"")}${p.gated?" (gated)":""}</div>`;
+      case "tool_denied": return `<div class="msg err">tool denied: ${esc(p.action||"")} (${esc(p.class||"")})</div>`;
+      case "verify_result": return `<div class="msg assistant mono">verify: ${esc(p.command||"")} → exit ${esc(p.exit_code!=null?p.exit_code:"")}${p.summary?" — "+esc(p.summary):""}</div>`;
+      case "review_result": {
+        const extra = p.must_fix ? " — "+esc(p.must_fix) : (p.issues ? " — "+esc(Array.isArray(p.issues)?p.issues.join("; "):p.issues) : "");
+        return `<div class="msg assistant">review: ${p.approve?"approved":"changes requested"}${extra}</div>`;
+      }
+      case "approval_requested": return `<div class="msg assistant">approval requested: ${esc(p.class||"")} — ${esc(p.action||"")}</div>`;
+      case "approval_decided": return `<div class="msg assistant">approval ${esc(p.decision||"")}: ${esc(p.action||"")}</div>`;
+      case "boundary": return `<div class="note warn" style="margin:8px 0"><b>${esc(String(p.boundary||"").replace(/_/g," "))}</b><div style="margin-top:4px">${esc(p.summary||"")}</div></div>`;
+      case "status": return `<div class="msg assistant mono">${Object.entries(p).map(([k,v])=>esc(k)+": "+esc(typeof v==="object"?JSON.stringify(v):v)).join(" · ")}</div>`;
+      case "error": return `<div class="msg err">${esc(p.message||JSON.stringify(p))}</div>`;
+      default: return `<div class="msg assistant mono">${esc(ev.kind)}${Object.keys(p).length?": "+esc(JSON.stringify(p)):""}</div>`;
+    }
+  }
+  function appendRunEvents(events){
+    const feed=$("run-events"); if(!feed) return;
+    const atBottom = feed.scrollHeight - feed.clientHeight - feed.scrollTop < 30;
+    feed.insertAdjacentHTML("beforeend", events.map(eventLineHtml).join(""));
+    if(atBottom) feed.scrollTop=feed.scrollHeight;
+  }
+  async function pollRunOnce(runId, gen){
+    const [ev,gr] = await Promise.all([
+      api("GET","/v1/runs/events?id="+encodeURIComponent(runId)+"&after="+runEventCursor),
+      api("GET","/v1/runs/get?id="+encodeURIComponent(runId))
+    ]);
+    // The user may have closed the run-detail modal (or moved on to a different run) during these
+    // two fetches — clearInterval only stops future ticks, it can't cancel this one. Bail before
+    // touching the DOM if the generation this tick started under is no longer current.
+    if(gen!==runPollGen) return;
+    if(ev.res.ok && ev.data){
+      const events=ev.data.events||[];
+      if(events.length) appendRunEvents(events);
+      if(ev.data.cursor!=null) runEventCursor=ev.data.cursor;
+    }
+    if(!gr.res.ok || !gr.data || !gr.data.run) return;
+    const run=gr.data.run;
+    if(!isLiveStatus(run)){
+      stopRunPoll();
+      if(isExitStatus(run)) renderExitView(run);
+      else renderPreflightStep(run, gr.data.preflight);
+      return;
+    }
+    updateLiveHeader(run);
+    renderApprovals(gr.data.pending_approvals||[]);
+  }
+  function startRunPoll(runId){
+    stopRunPoll();
+    const gen=runPollGen;
+    runEventCursor=0;
+    const feed=$("run-events"); if(feed) feed.innerHTML="";
+    pollRunOnce(runId, gen);
+    runPollTimer=setInterval(()=>pollRunOnce(runId, gen), 2000);
+  }
+
+  function renderLiveRun(run, pending){
+    const statusPillCls = run.status==="waiting_approval"?"warn":"accent";
+    openWideModal(`
+      <div class="eyebrow"><span class="tick" style="background:var(--run)"></span> Live run</div>
+      <h3>Run <span class="mono">${esc(run.id)}</span></h3>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0">
+        <span class="pill ${statusPillCls}" id="run-status-pill"><span class="d"></span>${esc(run.status)}</span>
+        <span class="chip">iteration <span class="mono" id="run-iter-txt">${num(run.current_iteration)}/${num(run.max_iterations)}</span></span>
+        <span class="chip">cost <span class="mono" id="run-cost-txt">${esc(usd(run.cost_usd))}</span></span>
+        <div style="margin-left:auto"><button class="btn sm danger" id="run-stop-btn">Stop</button></div>
+      </div>
+      <div id="run-live-note"></div>
+      <div class="field"><label>Approvals</label><div id="run-approvals"></div></div>
+      <div class="field"><label>Event feed</label><div class="chatlog" id="run-events" style="max-height:320px"></div></div>`);
+    renderApprovals(pending);
+    wireApprovalHandlers(run.id);
+    const stopBtn=$("run-stop-btn");
+    stopBtn.onclick=async()=>{
+      busy(stopBtn,"Stopping…");
+      const {res,data}=await api("POST","/v1/runs/stop",{id:run.id});
+      unbusy(stopBtn,"Stop");
+      if(!res.ok){ $("run-live-note").innerHTML=`<div class="note err">${esc(mErr(data,"Could not stop the run."))}</div>`; }
+    };
+  }
+
+  const BOUNDARY_SUGGESTIONS={
+    definition_of_done_met:"Nothing further needed — the goal was met.",
+    iteration_limit_reached:"Create a new run with a larger iteration budget, or Resume to continue with the same one.",
+    destructive_operation_required:"Review the flagged action, then Resume to continue with a fresh pre-flight.",
+    human_review_gate:"Review the flagged action, then Resume to continue with a fresh pre-flight.",
+    lock_lease_conflict:"Another agent holds the .l00prite lock; wait for it to release, then Resume.",
+    stop_signal:"Stopped by request. Resume to continue if you want more iterations."
+  };
+  function boundarySuggestion(b){ return BOUNDARY_SUGGESTIONS[b] || "Resume to continue with a fresh pre-flight, or start a new run."; }
+  function renderExitView(run){
+    const boundary=run.boundary||"";
+    const isGood = boundary==="definition_of_done_met";
+    const label = boundary ? boundary.replace(/_/g," ") : "ended";
+    openWideModal(`
+      <div class="eyebrow"><span class="tick" style="background:${isGood?"var(--ok)":"var(--warn)"}"></span> Run ended</div>
+      <h3>Run <span class="mono">${esc(run.id)}</span> — ${esc(run.status)}</h3>
+      <div class="note ${isGood?"ok":"warn"}" style="margin-top:10px"><b>${esc(label)}</b>${run.summary?`<div style="margin-top:6px">${esc(run.summary)}</div>`:""}</div>
+      <div class="note" style="margin-top:10px"><b>Suggestion</b> <span class="opt">— a local dashboard suggestion, not from the server</span><div style="margin-top:4px">${esc(boundarySuggestion(boundary))}</div></div>
+      <div id="exit-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Close</button><div class="spacer"></div><button class="btn primary" id="run-resume-btn">Resume</button></div>`);
+    const resumeBtn=$("run-resume-btn");
+    resumeBtn.onclick=async()=>{
+      busy(resumeBtn,"Rebuilding pre-flight…");
+      const {res,data}=await api("POST","/v1/runs/preflight",{id:run.id});
+      if(!res.ok){ unbusy(resumeBtn,"Resume"); $("exit-note").innerHTML=`<div class="note err">${esc(mErr(data,"Could not rebuild the pre-flight."))}</div>`; return; }
+      renderPreflightStep(data.run, data.preflight);
     };
   }
 
@@ -1026,6 +1463,20 @@
   $("repos-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(!b) return;
     if(b.dataset.action==="repo-add") addRepo();
     if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo); });
+  $("new-run-btn").onclick=()=>createRunModal();
+  $("runs-body").addEventListener("click",e=>{
+    const b=e.target.closest("[data-action]");
+    if(b && b.dataset.action==="run-add"){ createRunModal(); return; }
+    const row=e.target.closest("[data-run]");
+    if(row) openRunDetail(row.dataset.run);
+  });
+  $("runs-body").addEventListener("keydown",e=>{
+    if(e.key!=="Enter" && e.key!==" ") return;
+    const row=e.target.closest("[data-run]");
+    if(!row) return;
+    e.preventDefault();
+    openRunDetail(row.dataset.run);
+  });
   $("play-send").onclick=playSend;
   $("play-model").onchange=syncCustomModel;
   $("play-clear").onclick=()=>{ chat.length=0; chatGen++; renderChat(); };
@@ -1036,7 +1487,10 @@
   $("disconnect-btn").onclick=()=>{ S.token=null; try{localStorage.removeItem(TOKEN_KEY);}catch(e){} $("disconnect-btn").style.display="none"; showOverlay(); };
   $("token-save").onclick=()=>{ const v=$("token-input").value.trim(); if(!v){ showOverlay("Enter a token."); return; } S.token=v; try{localStorage.setItem(TOKEN_KEY,v);}catch(e){} refresh(); };
   $("token-input").addEventListener("keydown",e=>{ if(e.key==="Enter") $("token-save").click(); });
-  document.querySelectorAll("[data-goto]").forEach(a=>a.onclick=()=>{ const el=$(a.dataset.goto); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); });
+  function closeNavDrawer(){ $("sidebar").classList.remove("open"); $("nav-backdrop").classList.add("hidden"); }
+  $("nav-toggle").onclick=()=>{ $("sidebar").classList.toggle("open"); $("nav-backdrop").classList.toggle("hidden"); };
+  $("nav-backdrop").onclick=closeNavDrawer;
+  document.querySelectorAll("[data-goto]").forEach(a=>a.onclick=()=>{ const el=$(a.dataset.goto); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); closeNavDrawer(); });
 
   // auto-refresh every 20s while a token is set and the tab is visible
   setInterval(()=>{ if(S.token && S.summary && document.visibilityState==="visible") refresh(); }, 20000);

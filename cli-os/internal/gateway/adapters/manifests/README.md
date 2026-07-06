@@ -29,3 +29,12 @@ Anthropic first-party and left OpenAI and Zhipu/GLM pricing `null` (their offici
 egress-blocked). The meter (`../../meter.go`) returns `Unconfirmed=true` / `Priced=false` for a
 `null`-priced model rather than a silent `$0`, and the cost-preference auto-router refuses to route
 to an unpriced model.
+
+The 2026-07-05 Android pass added `venice.json` (Venice AI — OpenAI-compatible; per-model pricing
+first-party-confirmed via Venice's own docs mirror, capability flags marked training-knowledge
+pending first-party confirmation) and `gemini.json` (Google's documented OpenAI-compatible
+endpoint; pricing left `null`/unconfirmed — Google's pricing pages were egress-blocked from that
+build environment, same discipline as OpenAI/Zhipu above). Venice's catalog intentionally resells
+other labs' models under Venice-hosted ids (`claude-sonnet-5`, `openai-gpt-52-codex`, …); bare
+model ids that exist in more than one enabled provider's catalog resolve by provider order
+(router.go rule 3), so pin `provider/model` when the distinction matters.

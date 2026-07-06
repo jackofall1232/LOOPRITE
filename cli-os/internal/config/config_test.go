@@ -122,7 +122,9 @@ func TestBindSafetyStaysFatal(t *testing.T) {
 }
 
 func TestDefaultRoleProfiles(t *testing.T) {
-	// The four built-in role profiles ship alongside cheap/quality/balanced; roleRanks ships empty.
+	// The built-in role profiles ship alongside cheap/quality/balanced, including the newer
+	// architect/writer/reviewer/advisor role-model profiles (brief: "Fable 5 architects, Sonnet 5
+	// writes"). roleRanks now ships seeded (no longer empty) — see TestSeededRoleRanks.
 	profiles := defaults().Routing.Profiles
 	cases := []struct {
 		name       string
@@ -131,9 +133,16 @@ func TestDefaultRoleProfiles(t *testing.T) {
 		require    []string
 	}{
 		{"plan", "quality", "plan", nil},
-		{"code", "balanced", "code", []string{"tools"}},
+		// code/writer are "quality", not "balanced": the role policy ("Sonnet 5 writes") must
+		// actually route, not be silently out-blended by a cheaper tools-capable catalog entry —
+		// see the profile comment in defaults() and gateway's TestAutoWriterQualityPicksSonnet.
+		{"code", "quality", "code", []string{"tools"}},
 		{"review", "quality", "review", nil},
 		{"summarize", "cost", "", nil},
+		{"architect", "quality", "architect", nil},
+		{"writer", "quality", "writer", []string{"tools"}},
+		{"reviewer", "quality", "reviewer", nil},
+		{"advisor", "balanced", "advisor", nil},
 	}
 	for _, c := range cases {
 		p, ok := profiles[c.name]
@@ -155,8 +164,75 @@ func TestDefaultRoleProfiles(t *testing.T) {
 			}
 		}
 	}
-	if rr := defaults().Routing.RoleRanks; rr == nil || len(rr) != 0 {
-		t.Fatalf("RoleRanks must ship as an empty (non-nil) map, got %v", rr)
+}
+
+func TestSeededRoleRanks(t *testing.T) {
+	// RoleRanks no longer ships empty: architect/writer/reviewer/advisor plus the engine-internal
+	// plan/code/review roles are seeded so on-device Execution Mode inherits the same role policy
+	// (Fable 5 architects, Sonnet 5 writes). review/summarize is intentionally absent (falls back to
+	// qualityRanks, unchanged).
+	rr := defaults().Routing.RoleRanks
+	wantKeys := []string{"architect", "writer", "reviewer", "advisor", "plan", "code", "review"}
+	if len(rr) != len(wantKeys) {
+		t.Fatalf("RoleRanks want %d role maps got %d: %v", len(wantKeys), len(rr), rr)
+	}
+	for _, k := range wantKeys {
+		if _, ok := rr[k]; !ok {
+			t.Fatalf("RoleRanks missing role map %q", k)
+		}
+	}
+	// architect and plan must encode the identical policy (Fable 5 first), and be independent map
+	// instances (mutating one must never be observable through the other).
+	if rr["architect"]["anthropic/claude-fable-5"] != 98 {
+		t.Fatalf(`architect["anthropic/claude-fable-5"] want 98 got %d`, rr["architect"]["anthropic/claude-fable-5"])
+	}
+	for k, v := range rr["architect"] {
+		if rr["plan"][k] != v {
+			t.Fatalf("plan role map must mirror architect's policy; plan[%q]=%d architect[%q]=%d", k, rr["plan"][k], k, v)
+		}
+	}
+	rr["architect"]["probe/model"] = 1
+	if _, leaked := rr["plan"]["probe/model"]; leaked {
+		t.Fatalf("architect and plan must be independent map instances, not aliased")
+	}
+	// writer/code must prefer Sonnet 5 over Fable 5 (bulk-writer policy), and mirror each other.
+	if rr["writer"]["anthropic/claude-sonnet-5"] <= rr["writer"]["anthropic/claude-fable-5"] {
+		t.Fatalf("writer must rank claude-sonnet-5 above claude-fable-5, got sonnet=%d fable=%d",
+			rr["writer"]["anthropic/claude-sonnet-5"], rr["writer"]["anthropic/claude-fable-5"])
+	}
+	for k, v := range rr["writer"] {
+		if rr["code"][k] != v {
+			t.Fatalf("code role map must mirror writer's policy; code[%q]=%d writer[%q]=%d", k, rr["code"][k], k, v)
+		}
+	}
+	// reviewer/review must mirror each other.
+	for k, v := range rr["reviewer"] {
+		if rr["review"][k] != v {
+			t.Fatalf("review role map must mirror reviewer's policy; review[%q]=%d reviewer[%q]=%d", k, rr["review"][k], k, v)
+		}
+	}
+	// advisor has no engine-internal counterpart; just check it is seeded and sane.
+	if rr["advisor"]["anthropic/claude-fable-5"] == 0 {
+		t.Fatalf("advisor role map must be seeded, got %v", rr["advisor"])
+	}
+}
+
+func TestQualityRanksIncludeVeniceAndGemini(t *testing.T) {
+	// New providers' flagships must be visible to bare (non-role) quality routing.
+	qr := defaults().Routing.QualityRanks
+	want := map[string]int{
+		"venice/claude-fable-5":                       90,
+		"venice/claude-sonnet-5":                      85,
+		"venice/qwen3-coder-480b-a35b-instruct-turbo": 78,
+		"venice/deepseek-v4-pro":                      76,
+		"venice/openai-gpt-52":                        80,
+		"gemini/gemini-2.5-pro":                       84,
+		"gemini/gemini-2.5-flash":                     72,
+	}
+	for k, v := range want {
+		if qr[k] != v {
+			t.Fatalf("qualityRanks[%q] want %d got %d", k, v, qr[k])
+		}
 	}
 }
 

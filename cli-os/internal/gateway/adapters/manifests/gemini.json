@@ -1,0 +1,45 @@
+{
+  "provider": "gemini",
+  "display_name": "Google Gemini",
+  "adapter": "openai-compat",
+  "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+  "endpoints": { "chat": "/chat/completions" },
+  "auth": {
+    "scheme": "bearer",
+    "header": "Authorization",
+    "notes": "Bearer token is the Gemini API key. Google's documented OpenAI-compatibility layer accepts it as a standard Authorization: Bearer <key> header on this endpoint."
+  },
+  "streaming": "openai-sse-chunks",
+  "tool_schema": "openai-function",
+  "notes": [
+    "Targets Google's documented OpenAI-compatible endpoint (generativelanguage.googleapis.com/v1beta/openai), not the native Gemini REST/SDK shape -- so it plugs into the same openai-compat adapter as Zhipu/Venice with no new translation code.",
+    "Capability flags (tools/vision) below are TRAINING-KNOWLEDGE pending first-party confirmation from this environment's egress-restricted network -- treat as a starting point, not a verified fact.",
+    "Pricing could not be first-party-verified from this build environment; both models ship with a null price_per_mtok and price_confidence \"unconfirmed\" so the cost meter reports Unconfirmed/not-Priced rather than a fabricated $0, and PriceTierFor sorts them tier-2 (unpriced) -- last in cost-preference auto-routing, matching this repo's existing pricing-verification discipline (see openai.json / zhipu.json)."
+  ],
+  "verification": {
+    "shape": "high",
+    "shape_source": "Google's documented OpenAI-compatibility endpoint for the Gemini API (generativelanguage.googleapis.com/v1beta/openai)",
+    "pricing": "unverified from this environment",
+    "pricing_source": "NONE fetched first-party -- see pricing_note",
+    "pricing_checked": "2026-07-05",
+    "pricing_note": "First-party Gemini API pricing pages were not reachable from this build environment. Per this repo's pricing-verification discipline, prices are left null rather than backfilled from training-data memory -- see docs/pricing-confirmation.md precedent (openai.json, zhipu.json).",
+    "capabilities": "training-knowledge",
+    "capabilities_note": "tools/vision flags are training-knowledge (Gemini 2.5 Pro/Flash are well known to support function calling and multimodal input), not first-party confirmed from this environment."
+  },
+  "models": [
+    {
+      "id": "gemini-2.5-pro",
+      "capabilities": { "tools": true, "vision": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Flagship reasoning model. Context/max_output and pricing are unverified from this environment; left null/omitted rather than guessed."
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "capabilities": { "tools": true, "vision": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Faster/cheaper sibling. Context/max_output and pricing are unverified from this environment; left null/omitted rather than guessed."
+    }
+  ]
+}

@@ -11,22 +11,25 @@
 //     embedded userinfo (a credential) is also rejected — it would otherwise be echoed back
 //     in this endpoint's response.
 //   - Same project-scope rule as /v1/repos: the repo lands in the acting token's project.
-//   - git runs fully non-interactively, cross-platform: GIT_TERMINAL_PROMPT=0 disables git's
-//     own https credential prompt, and GIT_SSH_COMMAND forces ssh into BatchMode (no
-//     password/passphrase prompt) with a short connect timeout, so an unreachable or
-//     credential-requiring URL fails fast instead of hanging the request on a TTY prompt that
-//     nothing here can ever answer.
+//   - Cloning goes through the gitx seam (internal/gitx) rather than shelling out directly here:
+//     the exec implementation runs git fully non-interactively exactly as before
+//     (GIT_TERMINAL_PROMPT=0 disables git's own https credential prompt, GIT_SSH_COMMAND forces
+//     ssh into BatchMode with a short connect timeout, so an unreachable or credential-requiring
+//     URL fails fast instead of hanging on a TTY prompt nothing here can ever answer), and the
+//     pure-Go go-git fallback (Android — no git/ssh binary; see docs/android-architecture.md §4
+//     G4) covers the https case and cleanly rejects ssh URLs instead of this endpoint 500ing for
+//     want of a git binary.
 package gateway
 
 import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
 	"github.com/jackofall1232/l00prite/cli-os/internal/memory"
 	"github.com/jackofall1232/l00prite/cli-os/internal/state"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
@@ -84,10 +87,6 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 		oaiError(w, 400, "Provide an https:// or git@host:owner/repo URL. Other git transports are not accepted.", "invalid_request_error", "bad_url")
 		return
 	}
-	if _, err := exec.LookPath("git"); err != nil {
-		oaiError(w, 500, "git is not installed on the machine running this gateway.", "configuration_error", "git_missing")
-		return
-	}
 
 	// Refuse a duplicate id up front (the register step would 409 anyway, but we don't want to
 	// clone into a dir for an id that's taken).
@@ -112,19 +111,13 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// git clone with prompting disabled cross-platform (a private/unreachable URL fails fast,
-	// never hangs waiting on a TTY nothing here can answer). GIT_ASKPASS=/bin/true would be a
-	// no-op-or-worse on Windows and doesn't cover ssh anyway; GIT_TERMINAL_PROMPT handles https,
-	// GIT_SSH_COMMAND's BatchMode handles ssh passphrase/host-key prompts on every platform.
-	cmd := exec.CommandContext(r.Context(), "git", "clone", "--depth", "1", "--", url, dest)
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	// Clone through the gitx seam: the exec implementation runs the identical git-clone-with-
+	// prompting-disabled invocation this endpoint always has (see the package doc comment above);
+	// the go-git fallback (no git binary on the host) handles https itself and returns a clear
+	// error for an ssh URL instead of this endpoint 500ing for want of a git binary.
+	if err := gitx.Detect().Clone(r.Context(), url, dest, 1); err != nil {
 		_ = os.RemoveAll(dest) // don't leave a half-clone behind
-		oaiError(w, 400, "git clone failed: "+strings.TrimSpace(lastLine(string(out))), "invalid_request_error", "clone_failed")
+		oaiError(w, 400, "git clone failed: "+strings.TrimSpace(lastLine(err.Error())), "invalid_request_error", "clone_failed")
 		return
 	}
 

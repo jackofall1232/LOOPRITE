@@ -315,6 +315,83 @@ func TestSetupProviderRealValidation(t *testing.T) {
 	}
 }
 
+// doJSONHeaders is like doJSON but sets arbitrary extra headers instead of a bearer token — used
+// here to exercise x-l00prite-setup-secret without dragging in a whole auth header type.
+func doJSONHeaders(t *testing.T, method, url string, headers map[string]string, body any) (*http.Response, map[string]any) {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		reader = bytes.NewReader(b)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req, _ := http.NewRequest(method, url, reader)
+	req.Header.Set("content-type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	return resp, bodyJSON(t, resp)
+}
+
+// TestSetupSecretGateBlocksWithoutHeader proves LOOPRITE_SETUP_SECRET (docs/android-architecture.md
+// §4 G7): when the operator sets it, every mutating setup endpoint requires a matching
+// x-l00prite-setup-secret header and rejects everything else, while GET /v1/setup/status stays
+// open regardless (it leaks only booleans/counts).
+func TestSetupSecretGateBlocksWithoutHeader(t *testing.T) {
+	t.Setenv("LOOPRITE_SETUP_SECRET", "s3cr3t-install-value")
+	srv, _, db := unconfigured(t)
+	base := srv.URL
+
+	if resp, _ := doJSON(t, "GET", base+"/v1/setup/status", "", nil); resp.StatusCode != 200 {
+		t.Fatalf("GET /v1/setup/status must stay open even with LOOPRITE_SETUP_SECRET set, got %d", resp.StatusCode)
+	}
+
+	for _, path := range []string{"/v1/setup/vault", "/v1/setup/provider", "/v1/setup/provider/test", "/v1/setup/token"} {
+		// no header at all
+		resp, m := doJSON(t, "POST", base+path, "", map[string]any{"name": "mock", "adapter": "mock", "project": "x"})
+		if resp.StatusCode != 403 {
+			t.Fatalf("POST %s with no setup-secret header must 403, got %d", path, resp.StatusCode)
+		}
+		if e, _ := m["error"].(map[string]any); e == nil || e["code"] != "setup_secret_required" {
+			t.Fatalf("POST %s should carry code setup_secret_required, got %v", path, m["error"])
+		}
+		// wrong header value
+		resp, m = doJSONHeaders(t, "POST", base+path, map[string]string{"x-l00prite-setup-secret": "wrong"}, map[string]any{"name": "mock", "adapter": "mock", "project": "x"})
+		if resp.StatusCode != 403 {
+			t.Fatalf("POST %s with a wrong setup-secret header must 403, got %d", path, resp.StatusCode)
+		}
+		if e, _ := m["error"].(map[string]any); e == nil || e["code"] != "setup_secret_required" {
+			t.Fatalf("POST %s (wrong header) should carry code setup_secret_required, got %v", path, m["error"])
+		}
+	}
+	// none of the rejected calls mutated anything.
+	if got := countProviders(t, db); got != 0 {
+		t.Fatalf("a setup call rejected for a missing/wrong secret must not mutate; provider count=%d", got)
+	}
+
+	// the RIGHT header passes through to the existing logic unchanged.
+	resp, v := doJSONHeaders(t, "POST", base+"/v1/setup/vault", map[string]string{"x-l00prite-setup-secret": "s3cr3t-install-value"}, map[string]any{})
+	if resp.StatusCode != 200 || v["vault_initialized"] != true {
+		t.Fatalf("vault init with the correct setup-secret header should succeed: %d %v", resp.StatusCode, v)
+	}
+}
+
+// TestSetupSecretGateUnsetIsNoop proves the gate does nothing when LOOPRITE_SETUP_SECRET is unset
+// (the desktop default): every existing setup call keeps working exactly as it did before G7.
+func TestSetupSecretGateUnsetIsNoop(t *testing.T) {
+	srv, _, _ := unconfigured(t)
+	base := srv.URL
+	resp, v := doJSON(t, "POST", base+"/v1/setup/vault", "", map[string]any{})
+	if resp.StatusCode != 200 || v["vault_initialized"] != true {
+		t.Fatalf("vault init with LOOPRITE_SETUP_SECRET unset should succeed unconditionally: %d %v", resp.StatusCode, v)
+	}
+}
+
 // TestSetupVaultAcceptsProvidedKey verifies an operator-supplied 32-byte base64 master key is honored,
 // and a malformed one is rejected.
 func TestSetupVaultAcceptsProvidedKey(t *testing.T) {

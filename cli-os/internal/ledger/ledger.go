@@ -8,11 +8,61 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"strconv"
+	"sync"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/oai"
 	"github.com/jackofall1232/l00prite/cli-os/internal/state"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
 )
+
+// defaultLedgerMaxBytes is the JSONL mirror's rotation threshold. Ledger rows are small (a couple
+// hundred bytes of JSON each), so 5 MiB holds tens of thousands of recent requests -- plenty for
+// interactively tailing/grepping the raw file for debugging on a live device -- while being a size a
+// phone's constrained storage never notices even with the one ".1" backup generation kept alongside it
+// (worst case ~10 MiB total for this file). SQLite remains the durable, unbounded historical record;
+// this file is documented as "portability" only (see package doc above), so bounding it costs nothing
+// but easy tail-reading of old raw lines once they roll into (and eventually out of) the ".1" backup.
+const defaultLedgerMaxBytes int64 = 5 * 1024 * 1024
+
+// ledgerMaxBytesOnce/-Val cache the effective rotation threshold: read from LOOPRITE_LEDGER_MAX_BYTES
+// once (Append is a hot path hit on every gateway request, so it must not re-parse an env var per
+// call), the same "read once" shape config.Load uses for its own numeric env overrides. A test may
+// reset ledgerMaxBytesOnce to force a re-read after changing the env var.
+var (
+	ledgerMaxBytesOnce sync.Once
+	ledgerMaxBytesVal  int64
+)
+
+func ledgerMaxBytes() int64 {
+	ledgerMaxBytesOnce.Do(func() {
+		ledgerMaxBytesVal = parseLedgerMaxBytes(os.Getenv("LOOPRITE_LEDGER_MAX_BYTES"), defaultLedgerMaxBytes)
+	})
+	return ledgerMaxBytesVal
+}
+
+// parseLedgerMaxBytes mirrors config.finiteOr's contract ("invalid/zero/negative falls back to the
+// default, never to zero/unlimited/a crash"): an empty, non-numeric, zero, or negative override is
+// rejected in favor of fallback, so a bad env var can never disable rotation or panic.
+func parseLedgerMaxBytes(raw string, fallback int64) int64 {
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+// jsonlMu serializes the JSONL mirror's check-size / maybe-rotate / append sequence across every
+// concurrent caller of Append (the gateway calls Append per HTTP request, so multiple goroutines can
+// race here under real traffic). It guards ONLY the file-mirror section below -- the SQLite insert
+// above it already goes through the DB's own connection pool/driver locking and needs no new lock.
+// Without this, two goroutines could both observe "size >= threshold" and both rename ledgerPath ->
+// ledgerPath+".1" concurrently, or one could rename the file out from under the other mid-write; this
+// mutex makes the whole rotate-then-append sequence atomic instead.
+var jsonlMu sync.Mutex
 
 // Entry is a ledger row to append. Optional fields are pointers/typed nils.
 type Entry struct {
@@ -104,12 +154,51 @@ func Append(db *sql.DB, ledgerPath string, e Entry) string {
 		"memory_status": nullStr(e.MemoryStatus), "outcome": nullStr(e.Outcome),
 	}
 	if b, err := json.Marshal(mirror); err == nil {
-		if f, ferr := os.OpenFile(ledgerPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); ferr == nil {
-			f.Write(append(b, '\n'))
-			f.Close()
-		}
+		appendMirrorLine(ledgerPath, b)
 	}
 	return id
+}
+
+// appendMirrorLine rotates ledgerPath if it has already reached the size threshold, then appends line
+// (without a trailing newline; one is added here) to it. The whole check-size / maybe-rotate / append
+// sequence runs under jsonlMu so concurrent callers can never race each other's rename or writes.
+//
+// Size is checked BEFORE appending (not after) so the row being written is guaranteed to land as the
+// first line of a fresh, empty ledgerPath whenever rotation fires -- simpler than writing first and
+// then deciding to rotate around an already-appended row (which would require re-reading the file back
+// to split it). Either choice keeps the row; this one never risks writing into a file that gets renamed
+// out from under it a moment later, since rotation (if any) always completes before the write starts.
+//
+// Best-effort, like the rest of the JSONL mirror: if Stat/Rename/OpenFile/Write fails for any reason,
+// this silently does nothing further for that step. The row is never lost overall -- it is already
+// durable in the SQLite ledger table inserted above -- and a failed rotation just means the file keeps
+// growing past the threshold until a later call succeeds in rotating it.
+func appendMirrorLine(ledgerPath string, line []byte) {
+	jsonlMu.Lock()
+	defer jsonlMu.Unlock()
+
+	rotateLedgerLocked(ledgerPath)
+
+	if f, err := os.OpenFile(ledgerPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		f.Write(append(line, '\n'))
+		f.Close()
+	}
+}
+
+// rotateLedgerLocked renames ledgerPath to ledgerPath+".1" (clobbering any prior ".1" -- exactly one
+// backup generation is kept, by design, to bound worst-case size rather than archive history) when
+// ledgerPath already exists and is at or above the configured threshold. Must be called with jsonlMu
+// held. A missing/unreadable ledgerPath (nothing to rotate yet) or a failed rename (best-effort, see
+// appendMirrorLine) both simply leave ledgerPath as-is.
+func rotateLedgerLocked(ledgerPath string) {
+	info, err := os.Stat(ledgerPath)
+	if err != nil {
+		return
+	}
+	if info.Size() < ledgerMaxBytes() {
+		return
+	}
+	_ = os.Rename(ledgerPath, ledgerPath+".1")
 }
 
 func scanRows(rows *sql.Rows) []Row {

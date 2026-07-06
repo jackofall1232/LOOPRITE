@@ -83,10 +83,22 @@ func defaults() Config {
 				"cheap":     {Preference: "cost"},
 				"quality":   {Preference: "quality"},
 				"balanced":  {Preference: "balanced"},
-				"plan":      {Preference: "quality", RankMap: "plan"},
-				"code":      {Preference: "balanced", Require: []string{"tools"}, RankMap: "code"},
+				"plan": {Preference: "quality", RankMap: "plan"},
+				// code/writer are "quality" (not "balanced") on purpose: the maintainer's role policy
+				// is that Sonnet-class models do the bulk writing, and a balanced cost-blend would
+				// silently hand the writing role to whatever cheap tools-capable model a provider
+				// catalog offers (observed with Venice's first-party pricing loaded). Cost control
+				// belongs to the PEP daily caps and the cheap/balanced profiles, not to the role
+				// policy; operators who want cost-blended writing can override these in config.json.
+				"code":      {Preference: "quality", Require: []string{"tools"}, RankMap: "code"},
 				"review":    {Preference: "quality", RankMap: "review"},
 				"summarize": {Preference: "cost"},
+				// Role profiles (brief: "Fable 5 architects, Sonnet 5 writes") — same profile+roleRanks
+				// machinery as plan/code/review above, under names that map onto the role model directly.
+				"architect": {Preference: "quality", RankMap: "architect"},
+				"writer":    {Preference: "quality", Require: []string{"tools"}, RankMap: "writer"}, // same rationale as "code"
+				"reviewer":  {Preference: "quality", RankMap: "reviewer"},
+				"advisor":   {Preference: "balanced", RankMap: "advisor"},
 			},
 			QualityRanks: map[string]int{
 				"anthropic/claude-opus-4-8":  96,
@@ -96,10 +108,84 @@ func defaults() Config {
 				"zhipu/glm-5.2":              82,
 				"zhipu/glm-5.1":              78,
 				"zhipu/glm-5v-turbo":         70,
+				// Venice + Gemini flagships, so bare/unranked quality routing sees them once enabled.
+				"venice/claude-fable-5":                       90,
+				"venice/claude-sonnet-5":                      85,
+				"venice/qwen3-coder-480b-a35b-instruct-turbo": 78,
+				"venice/deepseek-v4-pro":                      76,
+				"venice/openai-gpt-52":                        80,
+				"gemini/gemini-2.5-pro":                       84,
+				"gemini/gemini-2.5-flash":                     72,
 			},
-			// roleRanks ships empty — operators fill it; an absent role map falls back to qualityRanks.
-			RoleRanks: map[string]map[string]int{},
-			Bridge:    Bridge{Enabled: false, MaxHops: 3},
+			// roleRanks: seeded operator opinions (same nature as qualityRanks — opinions, not
+			// benchmarks) encoding the maintainer's role policy: Fable 5 architects/plans/reviews,
+			// Sonnet 5 does the bulk writing. Every map here is fully overridable per deployment via
+			// config.json routing.roleRanks (mergeRouting replaces a named role's map wholesale — see
+			// mergeRouting below — so an operator can swap in their own policy for one role without
+			// disturbing the others). The engine's internal plan/code/review roles are seeded with the
+			// SAME values as architect/writer/reviewer (written out as separate map literals, not
+			// aliased to the same map instance, so a future in-place mutation of one can never leak into
+			// the other) so on-device Execution Mode inherits the identical policy.
+			RoleRanks: map[string]map[string]int{
+				"architect": {
+					"anthropic/claude-fable-5":  98,
+					"anthropic/claude-opus-4-8": 95,
+					"venice/claude-fable-5":     90,
+					"zhipu/glm-5.2":             80,
+					"venice/zai-org-glm-5":      72,
+				},
+				// Sonnet is 97 (not 96) in writer/code: a candidate ABSENT from a role map falls back
+				// to its qualityRanks value during the merge, and opus's qualityRanks entry is 96 —
+				// an exact tie would hand the writing role to opus on the alphabetical tiebreak. 97
+				// keeps the stated policy ("Sonnet 5 writes") true under quality-preference ranking.
+				"writer": {
+					"anthropic/claude-sonnet-5":                   97,
+					"anthropic/claude-fable-5":                    90,
+					"venice/claude-sonnet-5":                      88,
+					"venice/qwen3-coder-480b-a35b-instruct-turbo": 80,
+					"venice/openai-gpt-52-codex":                  78,
+					"zhipu/glm-5.2":                               76,
+				},
+				"reviewer": {
+					"anthropic/claude-opus-4-8": 96,
+					"anthropic/claude-fable-5":  94,
+					"venice/claude-fable-5":     86,
+					"zhipu/glm-5.2":             78,
+					"venice/deepseek-v4-pro":    72,
+				},
+				"advisor": {
+					"anthropic/claude-fable-5":  92,
+					"anthropic/claude-sonnet-5": 88,
+					"venice/claude-sonnet-5":    82,
+					"venice/minimax-m27":        70,
+					"zhipu/glm-5.1":             68,
+				},
+				// engine-internal roles — same policy as architect/writer/reviewer, written out (not
+				// aliased) per the note above.
+				"plan": {
+					"anthropic/claude-fable-5":  98,
+					"anthropic/claude-opus-4-8": 95,
+					"venice/claude-fable-5":     90,
+					"zhipu/glm-5.2":             80,
+					"venice/zai-org-glm-5":      72,
+				},
+				"code": { // mirrors "writer", incl. the 97-not-96 fallback-tie note above
+					"anthropic/claude-sonnet-5":                   97,
+					"anthropic/claude-fable-5":                    90,
+					"venice/claude-sonnet-5":                      88,
+					"venice/qwen3-coder-480b-a35b-instruct-turbo": 80,
+					"venice/openai-gpt-52-codex":                  78,
+					"zhipu/glm-5.2":                               76,
+				},
+				"review": {
+					"anthropic/claude-opus-4-8": 96,
+					"anthropic/claude-fable-5":  94,
+					"venice/claude-fable-5":     86,
+					"zhipu/glm-5.2":             78,
+					"venice/deepseek-v4-pro":    72,
+				},
+			},
+			Bridge: Bridge{Enabled: false, MaxHops: 3},
 		},
 	}
 }
