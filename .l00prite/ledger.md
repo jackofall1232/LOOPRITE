@@ -1402,3 +1402,45 @@ Append one entry per agent run. Do not overwrite prior runs.
   command line itself.
 - **Lock:** none — no protected-path write beyond this ledger append; lock.json left
   released from the prior run (same session, no concurrent agent observed).
+
+### Run 2026-07-06T15:05:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Replace the GitHub Pages deploy with a Vercel production deploy (direct
+  maintainer instruction), enforcing that only this private repo — never the public
+  source-only l00prite upstream — can publish the site.
+- **Triggering event:** none — maintainer message in-session.
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3
+- **Decision:** Normal work. Repo-identity enforcement is a double fence: a job-level
+  `if: github.repository == 'jackofall1232/LOOPRITE'` (skips the job in l00prite/forks)
+  plus an explicit first step that hard-fails with a clear error if the identity check is
+  ever bypassed. The asset hard-fail guard is kept unchanged from the Pages workflow (per
+  explicit instruction), and a downloads/ per-file size check fails at >= 100 MiB and warns
+  at >= 80 MiB so APK growth is caught before it breaks a deploy. Deploy is
+  `vercel deploy _site --prod --yes` with VERCEL_ORG_ID/VERCEL_PROJECT_ID as env (no
+  `vercel link` needed in CI) and the token via env, never argv-interpolated from the
+  secret context.
+- **Completed work:** deleted `.github/workflows/deploy-pages.yml`; created
+  `.github/workflows/deploy-vercel.yml`; updated the marketing-site row in CLAUDE.md §7 to
+  describe the Vercel workflow as superseding the interim Pages one.
+- **Fix implemented:** not applicable — platform switch.
+- **Changed files:** deleted `.github/workflows/deploy-pages.yml`; created
+  `.github/workflows/deploy-vercel.yml`; modified `CLAUDE.md`, `.l00prite/ledger.md`.
+  Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `python3 -c "import yaml; yaml.safe_load(...)"` · `exit_code`: 0 ·
+    `summary`: workflow YAML parses · `timestamp`: 2026-07-06T15:03Z
+  - `command`: local dry-run of the assemble + size-check steps (same shell logic) ·
+    `exit_code`: 0 · `summary`: APK 15,291,037 bytes (14% of 100 MiB), SHA256SUMS 93
+    bytes; guard exit 0 · `timestamp`: 2026-07-06T15:03Z
+- **Response drafted/sent:** full workflow file + exact secret-provisioning instructions +
+  APK-size report sent to maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** Site publishing remains main-branch-gated; the repo must NOT additionally
+  be connected to Vercel's Git integration or every push deploys twice. First live Vercel
+  deploy still requires the three repo secrets to exist.
+- **Confidence:** High for structure and guards (all shell logic dry-run locally); the
+  `vercel deploy` step itself needs the first real run on main with secrets present.
+- **Next action:** maintainer adds VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID secrets;
+  after merge, confirm the first deploy-vercel run publishes and the APK downloads.
+- **Do-not-retry notes:** none new.
+- **Lock:** none — ledger append only, same session, no concurrent agent observed.
