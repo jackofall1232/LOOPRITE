@@ -1,0 +1,113 @@
+name: deploy-vercel
+
+# Publishes the marketing site (root index.html + assets + the beta APK download)
+# to Vercel production. Replaces the earlier GitHub Pages workflow.
+#
+# Repo split this workflow enforces: l00prite is the public source-only upstream
+# (no APK); LOOPRITE is the private deploy-facing fork that carries the APK and the
+# site. ONLY LOOPRITE may ever build/publish the site — a job-level `if` skips the
+# job everywhere else, and a first step hard-fails as a second fence, so this
+# workflow can never accidentally publish from a repo that doesn't ship the APK.
+#
+# Secrets required (Settings → Secrets and variables → Actions):
+#   VERCEL_TOKEN      — a Vercel account token (Account Settings → Tokens)
+#   VERCEL_ORG_ID     — `orgId` from .vercel/project.json after `vercel link`
+#   VERCEL_PROJECT_ID — `projectId` from the same file (starts with `prj_`)
+# With VERCEL_ORG_ID/VERCEL_PROJECT_ID in the environment the CLI needs no
+# `vercel link` step in CI. Do NOT also connect this repo to Vercel's Git
+# integration, or every push will deploy twice.
+
+"on":
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy site to Vercel (production)
+    runs-on: ubuntu-latest
+    # First fence: anything that isn't the private deploy-facing repo —
+    # the l00prite upstream, any other fork — skips the whole job.
+    if: github.repository == 'jackofall1232/LOOPRITE'
+    steps:
+      - name: Assert this is the deploy-facing repo (hard fail)
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$REPO" != "jackofall1232/LOOPRITE" ]; then
+            echo "::error::deploy-vercel started in '$REPO', but only jackofall1232/LOOPRITE (the private repo that carries the APK) may publish the site. l00prite is source-only upstream. Refusing to deploy."
+            exit 1
+          fi
+          echo "repo identity OK: $REPO"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assert Vercel secrets are configured
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for v in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::repo secret $v is not set (Settings → Secrets and variables → Actions)"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Assemble site artifact (hard-fail guard)
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp index.html .nojekyll _site/
+          cp -r assets _site/assets
+          cp -r downloads _site/downloads
+          # Fail loudly if anything the page links to is missing, instead of
+          # publishing a site with a dead download button.
+          test -f _site/index.html
+          test -f _site/.nojekyll
+          test -f _site/assets/brand-image.png
+          ls _site/downloads/*.apk >/dev/null
+          test -f _site/downloads/SHA256SUMS
+          du -sh _site
+
+      - name: Check downloads/ against Vercel's ~100MB per-file limit
+        run: |
+          set -euo pipefail
+          LIMIT=104857600            # 100 MiB
+          WARN=$(( LIMIT * 80 / 100 ))  # flag at 80% so growth is caught early
+          fail=0
+          while IFS= read -r -d '' f; do
+            bytes="$(stat -c%s "$f")"
+            pct=$(( bytes * 100 / LIMIT ))
+            echo "$f: $bytes bytes (${pct}% of 100 MiB)"
+            if [ "$bytes" -ge "$LIMIT" ]; then
+              echo "::error::$f is $bytes bytes — at/over Vercel's ~100MB per-file limit; deploy would break"
+              fail=1
+            elif [ "$bytes" -ge "$WARN" ]; then
+              echo "::warning::$f is $bytes bytes — within 20% of Vercel's ~100MB per-file limit; plan a move to external hosting (e.g. GitHub Releases)"
+            fi
+          done < <(find _site/downloads -type f -print0)
+          exit "$fail"
+
+      - name: Deploy to Vercel (production)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          npm install --global vercel@latest
+          vercel deploy _site --prod --yes --token "$VERCEL_TOKEN"

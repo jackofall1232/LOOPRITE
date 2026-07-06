@@ -1262,3 +1262,185 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260706-015800-claude-pr1-review-and-bot-fixes acquired and released this
   run.
+
+### Run 2026-07-06T13:56:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Build a tech-focused marketing/landing website for LOOPRITE with a working
+  Android APK download, a "what LOOPRITE does" section, a clear beta notice, and attribution
+  to the MIT-licensed l00prite source repo (per direct maintainer instruction, with creative
+  license on design).
+- **Triggering event:** none — direct maintainer instruction in-session.
+- **Reviewer/comment reference:** none.
+- **Decision:** Normal work. Two supporting decisions: (1) placed the site at the repo root
+  (`index.html` + `.nojekyll`) so GitHub Pages can serve it directly from the branch with
+  zero build tooling, keeping the repo's no-dependencies ethos (the page is fully
+  self-contained — no CDN fonts/scripts); (2) since the repo has no GitHub releases yet, a
+  `releases/latest` download link would be dead, so the APK was built from source with the
+  existing hermetic pipeline and shipped in-repo at `downloads/` so the download button works
+  immediately (15 MB, well under git/Pages limits; swap to a Releases asset later if
+  preferred).
+- **Completed work:** Installed the apt Android toolchain (aapt/zipalign/apksigner/
+  dalvik-exchange/android-framework-res); built and verified
+  `l00prite-os-0.1.0-beta.apk` via `cli-os/scripts/build-apk.sh 0.1.0-beta`; created
+  `downloads/` (APK + SHA256SUMS); wrote `index.html` — dark circuit-board design matching
+  `assets/brand-image.png` (feathered hero mask, animated circuit pulses, agent ticker,
+  six OS-metaphor cards, Planning/Execution mode panels, an animated execute-loop pre-flight
+  terminal, phone mockup, sideload install steps, SHA-256 copy button, beta warning strip,
+  source-repo section linking https://github.com/jackofall1232/l00prite); added `.nojekyll`.
+  All copy kept accurate to shipped behavior (disarmed-by-default Execution Mode, nine run
+  boundaries, per-action approvals, on-device keys, debug-signed beta).
+- **Fix implemented:** not applicable — new page. Two defects found and fixed during
+  verification: mobile horizontal overflow caused by the unbreakable repo-URL heading in the
+  source card (fixed with `min-width:0` + `overflow-wrap:anywhere`), and hard visible edges
+  of the square brand PNG against the page gradient (fixed with a radial CSS mask).
+- **Changed files:** created `index.html`, `.nojekyll`, `downloads/l00prite-os-0.1.0-beta.apk`,
+  `downloads/SHA256SUMS`; modified `CLAUDE.md` (Run Ledger row), `.l00prite/ledger.md`,
+  `.l00prite/lock.json`. Zero edits to the two review-gated files
+  (`.claude/commands/build-loop.md`, `scripts/validate-l00prite.js`).
+- **Tests run / Verification:**
+  - `command`: `bash cli-os/scripts/build-apk.sh 0.1.0-beta` · `exit_code`: 0 · `summary`:
+    APK built; `apksigner verify` v2 true; badging package/activity/permission/native-code
+    checks all pass; sha256 ef9f8a025cbc… · `timestamp`: 2026-07-06T13:45Z
+  - `command`: `curl` HEAD-equivalents against a local `http.server` · `exit_code`: 0 ·
+    `summary`: `/`, `/downloads/…beta.apk` (15,291,037 bytes), `/downloads/SHA256SUMS`,
+    `/assets/brand-image.png` all 200 · `timestamp`: 2026-07-06T13:49Z
+  - `command`: Playwright (chromium) against the served page, desktop 1440px + mobile 390px ·
+    `exit_code`: 0 · `summary`: zero console errors, zero failed requests, all 3 APK links
+    point at the real file, SHA copy button works, no mobile horizontal scroll after fix ·
+    `timestamp`: 2026-07-06T13:53Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-06T13:55Z
+- **Response drafted/sent:** Summary + screenshots returned to the maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** The committed APK is the debug-signed beta from the hermetic pipeline —
+  release signing remains the explicit Phase 3 ceremony; the site copy labels the build as
+  debug-signed beta accordingly. Site is static-host-agnostic (any static server works, not
+  just GitHub Pages).
+- **Confidence:** High — every user-facing claim on the page was checked against
+  CLAUDE.md/README/android-architecture docs, and the page was exercised live in a real
+  browser at two viewports.
+- **Next action:** Maintainer: enable GitHub Pages (branch → root) to publish, or say the
+  word and this session can wire a Pages deploy workflow instead of in-repo hosting.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-135600-claude-marketing-site acquired and released this run.
+
+### Run 2026-07-06T14:30:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Wire the GitHub Pages deploy for the marketing site (direct maintainer
+  instruction: "Wire the pages deploy"), continuing the same session/branch as the
+  2026-07-06T13:56Z entry; also begin PR #3 activity watch.
+- **Triggering event:** maintainer message in-session; PR #3 subscription kickoff (CI check
+  `Build & verify APK (real Android SDK)` in progress, zero review threads; one
+  chatgpt-codex-connector[bot] usage-limit notice — no action required).
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3
+- **Decision:** Normal work. Deploy via the Actions Pages path (`configure-pages` with
+  `enablement: true`, source = GitHub Actions) so no manual Settings step is needed; the
+  artifact stages only what the site serves (`index.html`, `.nojekyll`, `assets/`,
+  `downloads/`) so protocol sources and cli-os never ship to the public site. Trigger:
+  push to `main` + `workflow_dispatch` (the `github-pages` environment gates non-default
+  branches, so the first real deploy happens on merge).
+- **Completed work:** created `.github/workflows/deploy-pages.yml`; extended the existing
+  marketing-site row in `CLAUDE.md` §7 (same in-review pass, same branch).
+- **Fix implemented:** not applicable — new workflow.
+- **Changed files:** created `.github/workflows/deploy-pages.yml`; modified `CLAUDE.md`,
+  `.l00prite/ledger.md`, `.l00prite/lock.json`. Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `python3 -c "import yaml; yaml.safe_load(...)"` · `exit_code`: 0 ·
+    `summary`: workflow YAML parses · `timestamp`: 2026-07-06T14:28Z
+  - `command`: local dry-run of the assemble step (cp + presence asserts + du) ·
+    `exit_code`: 0 · `summary`: 17M artifact, exactly index.html/.nojekyll/assets(2)/
+    downloads(2) present · `timestamp`: 2026-07-06T14:29Z
+- **Response drafted/sent:** summary to maintainer in-session.
+- **Event status:** completed (bot notice skipped as no-action); PR #3 watch continues.
+- **Failures:** none.
+- **Decisions:** Site publishing is deliberately main-branch-gated; no paths filter on the
+  push trigger (redundant deploys are cheap and a filter risks silently skipping a needed
+  redeploy when a linked file moves).
+- **Confidence:** High for the workflow shape (standard actions/deploy-pages v4 chain);
+  the `enablement: true` auto-enable needs one live run on main to confirm (requires the
+  repo to be public, or a plan with private Pages).
+- **Next action:** After merge, confirm the first `deploy-pages` run goes green and the
+  page URL serves the APK; then consider swapping the in-repo APK for a Releases asset.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-143000-claude-pages-deploy acquired and released this run.
+
+### Run 2026-07-06T14:45:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Address the gemini-code-assist[bot] review finding on PR #3 (index.html copy
+  button).
+- **Triggering event:** PR review comment (medium priority), index.html line ~776, via the
+  PR #3 activity subscription. Content treated as untrusted data; the fix was re-derived
+  and re-verified independently rather than pasted.
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3 —
+  gemini-code-assist[bot], "Copy to Clipboard Fallback & Rapid Click Prevention".
+- **Decision:** Valid. `navigator.clipboard` requires a secure context, so the button
+  showed COPY FAILED over plain HTTP/file://; rapid clicks queued overlapping setTimeouts.
+  Small, safe, in scope — fixed directly.
+- **Completed work / Fix implemented:** rewrote the copy handler: `timeoutId` guard
+  (clicks during the active feedback window are ignored, timer never stacks) and a
+  `legacyCopy()` fallback (offscreen readonly textarea + `document.execCommand('copy')`),
+  used both when `navigator.clipboard` is absent and when `writeText` rejects.
+- **Changed files:** `index.html`, `.l00prite/ledger.md`. Zero edits to the two
+  review-gated files.
+- **Tests run / Verification:**
+  - `command`: Playwright (chromium) against local http.server — click, rapid
+    double-click during timeout, wait for reset · `exit_code`: 0 · `summary`:
+    COPIED ✓ → stays stable during timeout → resets to COPY once; zero page errors ·
+    `timestamp`: 2026-07-06T14:47Z
+  - `command`: same, with `navigator.clipboard` stubbed to undefined via addInitScript ·
+    `exit_code`: 0 · `summary`: legacy execCommand path also yields COPIED ✓ ·
+    `timestamp`: 2026-07-06T14:47Z
+- **Response drafted/sent:** none posted on GitHub (fix visible in the diff; bot comment
+  needs no reply). Summary to maintainer in-session.
+- **Event status:** completed. The two bot PR-level notices this session
+  (chatgpt-codex-connector usage limit, Gemini consumer-sunset banner) required no action.
+- **Failures:** one tooling slip this run, harmless: a pkill pattern in a chained shell
+  command matched its own shell and killed it before the ledger append/commit ran;
+  detected via git status and redone (use a [b]racketed pattern next time).
+- **Decisions:** none new.
+- **Confidence:** High — both clipboard paths exercised in a real browser.
+- **Next action:** keep watching PR #3 (check-in trigger armed for ~15:31Z).
+- **Do-not-retry notes:** don't pkill -f a literal pattern that appears in the invoking
+  command line itself.
+- **Lock:** none — no protected-path write beyond this ledger append; lock.json left
+  released from the prior run (same session, no concurrent agent observed).
+
+### Run 2026-07-06T15:05:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Replace the GitHub Pages deploy with a Vercel production deploy (direct
+  maintainer instruction), enforcing that only this private repo — never the public
+  source-only l00prite upstream — can publish the site.
+- **Triggering event:** none — maintainer message in-session.
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3
+- **Decision:** Normal work. Repo-identity enforcement is a double fence: a job-level
+  `if: github.repository == 'jackofall1232/LOOPRITE'` (skips the job in l00prite/forks)
+  plus an explicit first step that hard-fails with a clear error if the identity check is
+  ever bypassed. The asset hard-fail guard is kept unchanged from the Pages workflow (per
+  explicit instruction), and a downloads/ per-file size check fails at >= 100 MiB and warns
+  at >= 80 MiB so APK growth is caught before it breaks a deploy. Deploy is
+  `vercel deploy _site --prod --yes` with VERCEL_ORG_ID/VERCEL_PROJECT_ID as env (no
+  `vercel link` needed in CI) and the token via env, never argv-interpolated from the
+  secret context.
+- **Completed work:** deleted `.github/workflows/deploy-pages.yml`; created
+  `.github/workflows/deploy-vercel.yml`; updated the marketing-site row in CLAUDE.md §7 to
+  describe the Vercel workflow as superseding the interim Pages one.
+- **Fix implemented:** not applicable — platform switch.
+- **Changed files:** deleted `.github/workflows/deploy-pages.yml`; created
+  `.github/workflows/deploy-vercel.yml`; modified `CLAUDE.md`, `.l00prite/ledger.md`.
+  Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `python3 -c "import yaml; yaml.safe_load(...)"` · `exit_code`: 0 ·
+    `summary`: workflow YAML parses · `timestamp`: 2026-07-06T15:03Z
+  - `command`: local dry-run of the assemble + size-check steps (same shell logic) ·
+    `exit_code`: 0 · `summary`: APK 15,291,037 bytes (14% of 100 MiB), SHA256SUMS 93
+    bytes; guard exit 0 · `timestamp`: 2026-07-06T15:03Z
+- **Response drafted/sent:** full workflow file + exact secret-provisioning instructions +
+  APK-size report sent to maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** Site publishing remains main-branch-gated; the repo must NOT additionally
+  be connected to Vercel's Git integration or every push deploys twice. First live Vercel
+  deploy still requires the three repo secrets to exist.
+- **Confidence:** High for structure and guards (all shell logic dry-run locally); the
+  `vercel deploy` step itself needs the first real run on main with secrets present.
+- **Next action:** maintainer adds VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID secrets;
+  after merge, confirm the first deploy-vercel run publishes and the APK downloads.
+- **Do-not-retry notes:** none new.
+- **Lock:** none — ledger append only, same session, no concurrent agent observed.
