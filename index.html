@@ -692,7 +692,8 @@
           <li><b>Click through the warnings.</b> Your phone <em>will</em> flag this install —
             from the browser, the installer, and Google Play Protect. That's the expected
             path for any app distributed outside the Play Store, not a sign something went
-            wrong. The box below shows exactly what you'll see and why.</li>
+            wrong. The box below shows exactly what you'll see, why, and how to verify the
+            file before you override anything.</li>
           <li><b>Open L00prite OS.</b> The gateway boots as a foreground service and the setup
             wizard walks you through your vault, your first AI provider, and your first token
             — keys stay on-device, sealed by the Android Keystore.</li>
@@ -708,8 +709,10 @@
           </h3>
           <p>
             This beta is signed with a developer key and delivered outside the Play Store, so
-            Android has no Play record to check it against. Every warning you'll see means
-            <b>“unrecognized”</b>, not “malicious” — here's the exact sequence:
+            Android has no Play record to check it against and flags what it can't recognize.
+            That's the expected consequence of sideloading — but don't override any warning on
+            faith: verify the file's SHA-256 against the checksum below first, then proceed.
+            Here's the sequence you'll see:
           </p>
           <ul>
             <li><b>While downloading</b> — Chrome may say <i>“This type of file can harm your
@@ -718,10 +721,11 @@
               security, your phone is not allowed to install unknown apps from this
               source.”</i> Tap <i>Settings</i>, flip <i>Allow from this source</i>, and go
               back.</li>
-            <li><b>Before it installs</b> — Google Play Protect may show <i>“Unsafe app
-              blocked”</i> or offer to scan the app. Tap <i>More details → Install anyway</i>.
-              If you'd rather not override a warning on trust alone, verify the download's
-              SHA-256 against the checksum below first.</li>
+            <li><b>Before it installs</b> — Google Play Protect may offer to scan the app or
+              show <i>“Unsafe app blocked.”</i> Check the SHA-256 <em>before</em> you decide:
+              if it matches the checksum below, <i>More details → Install anyway</i> completes
+              the install; if it doesn't match, stop — whatever you downloaded isn't this
+              file, and the warning may be telling you something real.</li>
           </ul>
           <p class="fine">
             Don't take our word for it: check the file's SHA-256 against the checksum below,
@@ -733,6 +737,10 @@
             browser after installing, and <b>if you installed an earlier beta, uninstall it
             first</b> — beta builds are debug-signed and the signing key can rotate between
             releases (it did for this one), which makes Android refuse an in-place update.
+            Fair warning before you uninstall: it deletes everything the app stored on your
+            device — provider keys, tokens, and imported repos — so you'll run setup again
+            from scratch. Nothing is recoverable from a cloud, because nothing ever left
+            your phone.
           </p>
         </div>
 
