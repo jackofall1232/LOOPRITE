@@ -146,16 +146,19 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 
 // looksLikeAuthFailure matches the stderr shapes git (and go-git) produce when a clone needs
 // credentials it doesn't have: https 401/403/404-on-private, disabled terminal prompts, and ssh
-// key rejection. GitHub reports a private repo to an unauthenticated https client as 404/"not
-// found", so that shape is included — for a PUBLIC repo the same text means a typo'd URL, which
-// is exactly what the appended hint tells the user to check first.
+// key rejection. GitHub reports a private repo to an unauthenticated https client as
+// "repository not found", so that shape is included — for a PUBLIC repo the same text means a
+// typo'd URL, which is exactly what the appended hint tells the user to check first. The match
+// is deliberately narrow ("repository not found" / "' not found", never a bare "not found"):
+// a missing git binary fails with "executable file not found in $PATH", and tagging THAT with a
+// permissions hint would send the user down the exact wrong path this hint exists to prevent.
 func looksLikeAuthFailure(s string) bool {
 	l := strings.ToLower(s)
 	for _, m := range []string{
 		"authentication failed", "authentication required", "could not read username",
 		"could not read password", "terminal prompts disabled", "permission denied (publickey)",
 		"invalid credentials", "http 401", "401 unauthorized", "403 forbidden",
-		"repository not found", "not found",
+		"repository not found", "' not found",
 	} {
 		if strings.Contains(l, m) {
 			return true
