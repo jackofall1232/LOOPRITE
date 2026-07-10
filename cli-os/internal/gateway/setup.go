@@ -327,9 +327,26 @@ func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
 		oaiError(w, 400, "project is required to mint a token", "invalid_request_error", "")
 		return
 	}
+	// A repo scope is matched EXACTLY against a registered repo id on every request, so a scope
+	// that will never match must not mint silently: it used to produce a token whose every prompt
+	// failed with `Repository "…" is not registered` — a dead end no GitHub-side permission can
+	// fix, and the wizard runs before any repo is normally registered. Reject strings that can
+	// never be a repo id (URLs, owner/repo); warn when the id is well-formed but not registered yet.
 	var repo *string
-	if strings.TrimSpace(body.Repo) != "" {
-		r := strings.TrimSpace(body.Repo)
+	repoWarning := ""
+	if r := strings.TrimSpace(body.Repo); r != "" {
+		var registered int
+		if err := app.DB.QueryRowContext(state.Ctx(), `SELECT COUNT(*) FROM repos WHERE id = ?`, r).Scan(&registered); err != nil {
+			oaiError(w, 500, "Database error: "+err.Error(), "api_error", "")
+			return
+		}
+		if registered == 0 {
+			if !validRepoID.MatchString(r) {
+				oaiError(w, 400, `"`+r+`" can't be used as a repo scope: a repo scope must exactly match a registered repo id — a short name like "myrepo" (letters, digits, ".", "-", "_"), not a URL or owner/repo. Leave the field empty; you can register repositories and mint repo-scoped tokens from the dashboard after setup.`, "invalid_request_error", "invalid_repo_scope")
+				return
+			}
+			repoWarning = `No repository named "` + r + `" is registered yet. Every request with this token will fail with "repo not registered" until you register a repo with exactly that id (dashboard → Repositories → Register repo). If unsure, mint the token without a repo scope.`
+		}
 		repo = &r
 	}
 	id, token, err := security.MintToken(app.DB, project, repo, body.ExpiresDays)
@@ -340,6 +357,7 @@ func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
 	setupAudit(app, "token.mint", id)
 	sendJSON(w, 200, map[string]any{
 		"id": id, "token": token, "project": project, "repo": nilIfEmpty(strings.TrimSpace(body.Repo)),
+		"warning":        nilIfEmpty(repoWarning),
 		"setup_complete": app.SetupComplete(),
 	})
 }
