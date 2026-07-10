@@ -151,7 +151,15 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		var root, rproject string
 		err := app.DB.QueryRowContext(state.Ctx(), `SELECT root, project FROM repos WHERE id = ?`, repoID).Scan(&root, &rproject)
 		if err != nil {
-			oaiError(w, 404, `Repository "`+repoID+`" is not registered`, "invalid_request_error", "")
+			// This is a GATEWAY-side id mismatch, never a GitHub permission problem — say so, and
+			// say how to fix it, because the two failure paths need different repairs: a token
+			// permanently scoped to an id nothing was registered under (the wizard used to allow
+			// that) can only be fixed by registering that exact id or re-minting the token.
+			msg := `Repository "` + repoID + `" is not registered on this gateway. Register it in the dashboard (Repositories → Register repo) or pick a registered repo from the Playground's repo menu. This is a local repo-id lookup — GitHub permissions are not involved.`
+			if headerRepo == "" && principal.Repo == repoID {
+				msg = `This token is scoped to repo "` + repoID + `", but no repository with that id is registered on this gateway, so every request with this token is refused. Fix: register a repo with exactly the id "` + repoID + `" (dashboard → Repositories → Register repo), or mint a new token without a repo scope (CLI: l00prite token mint --project ` + principal.Project + `). This is a local repo-id lookup — GitHub permissions are not involved.`
+			}
+			oaiError(w, 404, msg, "invalid_request_error", "repo_not_found")
 			return
 		}
 		if rproject != principal.Project {

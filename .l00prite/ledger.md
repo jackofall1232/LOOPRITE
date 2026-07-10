@@ -1444,3 +1444,58 @@ Append one entry per agent run. Do not overwrite prior runs.
   after merge, confirm the first deploy-vercel run publishes and the APK downloads.
 - **Do-not-retry notes:** none new.
 - **Lock:** none — ledger append only, same session, no concurrent agent observed.
+
+### Run 2026-07-10T17:11:30Z — Claude (Fable 5), branch claude/repo-registration-github-perms-jpyu37
+- **Goal:** Debug the maintainer-reported "repo not registered" failure: prompting fails even
+  after the repo was added, and the maintainer suspected missing GitHub permissions.
+- **Triggering event:** maintainer bug report in-session (public repo added, prompt fails,
+  "do I need to add permissions in GitHub? … this app needs to be as friction free as possible").
+- **Reviewer/comment reference:** none.
+- **Decision:** Root-caused before touching anything, with a live reproduction against the real
+  binary. Cause is NOT GitHub permissions (public repos need none): the setup wizard's free-text
+  "Repo" field mints a token scoped to any string with zero validation, before any repo can
+  exist. A GitHub-shaped value ("owner/repo", a URL) can never match a registered repo id —
+  dashboard ids are [A-Za-z0-9._-]+ — so every subsequent prompt fails 404 "repo not registered"
+  no matter what the user registers, and nothing in the product said why or how to fix it.
+- **Completed work:** (1) /v1/setup/token now rejects never-registrable scopes (400
+  invalid_repo_scope) and returns an explicit warning when the scope is well-formed but not yet
+  registered; wizard field re-labeled "Repo scope (advanced, optional — leave empty)", validates
+  charset client-side, and the done screen shows the server warning. (2) The chat-path 404 now
+  distinguishes token-scope vs header, names the exact repair (register exactly that id, or
+  re-mint unscoped) and states GitHub permissions are not involved; runs.go 404 similarly
+  actionable; both carry code repo_not_found. (3) Dashboard Playground shows a persistent warning
+  with a one-click prefilled Register action when the token is scoped to an unregistered repo
+  (or a can-never-register scope, with the re-mint command). Register modal now says public repos
+  need no GitHub permissions and links SSH-key docs for private ones. (4) Clone failures that
+  look auth-shaped append the public-vs-private credentials hint.
+- **Fix implemented:** yes — see above; new e2e regression test TestRepoScopeFootgun walks the
+  full user story (bad scope refused → warned mint → actionable 404 → register exact id heals →
+  header-flavored 404 for unscoped tokens).
+- **Changed files:** cli-os/internal/gateway/{setup.go,ingress.go,runs.go,repos_clone.go},
+  cli-os/public/{setup.html,dashboard.html}, cli-os/internal/server/repo_scope_test.go (new),
+  .l00prite/ledger.md, .l00prite/lock.json, CLAUDE.md (Run Ledger row). Zero edits to the two
+  review-gated files.
+- **Tests run / Verification:**
+  - `command`: `go test ./...` · `exit_code`: 0 · `summary`: all packages pass incl. new
+    TestRepoScopeFootgun · `timestamp`: 2026-07-10T17:05Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-10T17:06Z
+  - `command`: live repro against the rebuilt binary (fresh LOOPRITE_HOME, mock provider) ·
+    `exit_code`: 0 · `summary`: owner/repo scope now 400s at mint with guidance; unregistered
+    valid scope mints with warning; prompt 404 names the repair; registering the exact id makes
+    the same token prompt successfully · `timestamp`: 2026-07-10T17:11Z
+- **Response drafted/sent:** diagnosis + fix summary sent to maintainer in-session (answering
+  the GitHub-permissions question: none needed for public repos).
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** CLI `token mint --repo` intentionally left unvalidated — CLI-registered repo
+  ids are not charset-restricted, so the CLI must keep accepting ids the wizard/dashboard would
+  refuse; the setup endpoint allows any scope that matches an ALREADY-registered repo id even if
+  the charset is unusual.
+- **Confidence:** High — every layer of the fix verified live against the real binary, plus an
+  e2e regression test.
+- **Next action:** maintainer review/merge; consider a dashboard token-mint UI later so scoped
+  tokens can be created post-setup without the CLI.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260710-171130-claude-repo-scope-footgun acquired for this append; released at
+  end of run.

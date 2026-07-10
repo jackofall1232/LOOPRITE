@@ -408,8 +408,12 @@
         <div><label>Project</label><input type="text" id="tproject" class="mono-in" value="default" placeholder="default"></div>
         <div><label>Expires <span class="opt">— days, 0 = never</span></label><input type="number" id="texpires" class="mono-in" value="0" min="0"></div>
       </div>
-      <label>Repo <span class="opt">— optional, scopes the token to one registered repo</span></label>
-      <input type="text" id="trepo" class="mono-in" placeholder="(none)">
+      <label>Repo scope <span class="opt">— advanced, optional. Leave empty (recommended)</span></label>
+      <input type="text" id="trepo" class="mono-in" placeholder="(none — you can register repos from the dashboard after setup)">
+      <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Only set this if a repo is
+        already registered on this gateway: the value must <b>exactly</b> match that repo's id (a short name
+        like <span class="mono">myrepo</span> — not a GitHub URL or <span class="mono">owner/repo</span>).
+        A token scoped to an id that never gets registered fails every request with “repo not registered”.</div>
       <div id="tnote"></div>
       <div class="actions"><button class="btn ghost" id="back">← Back</button><div class="spacer"></div>
         <button class="btn primary" id="mint">Mint token →</button></div>`;
@@ -418,7 +422,14 @@
       const btn=e.target, note=document.getElementById("tnote");
       const project=document.getElementById("tproject").value.trim();
       if(!project){ note.innerHTML=`<div class="note err">A project name is required.</div>`; return; }
-      const body={project}; const repo=document.getElementById("trepo").value.trim(); if(repo) body.repo=repo;
+      const repo=document.getElementById("trepo").value.trim();
+      if(repo && !/^[A-Za-z0-9._-]+$/.test(repo)){
+        note.innerHTML=`<div class="note err">A repo scope must exactly match a registered repo id — a short
+          name like <span class="mono">myrepo</span>, not a URL or <span class="mono">owner/repo</span>.
+          Leave it empty and register your repository from the dashboard after setup.</div>`;
+        return;
+      }
+      const body={project}; if(repo) body.repo=repo;
       const exp=parseInt(document.getElementById("texpires").value,10); if(!isNaN(exp)&&exp>0) body.expires_days=exp;
       btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Minting…`;
       const {res,data}=await api("POST","/v1/setup/token",body);
@@ -452,6 +463,7 @@ export OPENAI_API_KEY="${tok}"`;
       </div>
       ${state.token?`<div class="note warn"><b>Copy your token now — it won't be shown again.</b></div>
       <div class="tokenbox"><input type="text" id="tokval" class="mono-in" readonly value="${esc(tok)}"><button class="btn" id="copytok">Copy</button></div>`:""}
+      ${state.token&&state.token.warning?`<div class="note warn">${esc(state.token.warning)}</div>`:""}
       <label style="margin-top:22px">Try it — curl</label>
       <div class="codeblock"><pre id="curl">${esc(curl)}</pre><button class="copy" data-for="curl">Copy</button></div>
       <label style="margin-top:16px">Or wire up a tool</label>

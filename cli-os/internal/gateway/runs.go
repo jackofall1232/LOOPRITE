@@ -41,7 +41,7 @@ func (app *App) repoRootForToken(w http.ResponseWriter, principal *security.Prin
 	}
 	var root, project string
 	if err := app.DB.QueryRowContext(state.Ctx(), `SELECT root, project FROM repos WHERE id = ?`, repoID).Scan(&root, &project); err != nil {
-		oaiError(w, 404, `Repository "`+repoID+`" is not registered.`, "invalid_request_error", "repo_not_found")
+		oaiError(w, 404, `Repository "`+repoID+`" is not registered on this gateway. Register it in the dashboard (Repositories → Register repo) or clone it from a URL first — GitHub permissions are not involved.`, "invalid_request_error", "repo_not_found")
 		return "", false
 	}
 	if project != principal.Project {
