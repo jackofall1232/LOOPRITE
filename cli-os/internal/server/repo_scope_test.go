@@ -60,7 +60,17 @@ func TestRepoScopeFootgun(t *testing.T) {
 		}
 	}
 
-	// 2. A well-formed id that isn't registered yet mints, but carries an explicit warning.
+	// 2. A scope registered under ANOTHER project can never be used by this token (repo ids are
+	//    globally unique, chat enforces the project match) — refuse rather than mint a dead token.
+	if _, err := db.Exec(`INSERT INTO repos(id,root,project,created_at) VALUES('opsrepo','/x','ops','2026-07-10T00:00:00Z')`); err != nil {
+		t.Fatalf("seed cross-project repo: %v", err)
+	}
+	resp0, m0 := doJSON(t, "POST", base+"/v1/setup/token", "", map[string]any{"project": "demo", "repo": "opsrepo"})
+	if resp0.StatusCode != 400 || errField(m0, "code") != "repo_project_mismatch" {
+		t.Fatalf("cross-project scope must 400/repo_project_mismatch, got %d %v", resp0.StatusCode, m0)
+	}
+
+	// 3. A well-formed id that isn't registered yet mints, but carries an explicit warning.
 	resp, tk := doJSON(t, "POST", base+"/v1/setup/token", "", map[string]any{"project": "demo", "repo": "ghost"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("mint with unregistered-but-valid scope failed: %d %v", resp.StatusCode, tk)

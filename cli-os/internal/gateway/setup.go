@@ -21,6 +21,7 @@
 package gateway
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -335,17 +336,24 @@ func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
 	var repo *string
 	repoWarning := ""
 	if r := strings.TrimSpace(body.Repo); r != "" {
-		var registered int
-		if err := app.DB.QueryRowContext(state.Ctx(), `SELECT COUNT(*) FROM repos WHERE id = ?`, r).Scan(&registered); err != nil {
-			oaiError(w, 500, "Database error: "+err.Error(), "api_error", "")
-			return
-		}
-		if registered == 0 {
+		var repoProject string
+		err := app.DB.QueryRowContext(state.Ctx(), `SELECT project FROM repos WHERE id = ?`, r).Scan(&repoProject)
+		switch {
+		case err == sql.ErrNoRows:
 			if !validRepoID.MatchString(r) {
 				oaiError(w, 400, `"`+r+`" can't be used as a repo scope: a repo scope must exactly match a registered repo id — a short name like "myrepo" (letters, digits, ".", "-", "_"), not a URL or owner/repo. Leave the field empty; you can register repositories and mint repo-scoped tokens from the dashboard after setup.`, "invalid_request_error", "invalid_repo_scope")
 				return
 			}
 			repoWarning = `No repository named "` + r + `" is registered yet. Every request with this token will fail with "repo not registered" until you register a repo with exactly that id (dashboard → Repositories → Register repo). If unsure, mint the token without a repo scope.`
+		case err != nil:
+			oaiError(w, 500, "Database error: "+err.Error(), "api_error", "")
+			return
+		case repoProject != project:
+			// Repo ids are globally unique, so a scope registered under ANOTHER project can never
+			// be healed from this token's side (chat rejects the project mismatch, and the id
+			// can't be re-registered into this project) — refuse rather than mint a dead token.
+			oaiError(w, 400, `Repository "`+r+`" is registered under project "`+repoProject+`", not "`+project+`" — a token in project "`+project+`" could never use it. Mint the token with project "`+repoProject+`", or leave the repo scope empty.`, "invalid_request_error", "repo_project_mismatch")
+			return
 		}
 		repo = &r
 	}
