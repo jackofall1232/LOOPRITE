@@ -117,7 +117,14 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 	// error for an ssh URL instead of this endpoint 500ing for want of a git binary.
 	if err := gitx.Detect().Clone(r.Context(), url, dest, 1); err != nil {
 		_ = os.RemoveAll(dest) // don't leave a half-clone behind
-		oaiError(w, 400, "git clone failed: "+strings.TrimSpace(lastLine(err.Error())), "invalid_request_error", "clone_failed")
+		msg := "git clone failed: " + strings.TrimSpace(lastLine(err.Error()))
+		// An auth-shaped failure sends new users hunting through GitHub permission screens; tell
+		// them what actually matters: public repos need no credentials at all, so an auth error
+		// means either a typo'd URL or a genuinely private repo.
+		if looksLikeAuthFailure(err.Error()) {
+			msg += ` — Public repositories need no GitHub permissions or login, so if this repo is public, check the URL for typos. If it's private, set up an SSH key or a git credential helper on the machine running this gateway, then use the ssh URL (git@github.com:owner/repo.git).`
+		}
+		oaiError(w, 400, msg, "invalid_request_error", "clone_failed")
 		return
 	}
 
@@ -135,6 +142,26 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 		"repo":   map[string]any{"id": id, "root": absRoot, "project": principal.Project, "cloned_from": url},
 		"memory": map[string]any{"status": fr.Status, "present_count": fr.PresentCount, "total_files": fr.TotalFiles},
 	})
+}
+
+// looksLikeAuthFailure matches the stderr shapes git (and go-git) produce when a clone needs
+// credentials it doesn't have: https 401/403/404-on-private, disabled terminal prompts, and ssh
+// key rejection. GitHub reports a private repo to an unauthenticated https client as 404/"not
+// found", so that shape is included — for a PUBLIC repo the same text means a typo'd URL, which
+// is exactly what the appended hint tells the user to check first.
+func looksLikeAuthFailure(s string) bool {
+	l := strings.ToLower(s)
+	for _, m := range []string{
+		"authentication failed", "authentication required", "could not read username",
+		"could not read password", "terminal prompts disabled", "permission denied (publickey)",
+		"invalid credentials", "http 401", "401 unauthorized", "403 forbidden",
+		"repository not found", "not found",
+	} {
+		if strings.Contains(l, m) {
+			return true
+		}
+	}
+	return false
 }
 
 func lastLine(s string) string {
