@@ -359,6 +359,29 @@
   .beta-strip p{color:var(--muted);font-size:.93rem}
   .beta-strip a{color:var(--warn)}
 
+  /* ---------- sideload warning explainer ---------- */
+  .warn-note{
+    margin-top:26px;border:1px solid rgba(255,212,121,.3);border-radius:12px;padding:22px 24px;
+    background:linear-gradient(180deg,rgba(48,38,12,.24),rgba(20,16,6,.24));
+  }
+  .warn-note h3{
+    font-family:var(--mono);color:var(--warn);letter-spacing:.12em;font-size:.8rem;
+    text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:9px;
+  }
+  .warn-note h3 svg{flex-shrink:0}
+  .warn-note p{color:var(--muted);font-size:.88rem;margin-bottom:10px}
+  .warn-note ul{list-style:none;margin:12px 0 2px}
+  .warn-note li{
+    color:var(--muted);font-size:.86rem;padding:7px 0 7px 22px;position:relative;
+  }
+  .warn-note li::before{
+    content:"⚠";position:absolute;left:0;top:7px;color:var(--warn);font-size:.8rem;opacity:.8;
+  }
+  .warn-note li b{color:var(--text);font-weight:600}
+  .warn-note li i{color:#d8c39a;font-style:normal}
+  .warn-note .fine{color:var(--muted);font-size:.8rem;margin:12px 0 0}
+  .warn-note .fine a{color:var(--warn)}
+
   /* ---------- source ---------- */
   .src-card{
     margin-top:44px;border:1px solid var(--line-bright);border-radius:14px;padding:34px;
@@ -658,12 +681,19 @@
 
       <div>
         <ol class="steps reveal">
+          <li><b>Prep your phone.</b> Sideloading is off by default. On Android 8+ it's a
+            per-app switch: <i>Settings → Apps → Special app access → Install unknown apps</i>
+            → pick the browser you'll download with → <i>Allow from this source</i>. (On
+            Samsung it lives under <i>Settings → Security and privacy → Install unknown
+            apps</i>.) You can flip the switch back off as soon as you're done.</li>
           <li><b>Download the APK</b> below — or grab it from the
             <a href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">source repo</a>
             and build it yourself with <code>cli-os/scripts/build-apk.sh</code>.</li>
-          <li><b>Allow the install.</b> This beta is sideloaded: Android will ask you to permit
-            installs from your browser (Settings → “Install unknown apps”). That prompt is
-            expected for any app outside the Play Store.</li>
+          <li><b>Click through the warnings.</b> Your phone <em>will</em> flag this install —
+            from the browser, the installer, and Google Play Protect. That's the expected
+            path for any app distributed outside the Play Store, not a sign something went
+            wrong. The box below shows exactly what you'll see, why, and how to verify the
+            file before you override anything.</li>
           <li><b>Open L00prite OS.</b> The gateway boots as a foreground service and the setup
             wizard walks you through your vault, your first AI provider, and your first token
             — keys stay on-device, sealed by the Android Keystore.</li>
@@ -671,6 +701,48 @@
             open the Runs view, review the pre-flight, and type <code>EXECUTE</code>. Pushes,
             merges, and anything destructive still wait for your explicit approval.</li>
         </ol>
+
+        <div class="warn-note reveal">
+          <h3>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffd479" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+            Your phone will warn you — that's expected
+          </h3>
+          <p>
+            This beta is signed with a developer key and delivered outside the Play Store, so
+            Android has no Play record to check it against and flags what it can't recognize.
+            That's the expected consequence of sideloading — but don't override any warning on
+            faith: verify the file's SHA-256 against the checksum below first, then proceed.
+            Here's the sequence you'll see:
+          </p>
+          <ul>
+            <li><b>While downloading</b> — Chrome may say <i>“This type of file can harm your
+              device.”</i> Tap <i>Download anyway</i>.</li>
+            <li><b>When you open the file</b> — if you skipped step 1, Android says <i>“For your
+              security, your phone is not allowed to install unknown apps from this
+              source.”</i> Tap <i>Settings</i>, flip <i>Allow from this source</i>, and go
+              back.</li>
+            <li><b>Before it installs</b> — Google Play Protect may offer to scan the app or
+              show <i>“Unsafe app blocked.”</i> Check the SHA-256 <em>before</em> you decide:
+              if it matches the checksum below, <i>More details → Install anyway</i> completes
+              the install; if it doesn't match, stop — whatever you downloaded isn't this
+              file, and the warning may be telling you something real.</li>
+          </ul>
+          <p class="fine">
+            Don't take our word for it: check the file's SHA-256 against the checksum below,
+            and <a href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">read the source</a>
+            to see exactly what you're running. (A self-built APK won't be byte-identical to
+            this download — the build stamps a timestamp version code and signs with your own
+            local key — so verify the published file by its SHA-256, not by diffing your own
+            build.) Two hygiene tips: revoke <i>Install unknown apps</i> for your
+            browser after installing, and <b>if you installed an earlier beta, uninstall it
+            first</b> — beta builds are debug-signed and the signing key can rotate between
+            releases (it did for this one), which makes Android refuse an in-place update.
+            Fair warning before you uninstall: it deletes everything the app stored on your
+            device — provider keys, tokens, and imported repos — so you'll run setup again
+            from scratch. Nothing is recoverable from a cloud, because nothing ever left
+            your phone.
+          </p>
+        </div>
 
         <div class="dl-card reveal">
           <a class="btn btn-primary" href="downloads/l00prite-os-0.1.0-beta.apk" download>
@@ -684,7 +756,7 @@
           </div>
           <div class="sha">
             <span>SHA-256</span>
-            <code id="sha-val">ef9f8a025cbc93583f36c30d815e9cc76c69bbfbb33d2f055511d7dd4be36cdf</code>
+            <code id="sha-val">32e0feb7d39d439af839a158b668b9d3b8855cfe7c037c12818dbf7f96bb9e53</code>
             <button class="copy-btn" id="copy-sha" type="button">COPY</button>
             <a href="downloads/SHA256SUMS" style="font-size:.7rem;color:var(--dim)">SHA256SUMS ↗</a>
           </div>
@@ -721,8 +793,8 @@
       <p class="lead">
         LOOPRITE is built off the <b>l00prite</b> source code — the vendor-neutral protocol,
         the gateway, the run engine, and this very APK pipeline are all MIT-licensed and
-        public. Read the prompts your agents will follow. Audit the run boundaries. Build the
-        APK from source and diff the checksum. That's the point.
+        public. Read the prompts your agents will follow. Audit the run boundaries. Build
+        your own APK from the same source. That's the point.
       </p>
     </div>
     <div class="src-card reveal">

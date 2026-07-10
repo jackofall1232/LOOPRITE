@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher icon foreground: the LOOPRITE infinity loop as a neon tube.
+
+  One continuous figure-eight path, stroked four times from wide/faint to
+  thin/white — layered low-alpha strokes stand in for the radial glow that
+  aapt-v1 vectors can't express with gradients. The loop spans x 26..82 /
+  y 41..67, safely inside the 66dp adaptive-icon safe zone (x 21..87 at
+  centre height); only the outermost 15dp glow stroke may kiss a circular
+  mask edge, which is intentional.
+
+  Endpoint tangents at the centre crossing are mirrored (+/-4.5, +/-7.5), so
+  both strands pass through (54,54) without a visible kink.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- outer glow -->
+    <path
+        android:pathData="M54,54 C49.5,46.5 45.5,41 39,41 C31.5,41 26,46.8 26,54 C26,61.2 31.5,67 39,67 C45.5,67 49.5,61.5 54,54 C58.5,46.5 62.5,41 69,41 C76.5,41 82,46.8 82,54 C82,61.2 76.5,67 69,67 C62.5,67 58.5,61.5 54,54 Z"
+        android:strokeColor="#1E3FB6E8"
+        android:strokeWidth="15"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- mid glow -->
+    <path
+        android:pathData="M54,54 C49.5,46.5 45.5,41 39,41 C31.5,41 26,46.8 26,54 C26,61.2 31.5,67 39,67 C45.5,67 49.5,61.5 54,54 C58.5,46.5 62.5,41 69,41 C76.5,41 82,46.8 82,54 C82,61.2 76.5,67 69,67 C62.5,67 58.5,61.5 54,54 Z"
+        android:strokeColor="#4D3FB6E8"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- tube body -->
+    <path
+        android:pathData="M54,54 C49.5,46.5 45.5,41 39,41 C31.5,41 26,46.8 26,54 C26,61.2 31.5,67 39,67 C45.5,67 49.5,61.5 54,54 C58.5,46.5 62.5,41 69,41 C76.5,41 82,46.8 82,54 C82,61.2 76.5,67 69,67 C62.5,67 58.5,61.5 54,54 Z"
+        android:strokeColor="#FF3FB6E8"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- white-hot filament -->
+    <path
+        android:pathData="M54,54 C49.5,46.5 45.5,41 39,41 C31.5,41 26,46.8 26,54 C26,61.2 31.5,67 39,67 C45.5,67 49.5,61.5 54,54 C58.5,46.5 62.5,41 69,41 C76.5,41 82,46.8 82,54 C82,61.2 76.5,67 69,67 C62.5,67 58.5,61.5 54,54 Z"
+        android:strokeColor="#FFEAFAFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- crossover node: halo + bright core, where the two strands meet -->
+    <path
+        android:pathData="M54,54 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0"
+        android:fillColor="#403FB6E8" />
+    <path
+        android:pathData="M54,54 m-2.8,0 a2.8,2.8 0 1,1 5.6,0 a2.8,2.8 0 1,1 -5.6,0"
+        android:fillColor="#FFEAFAFF" />
+
+    <!-- circuit-node pips at the loop apexes -->
+    <path
+        android:pathData="M26,54 m-1.9,0 a1.9,1.9 0 1,1 3.8,0 a1.9,1.9 0 1,1 -3.8,0"
+        android:fillColor="#FFCDEFFB" />
+    <path
+        android:pathData="M82,54 m-1.9,0 a1.9,1.9 0 1,1 3.8,0 a1.9,1.9 0 1,1 -3.8,0"
+        android:fillColor="#FFCDEFFB" />
+</vector>

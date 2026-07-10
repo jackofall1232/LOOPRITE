@@ -1499,3 +1499,68 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260710-171130-claude-repo-scope-footgun acquired for this append; released at
   end of run.
+
+### Run 2026-07-10T19:16:00Z — Claude (Fable 5), branch claude/android-icon-sideload-docs-ttk7so
+- **Goal:** Give the Android APK a distinctive infinity (♾) launcher icon, and make the
+  marketing site explain (a) that the device will flag the sideloaded install and that this is
+  expected, and (b) how to prep the device for sideloading — per direct maintainer request.
+- **Triggering event:** none — direct maintainer instruction in-session.
+- **Reviewer/comment reference:** none.
+- **Decision:** Normal work. The APK previously shipped with NO launcher icon at all (no
+  `android:icon` in the manifest, no mipmap resources), so Android showed the generic default.
+- **Completed work:** Adaptive launcher icon (API 26+ only, matching minSdk, so no legacy
+  raster fallback is needed): `android/res/drawable/ic_launcher_{background,foreground,monochrome}.xml`
+  + `android/res/mipmap-anydpi-v26/ic_launcher{,_round}.xml`, wired via `android:icon`/
+  `android:roundIcon` in `AndroidManifest.xml`. Design: neon infinity figure-eight (one path,
+  four layered strokes faking radial glow — aapt-v1 vectors can't do gradients), white-hot
+  crossover node, apex pips, circuit-trace corners on the brand's dark navy, plus a
+  `<monochrome>` layer for Android 13+ themed icons. Site (`index.html`): install steps grown
+  4→5 with a new leading "Prep your phone" step (per-app *Install unknown apps* path, Samsung
+  variant, flip-it-back-off tip) and a "Click through the warnings" step; new amber
+  `.warn-note` explainer ("Your phone will warn you — that's expected") walking the exact
+  warning sequence (Chrome download warning → unknown-apps block → Play Protect
+  "Unsafe app blocked"/scan) with the why (developer-signed, outside Play = "unrecognized",
+  not "malicious"), SHA-256/build-from-source verification pointer, and hygiene tips (revoke
+  the permission afterwards; uninstall before installing a later beta if signatures rotate).
+  Rebuilt `downloads/l00prite-os-0.1.0-beta.apk` (+`SHA256SUMS`, + page SHA) so the shipped
+  beta actually carries the icon.
+- **Fix implemented:** see above (icon + docs are the whole task).
+- **Changed files:** android/AndroidManifest.xml, android/res/drawable/ic_launcher_background.xml
+  (new), android/res/drawable/ic_launcher_foreground.xml (new),
+  android/res/drawable/ic_launcher_monochrome.xml (new),
+  android/res/mipmap-anydpi-v26/ic_launcher.xml (new),
+  android/res/mipmap-anydpi-v26/ic_launcher_round.xml (new), index.html,
+  downloads/l00prite-os-0.1.0-beta.apk, downloads/SHA256SUMS, .l00prite/ledger.md,
+  .l00prite/lock.json, CLAUDE.md (Run Ledger row). Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `bash cli-os/scripts/build-apk.sh 0.1.0-beta` · `exit_code`: 0 · `summary`:
+    aapt v1 compiled mipmap-anydpi-v26 adaptive icon cleanly; badging shows
+    `application-icon:'res/mipmap-anydpi-v26/ic_launcher.xml'`; all script badging/content
+    asserts pass; new sha256 32e0feb7… (15,295,560 bytes) · `timestamp`: 2026-07-10T19:12Z
+  - `command`: `apksigner verify --verbose` on the new APK · `exit_code`: 0 · `summary`:
+    v2 true, v3 true (page's "v2 + v3" chip stays accurate) · `timestamp`: 2026-07-10T19:14Z
+  - `command`: Chromium render of an exact SVG replica of the vector drawables under
+    circle/squircle/rounded-square masks + themed-mono tile · `exit_code`: 0 · `summary`:
+    loop reads clearly at launcher size in all masks; glow layering renders as designed ·
+    `timestamp`: 2026-07-10T19:14Z
+  - `command`: Playwright screenshots of #android at 1440px and 390px · `exit_code`: 0 ·
+    `summary`: 5-step list + warn-note render correctly, zero console errors, zero horizontal
+    overflow · `timestamp`: 2026-07-10T19:20Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-10T19:18Z
+- **Response drafted/sent:** summary + icon preview sent to maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none. (Note: on-device rendering not verified — no emulator ABI in this
+  container, same standing limitation recorded for previous APK passes.)
+- **Decisions:** No raster mipmap fallback (minSdk 26 == adaptive-icon floor, every installable
+  device renders the XML icon); glow via layered low-alpha strokes because the aapt-v1 hermetic
+  pipeline cannot compile gradient/aapt:attr vector resources; debug keystore was regenerated in
+  this container, so the new beta APK's signing cert differs from the previous upload —
+  upgrading over an existing install requires uninstall first (now documented on the site).
+- **Confidence:** High for build integrity and site rendering (all verified live); medium for
+  exact on-device icon appearance (SVG replica verified, device render not).
+- **Next action:** maintainer review/merge; optionally verify the icon on a physical device and
+  consider a matching favicon/social-preview for the site (HANDOFF.md already tracks that gap).
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260710-191600-claude-android-icon-sideload-docs acquired for this append;
+  released at end of run.
