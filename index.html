@@ -379,7 +379,7 @@
   }
   .warn-note li b{color:var(--text);font-weight:600}
   .warn-note li i{color:#d8c39a;font-style:normal}
-  .warn-note .fine{color:var(--dim);font-size:.8rem;margin:12px 0 0}
+  .warn-note .fine{color:var(--muted);font-size:.8rem;margin:12px 0 0}
   .warn-note .fine a{color:var(--warn)}
 
   /* ---------- source ---------- */
@@ -719,15 +719,20 @@
               source.”</i> Tap <i>Settings</i>, flip <i>Allow from this source</i>, and go
               back.</li>
             <li><b>Before it installs</b> — Google Play Protect may show <i>“Unsafe app
-              blocked”</i> or offer to scan the app. Tap <i>More details → Install anyway</i>
-              (or let the scan run — it will pass).</li>
+              blocked”</i> or offer to scan the app. Tap <i>More details → Install anyway</i>.
+              If you'd rather not override a warning on trust alone, verify the download's
+              SHA-256 against the checksum below first.</li>
           </ul>
           <p class="fine">
-            Don't take our word for it: check the file's SHA-256 against the checksum below, or
-            <a href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">build the APK from source</a>
-            and diff the two. Two hygiene tips: revoke <i>Install unknown apps</i> for your
-            browser after installing, and if a later beta refuses to install over this one,
-            uninstall first — beta signing keys can rotate between releases.
+            Don't take our word for it: check the file's SHA-256 against the checksum below,
+            and <a href="https://github.com/jackofall1232/l00prite" target="_blank" rel="noopener">read the source</a>
+            to see exactly what you're running. (A self-built APK won't be byte-identical to
+            this download — the build stamps a timestamp version code and signs with your own
+            local key — so verify the published file by its SHA-256, not by diffing your own
+            build.) Two hygiene tips: revoke <i>Install unknown apps</i> for your
+            browser after installing, and <b>if you installed an earlier beta, uninstall it
+            first</b> — beta builds are debug-signed and the signing key can rotate between
+            releases (it did for this one), which makes Android refuse an in-place update.
           </p>
         </div>
 
@@ -780,8 +785,8 @@
       <p class="lead">
         LOOPRITE is built off the <b>l00prite</b> source code — the vendor-neutral protocol,
         the gateway, the run engine, and this very APK pipeline are all MIT-licensed and
-        public. Read the prompts your agents will follow. Audit the run boundaries. Build the
-        APK from source and diff the checksum. That's the point.
+        public. Read the prompts your agents will follow. Audit the run boundaries. Build
+        your own APK from the same source. That's the point.
       </p>
     </div>
     <div class="src-card reveal">
