@@ -37,13 +37,17 @@ var perActionPermissions = []string{
 // button entirely — see dashboard.html's hasBlockers gate — making that checkpoint unreachable).
 func checkGitReady(git gitx.Client, root, runID string) (blockers, notes []string) {
 	git = gitOrDetect(git)
+	// Plain-English, fixed strings only -- never the raw git/go-git error text (adversarial-review
+	// finding: these two Blockers flow verbatim into the pre-flight display and from there straight
+	// into the dashboard, the same class of leak humanizeStartError (gateway/runs.go) closes for
+	// StartRun's own errors).
 	if _, err := git.RevParseHead(root); err != nil {
-		blockers = append(blockers, "repository has no commits (or is not a git repository): "+err.Error())
+		blockers = append(blockers, "this project doesn't look like a ready git repository yet — it needs at least one commit before an autonomous run can start (and it must actually be a git repository)")
 		return blockers, notes
 	}
 	out, err := git.StatusPorcelain(root)
 	if err != nil {
-		blockers = append(blockers, "git status failed: "+err.Error())
+		blockers = append(blockers, "l00prite couldn't check this project's git status — the repository may be corrupted, or the gateway may not have permission to read it")
 		return blockers, notes
 	}
 	if dirty := dirtyPathsOutsideL00prite(out); len(dirty) > 0 {

@@ -2,11 +2,13 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
 )
 
@@ -138,4 +140,79 @@ func TestDirtyWorktreeIsANoteNotABlockerAndAutoCheckpoints(t *testing.T) {
 	if !strings.Contains(string(ledgerBytes), "auto-checkpoint before run "+run.ID) {
 		t.Fatalf("expected the checkpoint to be logged in ledger.md, got:\n%s", string(ledgerBytes))
 	}
+}
+
+// rawErrGit is a gitx.Client whose RevParseHead/StatusPorcelain return an error carrying raw
+// technical text (as a real git failure or a corrupted-repo condition might), to prove
+// checkGitReady never lets that text reach a Blocker string. Every other method panics: this test
+// only exercises checkGitReady, which never calls them.
+type rawErrGit struct{ revErr, statusErr error }
+
+func (rawErrGit) Kind() string { return "fake" }
+func (rawErrGit) Clone(ctx context.Context, url, dest string, depth int) error {
+	panic("not used by checkGitReady")
+}
+func (g rawErrGit) RevParseHead(repo string) (string, error) { return "", g.revErr }
+func (g rawErrGit) StatusPorcelain(repo string) (string, error) {
+	if g.statusErr != nil {
+		return "", g.statusErr
+	}
+	return "", nil
+}
+func (rawErrGit) CheckoutNewBranch(repo, name string) error { panic("not used by checkGitReady") }
+func (rawErrGit) AddAll(repo string) error                  { panic("not used by checkGitReady") }
+func (rawErrGit) Commit(repo, message string) (string, error) {
+	panic("not used by checkGitReady")
+}
+func (rawErrGit) DiffHead(repo string) (string, error) { panic("not used by checkGitReady") }
+func (rawErrGit) Log(repo string, limit int) (string, error) {
+	panic("not used by checkGitReady")
+}
+func (rawErrGit) Show(repo string, ref string) (string, error) {
+	panic("not used by checkGitReady")
+}
+func (rawErrGit) Raw(ctx context.Context, repo string, args ...string) (string, error) {
+	panic("not used by checkGitReady")
+}
+
+var _ gitx.Client = rawErrGit{}
+
+// Adversarial-review finding: checkGitReady's own Blockers ("repository has no commits...", "git
+// status failed...") used to concatenate the raw error text, bypassing the plain-English
+// translation the rest of Bug 2's fix (gateway/runs.go's humanizeStartError) added for StartRun's
+// errors. Both failure paths must now be fixed, plain-English strings only.
+func TestCheckGitReadyNeverLeaksRawErrorText(t *testing.T) {
+	rawMarkers := []string{"fatal:", "exit status", "unstaged", "checkout -B", "\n"}
+
+	t.Run("RevParseHead failure", func(t *testing.T) {
+		git := rawErrGit{revErr: errors.New("fatal: not a git repository (or any of the parent directories): .git\nexit status 128")}
+		blockers, notes := checkGitReady(git, t.TempDir(), "run-x")
+		if len(notes) != 0 {
+			t.Fatalf("expected no notes on a hard git-repo failure, got: %v", notes)
+		}
+		if len(blockers) != 1 {
+			t.Fatalf("expected exactly one blocker, got: %v", blockers)
+		}
+		for _, marker := range rawMarkers {
+			if strings.Contains(blockers[0], marker) {
+				t.Fatalf("blocker leaked raw git error text (marker %q): %q", marker, blockers[0])
+			}
+		}
+	})
+
+	t.Run("StatusPorcelain failure", func(t *testing.T) {
+		git := rawErrGit{statusErr: errors.New("fatal: index file corrupt\nexit status 128")}
+		blockers, notes := checkGitReady(git, t.TempDir(), "run-x")
+		if len(notes) != 0 {
+			t.Fatalf("expected no notes on a hard git-status failure, got: %v", notes)
+		}
+		if len(blockers) != 1 {
+			t.Fatalf("expected exactly one blocker, got: %v", blockers)
+		}
+		for _, marker := range rawMarkers {
+			if strings.Contains(blockers[0], marker) {
+				t.Fatalf("blocker leaked raw git error text (marker %q): %q", marker, blockers[0])
+			}
+		}
+	})
 }
