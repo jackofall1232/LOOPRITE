@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -51,15 +52,20 @@ var chatSecretDenyPatterns = []string{
 	"*.keystore", "*.jks",
 }
 
+// rel is always a repo-relative, forward-slash-normalized path (it comes from
+// filepath.ToSlash(resolvedRel) in readFile and c.relOf in searchFiles) -- path.Base/path.Match
+// (not filepath.Base/filepath.Match) are the correct match here: they're platform-independent by
+// definition, where filepath's behavior depends on GOOS and would misinterpret an already-forward
+// -slash value on a platform whose native separator differs.
 func isChatSecretPath(rel string) bool {
 	lowerRel := strings.ToLower(rel)
-	lowerBase := strings.ToLower(filepath.Base(rel))
+	lowerBase := strings.ToLower(path.Base(rel))
 	for _, pat := range chatSecretDenyPatterns {
 		lowerPat := strings.ToLower(pat)
-		if ok, _ := filepath.Match(lowerPat, lowerBase); ok {
+		if ok, _ := path.Match(lowerPat, lowerBase); ok {
 			return true
 		}
-		if ok, _ := filepath.Match(lowerPat, lowerRel); ok {
+		if ok, _ := path.Match(lowerPat, lowerRel); ok {
 			return true
 		}
 	}
@@ -168,7 +174,14 @@ func (c chatToolbox) resolvePath(rel string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("path escapes the repository")
 	}
-	if ancestorResolved != rootResolved && !strings.HasPrefix(ancestorResolved, rootResolved+string(os.PathSeparator)) {
+	// filepath.Rel is more robust than a raw prefix comparison: it reasons in path components,
+	// not bytes. containRel == ".." (same escape check the top of this function already uses for
+	// the pre-resolution "cleaned" path) or a leading "../" component means ancestorResolved needed
+	// to go up and out of rootResolved. NOTE: deliberately NOT a bare
+	// strings.HasPrefix(containRel, "..") -- that would also reject a real, correctly-contained
+	// path/directory that happens to be named something like "..foo".
+	containRel, err := filepath.Rel(rootResolved, ancestorResolved)
+	if err != nil || containRel == ".." || strings.HasPrefix(containRel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("path escapes the repository")
 	}
 	return abs, nil
@@ -225,11 +238,13 @@ func (c chatToolbox) readFile(args map[string]any) string {
 	if rerr != nil {
 		return "ERROR: path escapes the repository"
 	}
-	if resolvedAbs != rootResolved && !strings.HasPrefix(resolvedAbs, rootResolved+string(os.PathSeparator)) {
-		return "ERROR: path escapes the repository"
-	}
+	// filepath.Rel reasons in path components, not bytes, so this single check both confirms
+	// containment AND gives us the relative path the secret-pattern check below needs -- no need
+	// for a separate raw prefix comparison against the absolute path first. Deliberately NOT a bare
+	// strings.HasPrefix(resolvedRel, "..") -- that would also reject a real, correctly-contained
+	// path/directory that happens to be named something like "..foo".
 	resolvedRel, rerr := filepath.Rel(rootResolved, resolvedAbs)
-	if rerr != nil {
+	if rerr != nil || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(os.PathSeparator)) {
 		return "ERROR: path escapes the repository"
 	}
 	if isChatSecretPath(filepath.ToSlash(resolvedRel)) {
@@ -263,8 +278,19 @@ func (c chatToolbox) readFile(args map[string]any) string {
 			start = total
 		}
 		end := total
-		if hasLimit && limit >= 0 && start+limit < end {
-			end = start + limit
+		if hasLimit && limit >= 0 {
+			// Cap limit to total BEFORE adding: an unbounded limit_lines from the model (e.g.
+			// math.MaxInt) would otherwise overflow start+limit (Go int addition wraps, it doesn't
+			// panic), potentially wrapping to a large negative number that passes the
+			// "start+limit < end" check and gets assigned to end -- then lines[start:end] with a
+			// negative end panics ("slice bounds out of range"), crashing the whole gateway process
+			// for every tenant, not just this request.
+			if limit > total {
+				limit = total
+			}
+			if start+limit < end {
+				end = start + limit
+			}
 		}
 		text = strings.Join(lines[start:end], "\n")
 		if start > 0 || end < total {
@@ -387,7 +413,17 @@ func (c chatToolbox) searchFiles(args map[string]any) string {
 			}
 			trimmed := line
 			if utf8.RuneCountInString(trimmed) > 200 {
-				trimmed = string([]rune(trimmed)[:200])
+				// Walk byte indices (range over a string yields each rune's starting byte offset)
+				// to find where the 200th rune ends, instead of allocating a full []rune copy of
+				// the line just to truncate it.
+				runeCount := 0
+				for i := range trimmed {
+					if runeCount == 200 {
+						trimmed = trimmed[:i]
+						break
+					}
+					runeCount++
+				}
 			}
 			entry := fmt.Sprintf("%s:%d: %s\n", rel, lineNo, trimmed)
 			if b.Len()+len(entry) > chatSearchTotalCap {
