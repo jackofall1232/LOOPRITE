@@ -210,7 +210,7 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 			}
 			msg := "Request denied by policy"
 			if result.Denied.Reason == "cost_cap" {
-				msg = fmt.Sprintf("Daily cost cap reached mid-bridge after %d delegation(s) and $%.4f committed. Raise it with \"l00prite cap set\" or wait for the UTC-day reset.", result.SubCalls, result.TotalCostUsd)
+				msg = fmt.Sprintf("Daily budget reached mid-bridge after %d delegation(s) and $%.4f committed. Raise or change it in the dashboard (Costs → Set budget), or wait for the UTC-day reset.", result.SubCalls, result.TotalCostUsd)
 			}
 			oaiError(w, 402, msg, "insufficient_quota", firstNonEmpty(result.Denied.Code, result.Denied.Reason))
 			return
@@ -294,7 +294,7 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 			ledger.Append(app.DB, cfg.LedgerPath, ledger.Entry{RequestID: requestID, Project: project, Repo: repoID, Provider: route.Provider, Model: route.Model, RuleID: ruleID, Decision: route.Decision, Outcome: "denied_" + resv.Reason})
 			msg := "Request denied by policy"
 			if resv.Reason == "cost_cap" {
-				msg = fmt.Sprintf("Daily cost cap reached ($%.4f of $%.2f). Raise it with \"l00prite cap set\" or wait for the UTC-day reset.", resv.Spent, resv.Cap)
+				msg = fmt.Sprintf("Daily budget reached ($%.4f of $%.2f). Raise or change it in the dashboard (Costs → Set budget), or wait for the UTC-day reset.", resv.Spent, resv.Cap)
 			}
 			oaiError(w, 402, msg, "insufficient_quota", resv.Reason)
 			return
@@ -328,7 +328,7 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	// RunChatTools attaches read-only repo-browsing tools (read_file/list_dir/search_files) when
 	// repoRoot names a registered repo, and is a no-op passthrough to runTurn otherwise -- see
 	// chatloop.go's doc comment for why streaming/bridging aren't wired to it yet.
-	turn, err := RunChatTools(app, requestID, project, repoID, repoRoot, openaiReq, routeHeader, clientCtx, paths)
+	turn, err := RunChatTools(app, principal, requestID, project, repoID, repoRoot, openaiReq, routeHeader, clientCtx, paths)
 	if err != nil {
 		logRouteError(app, requestID, project, repoID, err)
 		e := httpErr(err)
@@ -341,7 +341,7 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 		msg := "Request denied by policy"
 		if turn.Denial.Reason == "cost_cap" {
-			msg = fmt.Sprintf("Daily cost cap reached ($%.4f of $%.2f). Raise it with \"l00prite cap set\" or wait for the UTC-day reset.", turn.Denial.Spent, turn.Denial.Cap)
+			msg = fmt.Sprintf("Daily budget reached ($%.4f of $%.2f). Raise or change it in the dashboard (Costs → Set budget), or wait for the UTC-day reset.", turn.Denial.Spent, turn.Denial.Cap)
 		}
 		oaiError(w, 402, msg, "insufficient_quota", firstNonEmpty(turn.Denial.Code, turn.Denial.Reason))
 		return

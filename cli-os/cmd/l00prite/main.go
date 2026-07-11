@@ -509,7 +509,14 @@ func capCmd(db *sql.DB, cfg config.Config, sub string, flags map[string]string) 
 			fmt.Fprintln(os.Stderr, "invalid --daily amount")
 			return
 		}
-		_, _ = db.ExecContext(state.Ctx(), `INSERT OR REPLACE INTO caps(project,window,limit_usd) VALUES(?,'daily',?)`, project, d)
+		// A CLI daily cap is an explicit request to enforce a hard limit: also clear any
+		// unlimited/overage override a prior dashboard "no budget stop" or overage setting left in
+		// place, or the project would keep running unenforced/over-ceiling despite this command's
+		// own success message claiming a $d cap is now active (pep.EffectiveCeiling treats
+		// Unlimited as capped=false regardless of limit_usd, so a stale unlimited=1 row would
+		// silently defeat this cap).
+		_, _ = db.ExecContext(state.Ctx(), `INSERT INTO caps(project,window,limit_usd,overage_pct,unlimited) VALUES(?,'daily',?,0,0)
+			ON CONFLICT(project,window) DO UPDATE SET limit_usd = excluded.limit_usd, overage_pct = excluded.overage_pct, unlimited = excluded.unlimited`, project, d)
 		audit(db, "cap.set", fmt.Sprintf("%s=%s", project, daily))
 		fmt.Printf("Daily cap for %q set to $%.2f\n", project, d)
 	case "list":
@@ -517,13 +524,12 @@ func capCmd(db *sql.DB, cfg config.Config, sub string, flags map[string]string) 
 		// and GetSpend opens its own transaction, so querying while these rows are still open deadlocks.
 		type capRow struct {
 			project string
-			limit   float64
 		}
 		var caps []capRow
-		if rows, err := db.QueryContext(state.Ctx(), `SELECT project,limit_usd FROM caps`); err == nil {
+		if rows, err := db.QueryContext(state.Ctx(), `SELECT project FROM caps`); err == nil {
 			for rows.Next() {
 				var c capRow
-				if rows.Scan(&c.project, &c.limit) == nil {
+				if rows.Scan(&c.project) == nil {
 					caps = append(caps, c)
 				}
 			}
@@ -531,7 +537,15 @@ func capCmd(db *sql.DB, cfg config.Config, sub string, flags map[string]string) 
 		}
 		for _, c := range caps {
 			s := pep.GetSpend(db, c.project, cfg.DefaultDailyCapUsd)
-			fmt.Printf("%-16s daily $%.2f  spent today $%.4f\n", c.project, c.limit, s.Reserved+s.Committed)
+			spent := s.Reserved + s.Committed
+			switch {
+			case s.Unlimited:
+				fmt.Printf("%-16s no budget stop (unlimited, limit_usd $%.2f kept for reference)  spent today $%.4f\n", c.project, s.Cap, spent)
+			case s.OveragePct > 0:
+				fmt.Printf("%-16s daily $%.2f +%.0f%% overage (effective $%.2f)  spent today $%.4f\n", c.project, s.Cap, s.OveragePct, s.EffectiveCap, spent)
+			default:
+				fmt.Printf("%-16s daily $%.2f  spent today $%.4f\n", c.project, s.Cap, spent)
+			}
 		}
 	default:
 		fmt.Fprintln(os.Stderr, "unknown cap subcommand")

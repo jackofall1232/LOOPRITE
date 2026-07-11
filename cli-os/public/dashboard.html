@@ -260,6 +260,20 @@
     .topbar{background:rgba(245,247,251,.8);}
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+
+  /* help section */
+  .help-d{border:1px solid var(--stroke);border-radius:12px;margin-top:10px;background:var(--panel);}
+  .help-d summary{cursor:pointer;padding:12px 14px;font-size:13px;font-weight:650;list-style:none;display:flex;align-items:center;gap:8px;}
+  .help-d summary::-webkit-details-marker{display:none}
+  .help-d summary::before{content:"›";color:var(--text-3);transition:transform .15s}
+  .help-d[open] summary::before{transform:rotate(90deg)}
+  .hd-body{padding:0 14px 14px;font-size:12.5px;color:var(--text-2);line-height:1.65}
+  .hd-body ol,.hd-body ul{margin:6px 0;padding-left:20px}
+  .hd-body li{margin:6px 0}
+  .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;padding:0 14px 14px}
+  .shot{margin:0}
+  .shot img{width:100%;display:block;border-radius:10px;border:1px solid var(--stroke)}
+  .shot figcaption{font-size:11.5px;color:var(--text-3);margin-top:6px;line-height:1.5}
 </style>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -282,6 +296,9 @@
   <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5c0 4.14-4.03 7.5-9 7.5-1.02 0-2-.14-2.92-.4L4.5 20l1.15-3.44C4.24 15.24 3.4 13.46 3.4 11.5 3.4 7.36 7.03 4 12 4s9 3.36 9 7.5z"/><line x1="8.5" y1="10.5" x2="15.5" y2="10.5"/><line x1="8.5" y1="13.5" x2="13" y2="13.5"/></symbol>
   <symbol id="i-run" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5z"/></symbol>
   <symbol id="i-menu" viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.4-2.1"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.6 2.6 0 0 1 5.1.8c0 1.6-2.2 2-2.7 3.2"/><path d="M12 17h.01"/></symbol>
 </defs></svg>
 
 <div class="app">
@@ -294,6 +311,7 @@
     <div class="nav-label">Workspace</div>
     <nav class="nav">
       <a data-goto="sec-top"><svg class="ico"><use href="#i-grid"/></svg><span>Overview</span></a>
+      <a data-goto="sec-help"><svg class="ico"><use href="#i-help"/></svg><span>Help</span></a>
       <a data-goto="sec-play"><svg class="ico"><use href="#i-chat"/></svg><span>Playground</span></a>
       <a data-goto="sec-providers"><svg class="ico"><use href="#i-server"/></svg><span>Providers</span></a>
       <a data-goto="sec-cost"><svg class="ico"><use href="#i-card"/></svg><span>Costs</span></a>
@@ -330,10 +348,84 @@
 
       <section class="card hero" id="hero"></section>
 
+      <section class="card card-pad" id="sec-help">
+        <div class="sec-head">
+          <div><div class="eyebrow"><span class="tick" style="background:var(--accent-2)"></span> Help</div>
+            <h2 style="margin-top:8px">How to use L00prite OS</h2></div>
+        </div>
+        <p style="font-size:13px;color:var(--text-2);margin:2px 0 4px">Everything runs on your own device — this dashboard is the whole control panel. The short version: connect a token, add an AI provider, connect a repository. Then talk to your models in the <b>Playground</b>, or hand them a whole goal as a <b>Run</b> that you review and explicitly start.</p>
+
+        <details class="help-d">
+          <summary>Getting started — token, provider, repository</summary>
+          <div class="hd-body">
+            <ol>
+              <li><b>Connect a token.</b> The dashboard reads everything through the same authenticated API your coding tools use. If you finished the setup wizard, your token was shown there; paste it into the connect screen. It's stored only in this browser — Disconnect (top right) forgets it.</li>
+              <li><b>Add a provider.</b> Providers → <i>Add provider</i>. Pick the adapter (Anthropic, or any OpenAI-compatible endpoint), paste your API key, and validate it with a real test call. The key is encrypted into the on-device vault and never shown again. A provider stays marked <i>unverified</i> until its first successful real request.</li>
+              <li><b>Connect a repository.</b> Repositories → <i>Register repo</i>. Cloning from a URL is the easy path — public repos need no account or permissions at all. Once registered, the Playground can read the repo's files (read-only), its <span class="mono">.l00prite</span> memory is injected into requests, and Runs can work on it.</li>
+            </ol>
+            <p>That's the whole setup. Nothing below needs a terminal.</p>
+          </div>
+        </details>
+
+        <details class="help-d">
+          <summary>Playground — chat with your models (and put them to work)</summary>
+          <div class="hd-body">
+            <p>Type a prompt, press Send. <b>auto</b> lets the gateway pick the best provider and model for each request; choosing a specific model pins every request to it. Every reply goes through the same authenticated, metered path your coding tools use, so cost shows up in Activity immediately.</p>
+            <p><b>Lock a model in.</b> By default the picker returns to <b>auto</b> when you reload. If you always want the same model, choose it and click the padlock next to the picker — a filled padlock means your choice now survives reloads and app restarts. Click it again to unlock. Locking is entirely your choice; nothing locks itself.</p>
+            <p><b>Let it read your code.</b> Pick a repository in the repo menu and the assistant can read files, list folders, and search that repo — read-only, always. It can never write files, run commands, or touch git from chat.</p>
+            <p><b>Ask for real work — in plain words.</b> With a repo selected, you don't need any special syntax to get something built. Just say what you want and that you want it done, for example:</p>
+            <ul><li><span class="mono">"Add a /healthz endpoint to this service and execute it"</span></li>
+                <li><span class="mono">"Fix the failing date parsing in utils.js — go ahead and do it"</span></li></ul>
+            <p>The assistant then <b>drafts a Run</b> for you and a green <i>Run drafted</i> banner appears in the chat. Drafting changes nothing: no code is touched, no command runs. Press <i>Review &amp; start</i> on the banner (or open the Runs section) to see the run's pre-flight — its goal, planned steps, branch, command allowlist, and safety gates — and only when you type <span class="mono">EXECUTE</span> does anything actually start.</p>
+          </div>
+        </details>
+
+        <details class="help-d">
+          <summary>Runs — autonomous work behind an explicit gate</summary>
+          <div class="hd-body">
+            <p>A Run gives a model a whole goal against one repository — "add this feature, make the tests pass" — and lets it work iteration by iteration. The safety model is simple and absolute:</p>
+            <ol>
+              <li><b>Draft.</b> Create a run from the <i>New run</i> button, or by asking for it in the Playground. A draft is inert — it exists only so you can review it.</li>
+              <li><b>Pre-flight.</b> Before anything can start, you see exactly what would happen: the goal, the planned units of work, the branch it will commit to, the command allowlist (the first command is the done-check that must pass before the goal counts as met), which action classes are gated, and any blockers. If pre-flight finds blockers, Start stays disabled until they're resolved.</li>
+              <li><b>EXECUTE.</b> Nothing starts until you type <span class="mono">EXECUTE</span> into the pre-flight screen. No setting, no saved flag, and no request from a model can ever skip this step.</li>
+              <li><b>Approvals.</b> While a run is live, actions like push, merge, deploy, or anything destructive pause the run and wait for your explicit Allow or Deny — and an unanswered request fails closed.</li>
+              <li><b>Stop &amp; resume.</b> Stop ends a run cleanly at the next boundary. Resuming always goes through a fresh pre-flight and a fresh <span class="mono">EXECUTE</span> — a resumed run never inherits an old confirmation.</li>
+            </ol>
+            <p>Every model turn, tool call, verification, and boundary is streamed into the run's live event feed, and its cost is metered against your budget like everything else.</p>
+          </div>
+        </details>
+
+        <details class="help-d">
+          <summary>Budget — decide what a day may cost</summary>
+          <div class="hd-body">
+            <p>Every request reserves money against your project's daily budget <i>before</i> it is sent and settles the real cost after — enforced by the gateway on your device, not by the provider. Set it under <b>Costs → Set budget</b>. Three modes:</p>
+            <ul>
+              <li><b>Stop at the limit</b> — requests are blocked once today's spend reaches your budget. The strictest choice, and the default.</li>
+              <li><b>Allow up to 100% over</b> — requests keep flowing past the budget, up to double it, then stop. You get an alert the moment you cross the base limit, so a long run can finish without being cut off mid-thought.</li>
+              <li><b>No stop on cost</b> — the gateway never blocks a request because of cost. Spend is still metered and visible in Costs, but nothing will stop a runaway bill except you. Use deliberately.</li>
+            </ul>
+            <p>The budget resets at midnight UTC. Runs additionally have their own iteration limits, which apply in every mode.</p>
+          </div>
+        </details>
+
+        <details class="help-d">
+          <summary>Screenshots — the flows at a glance</summary>
+          <div class="shots" id="help-shots">
+            <figure class="shot"><img src="/assets/screenshots/playground-locked-model.png" loading="lazy" alt="Playground with a repository selected and the model padlock engaged" onerror="this.closest('.shot').style.display='none'"><figcaption>The Playground with a repository selected and a model locked in — the padlock keeps your choice across reloads instead of snapping back to auto.</figcaption></figure>
+            <figure class="shot"><img src="/assets/screenshots/playground-run-drafted.png" loading="lazy" alt="Chat reply with a green Run drafted banner and a Review and start button" onerror="this.closest('.shot').style.display='none'"><figcaption>Asking in plain words — "…and execute it" — drafts a Run. The green banner leads to its pre-flight; nothing has executed yet.</figcaption></figure>
+            <figure class="shot"><img src="/assets/screenshots/run-preflight.png" loading="lazy" alt="Run pre-flight modal with goal, planned units, allowlist, gates and the EXECUTE confirmation field" onerror="this.closest('.shot').style.display='none'"><figcaption>The pre-flight is the contract: what will run, on which branch, under which limits. Typing EXECUTE is the only way anything starts.</figcaption></figure>
+            <figure class="shot"><img src="/assets/screenshots/run-live-feed.png" loading="lazy" alt="Live run modal with streaming event feed and a pending approval card" onerror="this.closest('.shot').style.display='none'"><figcaption>A live run: every model turn, tool call, and verification streams into the feed, and gated actions wait for your Allow or Deny.</figcaption></figure>
+            <figure class="shot"><img src="/assets/screenshots/budget-modal.png" loading="lazy" alt="Set budget modal with daily amount and three stop modes" onerror="this.closest('.shot').style.display='none'"><figcaption>The budget control: stop at your limit, allow a one-time 100% overage, or meter without stopping.</figcaption></figure>
+            <figure class="shot"><img src="/assets/screenshots/help-section.png" loading="lazy" alt="The Help section itself with the Getting started accordion open" onerror="this.closest('.shot').style.display='none'"><figcaption>This Help section — every step lives in the dashboard; nothing needs a terminal.</figcaption></figure>
+          </div>
+        </details>
+      </section>
+
       <section class="card card-pad" id="sec-play">
         <div class="sec-head">
           <div><div class="eyebrow"><span class="tick" style="background:var(--violet)"></span> Playground</div><h2 style="margin-top:8px">Prompt your models</h2></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn sm" id="play-lock" aria-pressed="false" title="Lock this model so the Playground stops defaulting back to auto"><svg class="ico" style="width:14px;height:14px"><use href="#i-unlock"/></svg></button>
             <select id="play-model" class="play-select" title="Model, provider/model pin, or auto profile"><option value="auto">auto</option></select>
             <input type="text" id="play-model-custom" class="play-select hidden" placeholder="model id, e.g. glm-5.2" title="Sent as-is — for providers whose catalog isn't known">
             <select id="play-repo" class="play-select" title="Let the model browse this repo's files and inject its .l00prite memory"><option value="">no repo selected</option></select>
@@ -365,13 +457,16 @@
             <button class="btn sm primary" id="new-run-btn" style="display:none"><svg class="ico" style="width:15px;height:15px"><use href="#i-run"/></svg> New run</button>
           </div>
         </div>
+        <p style="margin:2px 0 12px;font-size:12.5px;color:var(--text-2)">Tip: you can also draft a run straight from the Playground — pick a repo and ask in plain words, e.g. <span class="mono">"Add input validation to the signup form and execute it"</span>. The draft lands here for review; nothing starts until you type <span class="mono">EXECUTE</span>. <a data-goto="sec-help" style="cursor:pointer;color:var(--accent-2)">Learn more →</a></p>
         <div id="runs-body"></div>
       </section>
 
       <div class="grid-main">
         <div class="col">
           <section class="card card-pad" id="sec-cost">
-            <div class="sec-head"><div><div class="eyebrow"><span class="tick" style="background:var(--teal)"></span> Cost analytics</div><h2 style="margin-top:8px">Spend &amp; usage</h2></div><span class="meta" id="cost-meta"></span></div>
+            <div class="sec-head"><div><div class="eyebrow"><span class="tick" style="background:var(--teal)"></span> Cost analytics</div><h2 style="margin-top:8px">Spend &amp; usage</h2></div>
+              <div style="display:flex;align-items:center;gap:12px;margin-left:auto"><span class="meta" id="cost-meta"></span>
+                <button class="btn sm primary" id="budget-btn" style="display:none"><svg class="ico" style="width:15px;height:15px"><use href="#i-card"/></svg> Set budget</button></div></div>
             <div id="cost-body"></div>
           </section>
 
@@ -433,6 +528,7 @@
 "use strict";
 (function(){
   const TOKEN_KEY="l00prite_token";
+  const LOCK_KEY="l00prite_play_model_lock";
   const S={ token:null, summary:null, timer:null, runs:null };
   const $ = id => document.getElementById(id);
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -477,6 +573,7 @@
     $("add-provider-btn").style.display="";
     $("add-repo-btn").style.display="";
     $("new-run-btn").style.display="";
+    $("budget-btn").style.display="";
     // header
     const providersOnline=(d.system&&d.system.providers_healthy)||0, providersTotal=(d.system&&d.system.providers_total)||0;
     const repos=(d.repos||[]).length, spendToday=(d.spend&&d.spend.today_committed_usd)||0;
@@ -581,12 +678,13 @@
     const sp=d.spend||{}; $("cost-meta").textContent = "UTC day "+esc(sp.day||"");
     const hist=sp.history||[], byProv=sp.by_provider_today||[];
     const totalToday=Number(sp.today_committed_usd||0), reserved=Number(sp.today_reserved_usd||0);
-    let capTotal=0; (sp.by_project||[]).forEach(p=>capTotal+=Number(p.cap_usd||0));
+    const mine=(sp.by_project||[]).find(p=>p.project===((S.summary.principal||{}).project));
+    const bud = mine ? (mine.unlimited ? "no stop" : usd(mine.effective_cap_usd!=null?mine.effective_cap_usd:mine.cap_usd)) : usd(sp.default_daily_cap_usd)+" (default)";
     const noData = hist.length===0 && byProv.length===0 && totalToday===0;
     let html = `<div class="cost-head">
         <div class="cost-stat"><div class="l">Committed today</div><div class="v">${usd(totalToday)}</div></div>
         <div class="cost-stat"><div class="l">Reserved (in-flight)</div><div class="v">${usd(reserved)}</div></div>
-        <div class="cost-stat"><div class="l">Caps (sum)</div><div class="v">${capTotal>0?usd(capTotal):"—"}</div></div>
+        <div class="cost-stat"><div class="l">Budget (daily)</div><div class="v">${esc(bud)}</div></div>
         <div class="cost-stat"><div class="l">Pricing</div><div class="v" style="font-size:15px">${sp.has_pricing_gaps?`<span style="color:var(--warn)">some unpriced</span>`:"confirmed"}</div></div>
       </div>`;
     if(noData){ html += `<div class="empty"><b>No spend recorded yet.</b> Cost appears here after the first request through <code>/v1/chat/completions</code>.</div>`; $("cost-body").innerHTML=html; return; }
@@ -620,6 +718,75 @@
       const w=Math.max(2,Math.round(Number(p.cost_usd||0)/max*100));
       return `<div class="bar-row"><span class="bl" title="${esc(p.provider)}">${esc(p.provider)}</span><span class="bar-track"><i style="width:${w}%"></i></span><span class="bv">${esc(usd(p.cost_usd))}${p.cost_unconfirmed?"?":""}</span></div>`;
     }).join("")+`</div>`;
+  }
+
+  // ---- budget (Costs → Set budget) ----
+  // Same api()/busy()/note pattern as every other modal (add(), rotate(), createRunModal()): GET to
+  // prefill, client-side validation before the round trip, POST to save, afterMutation() on success.
+  function budgetModeOf(v){ if(v.unlimited) return "unlimited"; if(Number(v.overage_pct||0)>0) return "overage"; return "strict"; }
+  async function openBudgetModal(){
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Budget</div>
+      <h3>Set a daily budget</h3>
+      <div class="sub" id="bg-sub">Loading…</div>
+      <div id="bg-current"></div>
+      <div class="field"><label>Daily budget (USD)</label><input type="text" id="bg-daily" placeholder="10.00">
+        <div id="bg-daily-hint" style="margin-top:6px;font-size:11.5px;color:var(--text-3)"></div></div>
+      <div class="field"><label>When the budget is reached</label>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+          <label class="field check" style="align-items:flex-start"><input type="radio" name="bg-mode" value="strict" checked style="margin-top:2px">
+            <span><b>Stop at the limit</b><div style="color:var(--text-3);font-size:11.5px;margin-top:2px">Requests are blocked once today's spend reaches your budget. The strictest choice, and the default.</div></span></label>
+          <label class="field check" style="align-items:flex-start"><input type="radio" name="bg-mode" value="overage" style="margin-top:2px">
+            <span><b>Allow up to 100% over</b><div style="color:var(--text-3);font-size:11.5px;margin-top:2px">Requests keep going past the budget, up to double it, then stop. You'll see an alert the moment you cross the base limit.</div></span></label>
+          <label class="field check" style="align-items:flex-start"><input type="radio" name="bg-mode" value="unlimited" style="margin-top:2px">
+            <span><b>No budget stop</b><div style="color:var(--text-3);font-size:11.5px;margin-top:2px">Never block a request because of cost. Spend is still metered and shown in Costs.</div></span></label>
+        </div>
+      </div>
+      <div id="bg-warn"></div>
+      <div id="bg-note"></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="bg-save" disabled>Save budget</button>
+      </div>`);
+    const dailyIn=$("bg-daily"), hint=$("bg-daily-hint"), warn=$("bg-warn"), note=$("bg-note"), saveBtn=$("bg-save");
+    const modeRadios=()=>[...document.querySelectorAll('input[name="bg-mode"]')];
+    function curMode(){ const r=modeRadios().find(x=>x.checked); return r?r.value:"strict"; }
+    function syncMode(){
+      const m=curMode();
+      hint.textContent = m==="unlimited" ? "— kept for the charts' reference line only; it won't block anything." : "";
+      warn.innerHTML = m==="unlimited"
+        ? `<div class="note warn"><b>No safety net:</b> with this setting the gateway will never refuse a request on cost. Runs still obey their iteration limits, but nothing will stop a runaway bill except you. Consider “Allow up to 100% over” instead.</div>`
+        : "";
+    }
+    modeRadios().forEach(r=>r.onchange=syncMode);
+    syncMode();
+    const project=(S.summary&&S.summary.principal&&S.summary.principal.project)||"default";
+    $("bg-sub").innerHTML = `Applies to project <span class="mono">${esc(project)}</span> and resets at midnight UTC. Every request reserves against this budget before it's sent — enforced by this gateway on your device, not by the provider.`;
+    saveBtn.disabled=true;
+    const {res,data}=await api("GET","/v1/budget");
+    if(!res.ok || !data){ note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not load the current budget."))}</div>`; saveBtn.disabled=false; return; }
+    saveBtn.disabled=false;
+    const spentTxt=usd(data.spent_today_usd);
+    $("bg-current").innerHTML = `<div class="note">Today: <b>${esc(spentTxt)}</b> spent${data.unlimited?" — no stop on cost is currently set":(data.effective_cap_usd!=null?`, of an effective ${esc(usd(data.effective_cap_usd))}`:"")}.</div>`;
+    dailyIn.value = data.daily_usd!=null ? Number(data.daily_usd).toFixed(2) : "";
+    const initialMode=budgetModeOf(data);
+    modeRadios().forEach(r=>{ r.checked = r.value===initialMode; });
+    syncMode();
+    saveBtn.onclick=async()=>{
+      const mode=curMode();
+      const amtRaw=dailyIn.value.trim();
+      const amt=amtRaw===""?NaN:Number(amtRaw);
+      if(mode!=="unlimited" && !(amt>0)){ note.innerHTML=`<div class="note err">Enter a daily amount greater than $0.</div>`; return; }
+      let payload;
+      if(mode==="strict") payload={daily_usd:amt, overage_pct:0, unlimited:false};
+      else if(mode==="overage") payload={daily_usd:amt, overage_pct:100, unlimited:false};
+      else { payload={unlimited:true}; if(amt>0) payload.daily_usd=amt; }
+      busy(saveBtn,"Saving…");
+      const {res,data:resp}=await api("POST","/v1/budget",payload);
+      if(!res.ok){ unbusy(saveBtn,"Save budget"); note.innerHTML=`<div class="note err">${esc(mErr(resp,"Could not save the budget."))}</div>`; return; }
+      afterMutation();
+    };
   }
 
   function renderRepos(d){
@@ -1379,10 +1546,16 @@
     const grew=chat.length>renderedChatLen;
     renderedChatLen=chat.length;
     if(!chat.length){
-      log.innerHTML=`<div class="empty" style="padding:18px">Send a prompt to try your gateway. <b>auto</b> picks the best provider for the task; pick a repo to let the model read its files (via read-only tools) and inject its <code>.l00prite</code> memory. Cost lands in Activity below.</div>`;
+      log.innerHTML=`<div class="empty" style="padding:18px">Send a prompt to try your gateway. <b>auto</b> picks the best provider for the task; pick a repo to let the model read its files (via read-only tools) and inject its <code>.l00prite</code> memory. Want it to actually build something? With a repo selected, just say so — e.g. <i>“Add a /healthz endpoint and execute it”</i> — and it will draft a Run for you to review and confirm. Cost lands in Activity below.</div>`;
       return;
     }
     log.innerHTML=chat.map(m=>{
+      if(m.role==="run"){ const r=m.run||{};
+        return `<div class="note ok" style="text-align:left;margin:8px 0"><b>Run drafted:</b> ${esc(r.goal||"")} <span class="opt">(repo ${esc(r.repo||"")})</span>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button class="btn sm primary" data-open-run="${esc(r.id||"")}">Review &amp; start</button>
+            <span class="opt">Nothing runs until you review the pre-flight and type EXECUTE.</span>
+          </div></div>`; }
       if(m.role==="error") return `<div class="msg err">${esc(m.content)}</div>`;
       const meta=m.meta?`<div class="m-meta">${esc(m.meta.model||"")}${m.meta.pt!=null?` · ${esc(String(m.meta.pt))} in / ${esc(String(m.meta.ct==null?"?":m.meta.ct))} out`:""}</div>`:"";
       return `<div class="msg ${m.role==="user"?"user":"assistant"}">${esc(m.content)}${meta}</div>`;
@@ -1449,6 +1622,7 @@
       `<optgroup label="Custom"><option value="__custom">custom model…</option></optgroup>`;
     sel.value=[...sel.options].some(o=>o.value===cur)?cur:"auto";
     syncCustomModel();
+    applyModelLock();
   }
   function syncCustomModel(){
     const sel=$("play-model"), inp=$("play-model-custom");
@@ -1458,6 +1632,29 @@
     const v=$("play-model").value;
     if(v!=="__custom") return v||"auto";
     return $("play-model-custom").value.trim()||"auto";
+  }
+  function readModelLock(){ try{ const raw=localStorage.getItem(LOCK_KEY); if(!raw) return null;
+    const o=JSON.parse(raw); if(!o||typeof o.value!=="string") return null;
+    return {value:o.value, custom:typeof o.custom==="string"?o.custom:""}; }catch(e){ return null; } }
+  function writeModelLock(){ try{ localStorage.setItem(LOCK_KEY, JSON.stringify({value:$("play-model").value, custom:$("play-model-custom").value.trim()})); }catch(e){} }
+  function clearModelLock(){ try{ localStorage.removeItem(LOCK_KEY); }catch(e){} }
+  function syncLockUI(){
+    const locked=!!readModelLock(); const btn=$("play-lock"); if(!btn) return;
+    btn.classList.toggle("primary", locked);
+    btn.setAttribute("aria-pressed", locked?"true":"false");
+    btn.title = locked ? "Model locked — this choice survives reloads. Click to unlock."
+                       : "Lock this model so the Playground stops defaulting back to auto";
+    btn.innerHTML = `<svg class="ico" style="width:14px;height:14px"><use href="#${locked?"i-lock":"i-unlock"}"/></svg>`;
+  }
+  // Re-applied after every catalog rebuild: the lock overrides the "snap back to auto" default.
+  // A locked model missing from the rebuilt catalog (provider disabled, catalog changed) is still
+  // honored VERBATIM through the custom-model path — the value playModel() sends is identical.
+  function applyModelLock(){
+    const lock=readModelLock(); if(!lock){ syncLockUI(); return; }
+    const sel=$("play-model"), inp=$("play-model-custom");
+    if([...sel.options].some(o=>o.value===lock.value)){ sel.value=lock.value; if(lock.value==="__custom") inp.value=lock.custom; }
+    else { sel.value="__custom"; inp.value=lock.value; }
+    syncCustomModel(); syncLockUI();
   }
   async function playSend(){
     if(sending || !S.token) return;
@@ -1489,6 +1686,9 @@
     const u=(data&&data.usage)||{};
     chat.push({role:"assistant",content:String(content==null?"":content),
       meta:{model:(data&&data.model)||model, pt:u.prompt_tokens, ct:u.completion_tokens}});
+    const proposed=Array.isArray(data&&data.l00prite_proposed_runs)?data.l00prite_proposed_runs:[];
+    proposed.forEach(r=>chat.push({role:"run",run:r}));
+    if(proposed.length) loadRuns();
     renderChat();
   }
 
@@ -1517,10 +1717,15 @@
     openRunDetail(row.dataset.run);
   });
   $("play-send").onclick=playSend;
-  $("play-model").onchange=syncCustomModel;
+  $("play-log").addEventListener("click", e => { const b = e.target.closest("[data-open-run]"); if (b) openRunDetail(b.dataset.openRun); });
+  $("play-model").onchange=()=>{ syncCustomModel(); if(readModelLock()) writeModelLock(); };
+  $("play-model-custom").addEventListener("input",()=>{ if(readModelLock()) writeModelLock(); });
+  $("play-lock").onclick=()=>{ if(readModelLock()) clearModelLock(); else writeModelLock(); syncLockUI(); };
   $("play-clear").onclick=()=>{ chat.length=0; chatGen++; renderChat(); };
   $("play-input").addEventListener("keydown",e=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); playSend(); } });
+  $("budget-btn").onclick=()=>openBudgetModal();
   renderChat();
+  syncLockUI();
   $("modal").addEventListener("click",e=>{ if(e.target===$("modal") || (e.target.closest&&e.target.closest("[data-close]"))) closeModal(); });
   document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("modal").classList.contains("hidden")) closeModal(); });
   $("disconnect-btn").onclick=()=>{ S.token=null; try{localStorage.removeItem(TOKEN_KEY);}catch(e){} $("disconnect-btn").style.display="none"; showOverlay(); };

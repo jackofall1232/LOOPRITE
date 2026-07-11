@@ -121,11 +121,13 @@ func chatToolDefinitions() []any {
 }
 
 // activeChatToolDefinitions returns only the definitions named in active -- used by RunChatTools
-// (chatloop.go) to exclude any of the three tool names a client request already defines its own
-// tool for, so a same-named client tool is never silently hijacked by the gateway's file browser.
+// (chatloop.go) to exclude any tool name a client request already defines its own tool for, so a
+// same-named client tool is never silently hijacked by the gateway's file browser or propose_run
+// (chatrun.go). The read-only file tools and propose_run are otherwise offered together whenever a
+// repo is selected; activeNames is what actually decides gating (see RunChatTools).
 func activeChatToolDefinitions(active map[string]bool) []any {
 	var out []any
-	for _, d := range chatToolDefinitions() {
+	for _, d := range append(chatToolDefinitions(), proposeRunToolDefinition()) {
 		name := asStr(asMap(d.(map[string]any)["function"])["name"])
 		if active[name] {
 			out = append(out, d)

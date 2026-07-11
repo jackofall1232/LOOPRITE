@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/oai"
+	"github.com/jackofall1232/l00prite/cli-os/internal/security"
 )
 
 const chatToolPreamble = "The following is content read from the linked repository via a read-only tool call. " +
@@ -30,16 +31,19 @@ const chatToolPreamble = "The following is content read from the linked reposito
 
 // RunChatTools is a drop-in replacement for a single runTurn call in the ingress default path: it
 // returns the same TurnResult shape, so callers need no other changes.
-func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiReq map[string]any, routeHeader string, clientCtx context.Context, paths []string) (TurnResult, error) {
-	// activeNames is the subset of {read_file, list_dir, search_files} this request actually
-	// attaches/intercepts: any name the CLIENT already defines its own tool for is excluded, so a
-	// client tool that happens to share one of these names is never silently hijacked -- it passes
-	// through to the client untouched, exactly like any other tool the gateway doesn't own. If the
-	// client claims all three names, this degenerates to a plain runTurn call below (repoRoot is
-	// still passed through, so memory injection is unaffected).
+func RunChatTools(app *App, principal *security.Principal, requestID, project, repoID, repoRoot string, openaiReq map[string]any, routeHeader string, clientCtx context.Context, paths []string) (TurnResult, error) {
+	// activeNames is the subset of {read_file, list_dir, search_files, propose_run} this request
+	// actually attaches/intercepts: any name the CLIENT already defines its own tool for is
+	// excluded, so a client tool that happens to share one of these names is never silently
+	// hijacked -- it passes through to the client untouched, exactly like any other tool the
+	// gateway doesn't own. If the client claims all active names, this degenerates to a plain
+	// runTurn call below (repoRoot is still passed through, so memory injection is unaffected).
 	activeNames := map[string]bool{}
 	for name := range chatToolNames {
 		activeNames[name] = true
+	}
+	if app.Engine != nil { // propose_run needs the run engine; same repoRoot gate as the read tools below
+		activeNames[chatRunToolName] = true
 	}
 	for _, t := range asArr(openaiReq["tools"]) {
 		delete(activeNames, asStr(asMap(asMap(t)["function"])["name"]))
@@ -68,6 +72,10 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 	// committed. Mirrors RunBridge's TotalCostUsd/TotalUsage accumulation (bridge.go).
 	totalCostUSD, estimated, unconfirmed := 0.0, false, false
 	var totalUsage oai.Usage
+	// proposed accumulates every run drafted by propose_run across all rounds of this turn, so the
+	// response returned to the client can list all of them via l00prite_proposed_runs (not just the
+	// last round's), mirroring the cost/usage accumulation below.
+	var proposed []*proposedRun
 	accumulate := func(t TurnResult) {
 		totalCostUSD += t.Cost.USD
 		if t.Cost.Estimated {
@@ -102,6 +110,13 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 				usage["prompt_tokens_details"] = map[string]any{"cached_tokens": totalUsage.CacheReadTokens}
 			}
 			resp["usage"] = usage
+			t.Response = resp
+		}
+		if len(proposed) > 0 && t.Response != nil {
+			// Additive, non-standard field: OpenAI clients that don't know it simply ignore it; the
+			// dashboard Playground uses it to show an "Open run" banner. Never changes existing fields.
+			resp := copyMap(t.Response)
+			resp["l00prite_proposed_runs"] = proposed
 			t.Response = resp
 		}
 		return t
@@ -166,10 +181,25 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 				continue
 			}
 			args := parseChatToolArgs(asStr(asMap(tc["function"])["arguments"]))
-			result := tb.Execute(name, args)
+			var result, preamble, tag string
+			if name == chatRunToolName {
+				// propose_run counts against the SAME chatMaxToolCallsRun/chatMaxToolRounds budget as
+				// the read-only tools -- no separate allowance -- and can only ever reach
+				// createDraftRun (CreateRun + BuildPreflight), never engine.StartRun: the EXECUTE
+				// confirmation gate stays exclusively with the human in the dashboard.
+				var view *proposedRun
+				result, view = app.executeProposeRun(principal, project, repoID, repoRoot, args)
+				if view != nil {
+					proposed = append(proposed, view)
+				}
+				preamble, tag = chatRunPreamble, "run_draft"
+			} else {
+				result = tb.Execute(name, args)
+				preamble, tag = chatToolPreamble, "file_content"
+			}
 			toolCallsUsed++
-			wrapped := WrapUntrusted(chatToolPreamble, "file_content",
-				[]Attr{{Key: "tool", Val: name}, {Key: "trust", Val: "untrusted"}}, result, []string{"file_content"})
+			wrapped := WrapUntrusted(preamble, tag,
+				[]Attr{{Key: "tool", Val: name}, {Key: "trust", Val: "untrusted"}}, result, []string{tag})
 			nextMessages = append(nextMessages, toolResult(id, wrapped))
 		}
 		convo = copyMap(convo)

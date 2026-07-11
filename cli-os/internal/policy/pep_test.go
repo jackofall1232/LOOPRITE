@@ -64,3 +64,61 @@ func TestReserveRejectsBadAmounts(t *testing.T) {
 		t.Fatalf("Inf must be rejected")
 	}
 }
+
+func TestReserveOveragePctExtendsButDoesNotEliminateCap(t *testing.T) {
+	cfg, _ := testDB(t)
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	// limit $1, overage 100% -> effective ceiling $2.
+	if _, err := db.Exec(`INSERT INTO caps(project,window,limit_usd,overage_pct,unlimited) VALUES('p','daily',1.0,100,0)`); err != nil {
+		t.Fatalf("cap: %v", err)
+	}
+
+	a := Reserve(db, "p", 1.0, 10)
+	if !a.OK {
+		t.Fatalf("first reserve within base limit should succeed: %+v", a)
+	}
+	b := Reserve(db, "p", 1.0, 10)
+	if !b.OK {
+		t.Fatalf("second reserve should succeed within the overage-extended ceiling: %+v", b)
+	}
+	if math.Abs(b.Cap-2.0) > 1e-9 {
+		t.Fatalf("effective cap want 2.0 got %v", b.Cap)
+	}
+	c := Reserve(db, "p", 0.01, 10)
+	if c.OK || c.Reason != "cost_cap" {
+		t.Fatalf("reserve past the overage-extended ceiling should deny: %+v", c)
+	}
+	if math.Abs(c.Cap-2.0) > 1e-9 {
+		t.Fatalf("denial cap want the effective ceiling 2.0 got %v", c.Cap)
+	}
+}
+
+func TestReserveUnlimitedNeverDeniesButStillRecordsSpend(t *testing.T) {
+	cfg, _ := testDB(t)
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	// limit $1 but unlimited=1 -> the limit is meaningless; nothing should ever deny on cost.
+	if _, err := db.Exec(`INSERT INTO caps(project,window,limit_usd,overage_pct,unlimited) VALUES('p','daily',1.0,0,1)`); err != nil {
+		t.Fatalf("cap: %v", err)
+	}
+
+	r := Reserve(db, "p", 100.0, 10) // 100x the stored limit
+	if !r.OK {
+		t.Fatalf("unlimited project must never be denied on cost: %+v", r)
+	}
+	Commit(db, r.ReservationID, 100.0)
+	s := GetSpend(db, "p", 10)
+	if !s.Unlimited {
+		t.Fatalf("GetSpend must report Unlimited=true")
+	}
+	if math.Abs(s.Committed-100.0) > 1e-9 {
+		t.Fatalf("spend must still be metered even when unlimited: committed want 100 got %v", s.Committed)
+	}
+}
