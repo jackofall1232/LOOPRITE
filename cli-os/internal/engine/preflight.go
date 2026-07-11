@@ -27,28 +27,31 @@ var perActionPermissions = []string{
 	"running any command not on the allowlist below",
 }
 
-// checkGitReady verifies the target is a git repo with at least one commit and a clean
-// worktree — read-only; the run branch itself is created at arming time. It goes through the
-// engine's gitx seam (exec git, or the pure-Go go-git fallback when no git binary is on PATH —
-// see docs/android-architecture.md §4 G4), so this can only ever report a genuine "not a git
-// repository" / "dirty tree" problem — never "git is not installed": with go-git compiled in,
-// some implementation can always at least read repository state.
-func checkGitReady(git gitx.Client, root string) []string {
+// checkGitReady verifies the target is a git repo with at least one commit — read-only; the run
+// branch itself is created at arming time. It goes through the engine's gitx seam (exec git, or
+// the pure-Go go-git fallback when no git binary is on PATH — see docs/android-architecture.md §4
+// G4), so this can only ever report a genuine "not a git repository" / "git status failed"
+// problem — never "git is not installed": with go-git compiled in, some implementation can always
+// at least read repository state. A dirty worktree is NOT a blocker: StartRun's AutoCheckpoint
+// commits it automatically, so it is surfaced here as a Note (a Blocker would disable the Start
+// button entirely — see dashboard.html's hasBlockers gate — making that checkpoint unreachable).
+func checkGitReady(git gitx.Client, root, runID string) (blockers, notes []string) {
 	git = gitOrDetect(git)
-	var blockers []string
 	if _, err := git.RevParseHead(root); err != nil {
 		blockers = append(blockers, "repository has no commits (or is not a git repository): "+err.Error())
-		return blockers
+		return blockers, notes
 	}
 	out, err := git.StatusPorcelain(root)
 	if err != nil {
 		blockers = append(blockers, "git status failed: "+err.Error())
-		return blockers
+		return blockers, notes
 	}
 	if dirty := dirtyPathsOutsideL00prite(out); len(dirty) > 0 {
-		blockers = append(blockers, "working tree has uncommitted changes outside .l00prite/ (commit or stash them before starting an autonomous run): "+strings.Join(dirty, ", "))
+		notes = append(notes, fmt.Sprintf(
+			"this project has %d unsaved file(s); l00prite will save them as a checkpoint commit (\"WIP: auto-checkpoint before run-%s\") when you press Start, so nothing is lost: %s",
+			len(dirty), runID, strings.Join(dirty, ", ")))
 	}
-	return blockers
+	return blockers, notes
 }
 
 // extractSection returns the body of a "## <heading>" markdown section (until the next ## or EOF).
@@ -285,7 +288,9 @@ func (e *Engine) BuildPreflight(run *Run) (*Preflight, error) {
 		}
 	}
 
-	pf.Blockers = append(pf.Blockers, checkGitReady(e.Git, run.RepoRoot)...)
+	gitBlockers, gitNotes := checkGitReady(e.Git, run.RepoRoot, run.ID)
+	pf.Blockers = append(pf.Blockers, gitBlockers...)
+	pf.Notes = append(pf.Notes, gitNotes...)
 	return e.finishPreflight(run, pf, snap, true)
 }
 
