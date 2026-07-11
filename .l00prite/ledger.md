@@ -1262,3 +1262,305 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260706-015800-claude-pr1-review-and-bot-fixes acquired and released this
   run.
+
+### Run 2026-07-06T13:56:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Build a tech-focused marketing/landing website for LOOPRITE with a working
+  Android APK download, a "what LOOPRITE does" section, a clear beta notice, and attribution
+  to the MIT-licensed l00prite source repo (per direct maintainer instruction, with creative
+  license on design).
+- **Triggering event:** none — direct maintainer instruction in-session.
+- **Reviewer/comment reference:** none.
+- **Decision:** Normal work. Two supporting decisions: (1) placed the site at the repo root
+  (`index.html` + `.nojekyll`) so GitHub Pages can serve it directly from the branch with
+  zero build tooling, keeping the repo's no-dependencies ethos (the page is fully
+  self-contained — no CDN fonts/scripts); (2) since the repo has no GitHub releases yet, a
+  `releases/latest` download link would be dead, so the APK was built from source with the
+  existing hermetic pipeline and shipped in-repo at `downloads/` so the download button works
+  immediately (15 MB, well under git/Pages limits; swap to a Releases asset later if
+  preferred).
+- **Completed work:** Installed the apt Android toolchain (aapt/zipalign/apksigner/
+  dalvik-exchange/android-framework-res); built and verified
+  `l00prite-os-0.1.0-beta.apk` via `cli-os/scripts/build-apk.sh 0.1.0-beta`; created
+  `downloads/` (APK + SHA256SUMS); wrote `index.html` — dark circuit-board design matching
+  `assets/brand-image.png` (feathered hero mask, animated circuit pulses, agent ticker,
+  six OS-metaphor cards, Planning/Execution mode panels, an animated execute-loop pre-flight
+  terminal, phone mockup, sideload install steps, SHA-256 copy button, beta warning strip,
+  source-repo section linking https://github.com/jackofall1232/l00prite); added `.nojekyll`.
+  All copy kept accurate to shipped behavior (disarmed-by-default Execution Mode, nine run
+  boundaries, per-action approvals, on-device keys, debug-signed beta).
+- **Fix implemented:** not applicable — new page. Two defects found and fixed during
+  verification: mobile horizontal overflow caused by the unbreakable repo-URL heading in the
+  source card (fixed with `min-width:0` + `overflow-wrap:anywhere`), and hard visible edges
+  of the square brand PNG against the page gradient (fixed with a radial CSS mask).
+- **Changed files:** created `index.html`, `.nojekyll`, `downloads/l00prite-os-0.1.0-beta.apk`,
+  `downloads/SHA256SUMS`; modified `CLAUDE.md` (Run Ledger row), `.l00prite/ledger.md`,
+  `.l00prite/lock.json`. Zero edits to the two review-gated files
+  (`.claude/commands/build-loop.md`, `scripts/validate-l00prite.js`).
+- **Tests run / Verification:**
+  - `command`: `bash cli-os/scripts/build-apk.sh 0.1.0-beta` · `exit_code`: 0 · `summary`:
+    APK built; `apksigner verify` v2 true; badging package/activity/permission/native-code
+    checks all pass; sha256 ef9f8a025cbc… · `timestamp`: 2026-07-06T13:45Z
+  - `command`: `curl` HEAD-equivalents against a local `http.server` · `exit_code`: 0 ·
+    `summary`: `/`, `/downloads/…beta.apk` (15,291,037 bytes), `/downloads/SHA256SUMS`,
+    `/assets/brand-image.png` all 200 · `timestamp`: 2026-07-06T13:49Z
+  - `command`: Playwright (chromium) against the served page, desktop 1440px + mobile 390px ·
+    `exit_code`: 0 · `summary`: zero console errors, zero failed requests, all 3 APK links
+    point at the real file, SHA copy button works, no mobile horizontal scroll after fix ·
+    `timestamp`: 2026-07-06T13:53Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-06T13:55Z
+- **Response drafted/sent:** Summary + screenshots returned to the maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** The committed APK is the debug-signed beta from the hermetic pipeline —
+  release signing remains the explicit Phase 3 ceremony; the site copy labels the build as
+  debug-signed beta accordingly. Site is static-host-agnostic (any static server works, not
+  just GitHub Pages).
+- **Confidence:** High — every user-facing claim on the page was checked against
+  CLAUDE.md/README/android-architecture docs, and the page was exercised live in a real
+  browser at two viewports.
+- **Next action:** Maintainer: enable GitHub Pages (branch → root) to publish, or say the
+  word and this session can wire a Pages deploy workflow instead of in-repo hosting.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-135600-claude-marketing-site acquired and released this run.
+
+### Run 2026-07-06T14:30:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Wire the GitHub Pages deploy for the marketing site (direct maintainer
+  instruction: "Wire the pages deploy"), continuing the same session/branch as the
+  2026-07-06T13:56Z entry; also begin PR #3 activity watch.
+- **Triggering event:** maintainer message in-session; PR #3 subscription kickoff (CI check
+  `Build & verify APK (real Android SDK)` in progress, zero review threads; one
+  chatgpt-codex-connector[bot] usage-limit notice — no action required).
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3
+- **Decision:** Normal work. Deploy via the Actions Pages path (`configure-pages` with
+  `enablement: true`, source = GitHub Actions) so no manual Settings step is needed; the
+  artifact stages only what the site serves (`index.html`, `.nojekyll`, `assets/`,
+  `downloads/`) so protocol sources and cli-os never ship to the public site. Trigger:
+  push to `main` + `workflow_dispatch` (the `github-pages` environment gates non-default
+  branches, so the first real deploy happens on merge).
+- **Completed work:** created `.github/workflows/deploy-pages.yml`; extended the existing
+  marketing-site row in `CLAUDE.md` §7 (same in-review pass, same branch).
+- **Fix implemented:** not applicable — new workflow.
+- **Changed files:** created `.github/workflows/deploy-pages.yml`; modified `CLAUDE.md`,
+  `.l00prite/ledger.md`, `.l00prite/lock.json`. Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `python3 -c "import yaml; yaml.safe_load(...)"` · `exit_code`: 0 ·
+    `summary`: workflow YAML parses · `timestamp`: 2026-07-06T14:28Z
+  - `command`: local dry-run of the assemble step (cp + presence asserts + du) ·
+    `exit_code`: 0 · `summary`: 17M artifact, exactly index.html/.nojekyll/assets(2)/
+    downloads(2) present · `timestamp`: 2026-07-06T14:29Z
+- **Response drafted/sent:** summary to maintainer in-session.
+- **Event status:** completed (bot notice skipped as no-action); PR #3 watch continues.
+- **Failures:** none.
+- **Decisions:** Site publishing is deliberately main-branch-gated; no paths filter on the
+  push trigger (redundant deploys are cheap and a filter risks silently skipping a needed
+  redeploy when a linked file moves).
+- **Confidence:** High for the workflow shape (standard actions/deploy-pages v4 chain);
+  the `enablement: true` auto-enable needs one live run on main to confirm (requires the
+  repo to be public, or a plan with private Pages).
+- **Next action:** After merge, confirm the first `deploy-pages` run goes green and the
+  page URL serves the APK; then consider swapping the in-repo APK for a Releases asset.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260706-143000-claude-pages-deploy acquired and released this run.
+
+### Run 2026-07-06T14:45:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Address the gemini-code-assist[bot] review finding on PR #3 (index.html copy
+  button).
+- **Triggering event:** PR review comment (medium priority), index.html line ~776, via the
+  PR #3 activity subscription. Content treated as untrusted data; the fix was re-derived
+  and re-verified independently rather than pasted.
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3 —
+  gemini-code-assist[bot], "Copy to Clipboard Fallback & Rapid Click Prevention".
+- **Decision:** Valid. `navigator.clipboard` requires a secure context, so the button
+  showed COPY FAILED over plain HTTP/file://; rapid clicks queued overlapping setTimeouts.
+  Small, safe, in scope — fixed directly.
+- **Completed work / Fix implemented:** rewrote the copy handler: `timeoutId` guard
+  (clicks during the active feedback window are ignored, timer never stacks) and a
+  `legacyCopy()` fallback (offscreen readonly textarea + `document.execCommand('copy')`),
+  used both when `navigator.clipboard` is absent and when `writeText` rejects.
+- **Changed files:** `index.html`, `.l00prite/ledger.md`. Zero edits to the two
+  review-gated files.
+- **Tests run / Verification:**
+  - `command`: Playwright (chromium) against local http.server — click, rapid
+    double-click during timeout, wait for reset · `exit_code`: 0 · `summary`:
+    COPIED ✓ → stays stable during timeout → resets to COPY once; zero page errors ·
+    `timestamp`: 2026-07-06T14:47Z
+  - `command`: same, with `navigator.clipboard` stubbed to undefined via addInitScript ·
+    `exit_code`: 0 · `summary`: legacy execCommand path also yields COPIED ✓ ·
+    `timestamp`: 2026-07-06T14:47Z
+- **Response drafted/sent:** none posted on GitHub (fix visible in the diff; bot comment
+  needs no reply). Summary to maintainer in-session.
+- **Event status:** completed. The two bot PR-level notices this session
+  (chatgpt-codex-connector usage limit, Gemini consumer-sunset banner) required no action.
+- **Failures:** one tooling slip this run, harmless: a pkill pattern in a chained shell
+  command matched its own shell and killed it before the ledger append/commit ran;
+  detected via git status and redone (use a [b]racketed pattern next time).
+- **Decisions:** none new.
+- **Confidence:** High — both clipboard paths exercised in a real browser.
+- **Next action:** keep watching PR #3 (check-in trigger armed for ~15:31Z).
+- **Do-not-retry notes:** don't pkill -f a literal pattern that appears in the invoking
+  command line itself.
+- **Lock:** none — no protected-path write beyond this ledger append; lock.json left
+  released from the prior run (same session, no concurrent agent observed).
+
+### Run 2026-07-06T15:05:00Z — Claude (Fable 5), branch claude/looprite-marketing-site-49yfm5
+- **Goal:** Replace the GitHub Pages deploy with a Vercel production deploy (direct
+  maintainer instruction), enforcing that only this private repo — never the public
+  source-only l00prite upstream — can publish the site.
+- **Triggering event:** none — maintainer message in-session.
+- **Reviewer/comment reference:** https://github.com/jackofall1232/LOOPRITE/pull/3
+- **Decision:** Normal work. Repo-identity enforcement is a double fence: a job-level
+  `if: github.repository == 'jackofall1232/LOOPRITE'` (skips the job in l00prite/forks)
+  plus an explicit first step that hard-fails with a clear error if the identity check is
+  ever bypassed. The asset hard-fail guard is kept unchanged from the Pages workflow (per
+  explicit instruction), and a downloads/ per-file size check fails at >= 100 MiB and warns
+  at >= 80 MiB so APK growth is caught before it breaks a deploy. Deploy is
+  `vercel deploy _site --prod --yes` with VERCEL_ORG_ID/VERCEL_PROJECT_ID as env (no
+  `vercel link` needed in CI) and the token via env, never argv-interpolated from the
+  secret context.
+- **Completed work:** deleted `.github/workflows/deploy-pages.yml`; created
+  `.github/workflows/deploy-vercel.yml`; updated the marketing-site row in CLAUDE.md §7 to
+  describe the Vercel workflow as superseding the interim Pages one.
+- **Fix implemented:** not applicable — platform switch.
+- **Changed files:** deleted `.github/workflows/deploy-pages.yml`; created
+  `.github/workflows/deploy-vercel.yml`; modified `CLAUDE.md`, `.l00prite/ledger.md`.
+  Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `python3 -c "import yaml; yaml.safe_load(...)"` · `exit_code`: 0 ·
+    `summary`: workflow YAML parses · `timestamp`: 2026-07-06T15:03Z
+  - `command`: local dry-run of the assemble + size-check steps (same shell logic) ·
+    `exit_code`: 0 · `summary`: APK 15,291,037 bytes (14% of 100 MiB), SHA256SUMS 93
+    bytes; guard exit 0 · `timestamp`: 2026-07-06T15:03Z
+- **Response drafted/sent:** full workflow file + exact secret-provisioning instructions +
+  APK-size report sent to maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** Site publishing remains main-branch-gated; the repo must NOT additionally
+  be connected to Vercel's Git integration or every push deploys twice. First live Vercel
+  deploy still requires the three repo secrets to exist.
+- **Confidence:** High for structure and guards (all shell logic dry-run locally); the
+  `vercel deploy` step itself needs the first real run on main with secrets present.
+- **Next action:** maintainer adds VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID secrets;
+  after merge, confirm the first deploy-vercel run publishes and the APK downloads.
+- **Do-not-retry notes:** none new.
+- **Lock:** none — ledger append only, same session, no concurrent agent observed.
+
+### Run 2026-07-10T17:11:30Z — Claude (Fable 5), branch claude/repo-registration-github-perms-jpyu37
+- **Goal:** Debug the maintainer-reported "repo not registered" failure: prompting fails even
+  after the repo was added, and the maintainer suspected missing GitHub permissions.
+- **Triggering event:** maintainer bug report in-session (public repo added, prompt fails,
+  "do I need to add permissions in GitHub? … this app needs to be as friction free as possible").
+- **Reviewer/comment reference:** none.
+- **Decision:** Root-caused before touching anything, with a live reproduction against the real
+  binary. Cause is NOT GitHub permissions (public repos need none): the setup wizard's free-text
+  "Repo" field mints a token scoped to any string with zero validation, before any repo can
+  exist. A GitHub-shaped value ("owner/repo", a URL) can never match a registered repo id —
+  dashboard ids are [A-Za-z0-9._-]+ — so every subsequent prompt fails 404 "repo not registered"
+  no matter what the user registers, and nothing in the product said why or how to fix it.
+- **Completed work:** (1) /v1/setup/token now rejects never-registrable scopes (400
+  invalid_repo_scope) and returns an explicit warning when the scope is well-formed but not yet
+  registered; wizard field re-labeled "Repo scope (advanced, optional — leave empty)", validates
+  charset client-side, and the done screen shows the server warning. (2) The chat-path 404 now
+  distinguishes token-scope vs header, names the exact repair (register exactly that id, or
+  re-mint unscoped) and states GitHub permissions are not involved; runs.go 404 similarly
+  actionable; both carry code repo_not_found. (3) Dashboard Playground shows a persistent warning
+  with a one-click prefilled Register action when the token is scoped to an unregistered repo
+  (or a can-never-register scope, with the re-mint command). Register modal now says public repos
+  need no GitHub permissions and links SSH-key docs for private ones. (4) Clone failures that
+  look auth-shaped append the public-vs-private credentials hint.
+- **Fix implemented:** yes — see above; new e2e regression test TestRepoScopeFootgun walks the
+  full user story (bad scope refused → warned mint → actionable 404 → register exact id heals →
+  header-flavored 404 for unscoped tokens).
+- **Changed files:** cli-os/internal/gateway/{setup.go,ingress.go,runs.go,repos_clone.go},
+  cli-os/public/{setup.html,dashboard.html}, cli-os/internal/server/repo_scope_test.go (new),
+  .l00prite/ledger.md, .l00prite/lock.json, CLAUDE.md (Run Ledger row). Zero edits to the two
+  review-gated files.
+- **Tests run / Verification:**
+  - `command`: `go test ./...` · `exit_code`: 0 · `summary`: all packages pass incl. new
+    TestRepoScopeFootgun · `timestamp`: 2026-07-10T17:05Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-10T17:06Z
+  - `command`: live repro against the rebuilt binary (fresh LOOPRITE_HOME, mock provider) ·
+    `exit_code`: 0 · `summary`: owner/repo scope now 400s at mint with guidance; unregistered
+    valid scope mints with warning; prompt 404 names the repair; registering the exact id makes
+    the same token prompt successfully · `timestamp`: 2026-07-10T17:11Z
+- **Response drafted/sent:** diagnosis + fix summary sent to maintainer in-session (answering
+  the GitHub-permissions question: none needed for public repos).
+- **Event status:** not applicable.
+- **Failures:** none.
+- **Decisions:** CLI `token mint --repo` intentionally left unvalidated — CLI-registered repo
+  ids are not charset-restricted, so the CLI must keep accepting ids the wizard/dashboard would
+  refuse; the setup endpoint allows any scope that matches an ALREADY-registered repo id even if
+  the charset is unusual.
+- **Confidence:** High — every layer of the fix verified live against the real binary, plus an
+  e2e regression test.
+- **Next action:** maintainer review/merge; consider a dashboard token-mint UI later so scoped
+  tokens can be created post-setup without the CLI.
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260710-171130-claude-repo-scope-footgun acquired for this append; released at
+  end of run.
+
+### Run 2026-07-10T19:16:00Z — Claude (Fable 5), branch claude/android-icon-sideload-docs-ttk7so
+- **Goal:** Give the Android APK a distinctive infinity (♾) launcher icon, and make the
+  marketing site explain (a) that the device will flag the sideloaded install and that this is
+  expected, and (b) how to prep the device for sideloading — per direct maintainer request.
+- **Triggering event:** none — direct maintainer instruction in-session.
+- **Reviewer/comment reference:** none.
+- **Decision:** Normal work. The APK previously shipped with NO launcher icon at all (no
+  `android:icon` in the manifest, no mipmap resources), so Android showed the generic default.
+- **Completed work:** Adaptive launcher icon (API 26+ only, matching minSdk, so no legacy
+  raster fallback is needed): `android/res/drawable/ic_launcher_{background,foreground,monochrome}.xml`
+  + `android/res/mipmap-anydpi-v26/ic_launcher{,_round}.xml`, wired via `android:icon`/
+  `android:roundIcon` in `AndroidManifest.xml`. Design: neon infinity figure-eight (one path,
+  four layered strokes faking radial glow — aapt-v1 vectors can't do gradients), white-hot
+  crossover node, apex pips, circuit-trace corners on the brand's dark navy, plus a
+  `<monochrome>` layer for Android 13+ themed icons. Site (`index.html`): install steps grown
+  4→5 with a new leading "Prep your phone" step (per-app *Install unknown apps* path, Samsung
+  variant, flip-it-back-off tip) and a "Click through the warnings" step; new amber
+  `.warn-note` explainer ("Your phone will warn you — that's expected") walking the exact
+  warning sequence (Chrome download warning → unknown-apps block → Play Protect
+  "Unsafe app blocked"/scan) with the why (developer-signed, outside Play = "unrecognized",
+  not "malicious"), SHA-256/build-from-source verification pointer, and hygiene tips (revoke
+  the permission afterwards; uninstall before installing a later beta if signatures rotate).
+  Rebuilt `downloads/l00prite-os-0.1.0-beta.apk` (+`SHA256SUMS`, + page SHA) so the shipped
+  beta actually carries the icon.
+- **Fix implemented:** see above (icon + docs are the whole task).
+- **Changed files:** android/AndroidManifest.xml, android/res/drawable/ic_launcher_background.xml
+  (new), android/res/drawable/ic_launcher_foreground.xml (new),
+  android/res/drawable/ic_launcher_monochrome.xml (new),
+  android/res/mipmap-anydpi-v26/ic_launcher.xml (new),
+  android/res/mipmap-anydpi-v26/ic_launcher_round.xml (new), index.html,
+  downloads/l00prite-os-0.1.0-beta.apk, downloads/SHA256SUMS, .l00prite/ledger.md,
+  .l00prite/lock.json, CLAUDE.md (Run Ledger row). Zero edits to the two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `bash cli-os/scripts/build-apk.sh 0.1.0-beta` · `exit_code`: 0 · `summary`:
+    aapt v1 compiled mipmap-anydpi-v26 adaptive icon cleanly; badging shows
+    `application-icon:'res/mipmap-anydpi-v26/ic_launcher.xml'`; all script badging/content
+    asserts pass; new sha256 32e0feb7… (15,295,560 bytes) · `timestamp`: 2026-07-10T19:12Z
+  - `command`: `apksigner verify --verbose` on the new APK · `exit_code`: 0 · `summary`:
+    v2 true, v3 true (page's "v2 + v3" chip stays accurate) · `timestamp`: 2026-07-10T19:14Z
+  - `command`: Chromium render of an exact SVG replica of the vector drawables under
+    circle/squircle/rounded-square masks + themed-mono tile · `exit_code`: 0 · `summary`:
+    loop reads clearly at launcher size in all masks; glow layering renders as designed ·
+    `timestamp`: 2026-07-10T19:14Z
+  - `command`: Playwright screenshots of #android at 1440px and 390px · `exit_code`: 0 ·
+    `summary`: 5-step list + warn-note render correctly, zero console errors, zero horizontal
+    overflow · `timestamp`: 2026-07-10T19:20Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS,
+    0 FAIL · `timestamp`: 2026-07-10T19:18Z
+- **Response drafted/sent:** summary + icon preview sent to maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none. (Note: on-device rendering not verified — no emulator ABI in this
+  container, same standing limitation recorded for previous APK passes.)
+- **Decisions:** No raster mipmap fallback (minSdk 26 == adaptive-icon floor, every installable
+  device renders the XML icon); glow via layered low-alpha strokes because the aapt-v1 hermetic
+  pipeline cannot compile gradient/aapt:attr vector resources; debug keystore was regenerated in
+  this container, so the new beta APK's signing cert differs from the previous upload —
+  upgrading over an existing install requires uninstall first (now documented on the site).
+- **Confidence:** High for build integrity and site rendering (all verified live); medium for
+  exact on-device icon appearance (SVG replica verified, device render not).
+- **Next action:** maintainer review/merge; optionally verify the icon on a physical device and
+  consider a matching favicon/social-preview for the site (HANDOFF.md already tracks that gap).
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260710-191600-claude-android-icon-sideload-docs acquired for this append;
+  released at end of run.

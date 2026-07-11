@@ -340,6 +340,7 @@
             <button class="btn sm" id="play-clear">Clear</button>
           </div>
         </div>
+        <div id="play-scope-warn"></div>
         <div class="chatlog" id="play-log"></div>
         <div class="chatbar">
           <textarea id="play-input" rows="2" placeholder="Ask anything — it goes through the same gateway your coding tools use (Ctrl/⌘+Enter to send)"></textarea>
@@ -937,7 +938,7 @@
     }
     afterMutation();
   }
-  function addRepo(){
+  function addRepo(prefillId){
     const project=(S.summary&&S.summary.principal&&S.summary.principal.project)||"default";
     openModal(`
       <div class="eyebrow"><span class="tick"></span> Register repository</div>
@@ -952,7 +953,11 @@
       </div>
       <div id="rp-clone-group">
         <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-clone-id" placeholder="myrepo" autocomplete="off"></div>
-        <div class="field"><label>Git URL</label><input type="text" id="rp-clone-url" placeholder="https://github.com/you/myrepo.git" autocomplete="off"></div>
+        <div class="field"><label>Git URL</label><input type="text" id="rp-clone-url" placeholder="https://github.com/you/myrepo.git" autocomplete="off">
+          <div style="margin-top:6px;font-size:11.5px;color:var(--text-3)">Public repos clone with just the URL —
+            no GitHub account, token, or permissions needed. Private repos need an
+            <a href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh" target="_blank" rel="noopener">SSH key</a>
+            or a git credential helper set up on the machine running this gateway.</div></div>
       </div>
       <div id="rp-path-group" class="hidden">
         <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-id" placeholder="myrepo" autocomplete="off"></div>
@@ -978,6 +983,10 @@
     tabClone.onclick=()=>{ mode="clone"; syncTabs(); document.getElementById("rp-clone-id").focus(); };
     tabPath.onclick=()=>{ mode="path"; syncTabs(); document.getElementById("rp-id").focus(); };
     syncTabs();
+    if(prefillId){ // e.g. the Playground's "register your token's repo scope" shortcut
+      document.getElementById("rp-clone-id").value=prefillId;
+      document.getElementById("rp-id").value=prefillId;
+    }
     document.getElementById("rp-clone-id").focus();
     btn.onclick=async()=>{
       if(mode==="clone"){
@@ -1388,13 +1397,34 @@
     // whose project differs from the token's, and a repo-scoped token may only name its own repo.
     let repos=(d.repos||[]).filter(r=>r.project===principal.project);
     if(principal.repo) repos=repos.filter(r=>r.id===principal.repo);
-    const sig=repos.map(r=>r.id).join(",");
+    // A token scoped to an id no registered repo carries can never prompt — the server refuses
+    // every request with "repo not registered". Surface that HERE, with the repair, instead of
+    // letting the user discover it one failed prompt at a time (and go hunting for a GitHub
+    // permission that was never the problem).
+    const orphanScope = principal.repo && !repos.length ? principal.repo : "";
+    const sig=repos.map(r=>r.id).join(",")+"|"+orphanScope;
     if(sig===playRepoSig) return; // unchanged — don't rebuild (an open dropdown would snap shut)
     playRepoSig=sig;
+    const warn=$("play-scope-warn");
+    if(warn){
+      if(!orphanScope) warn.innerHTML="";
+      else if(/^[A-Za-z0-9._-]+$/.test(orphanScope))
+        warn.innerHTML=`<div class="note warn" style="margin-bottom:10px"><b>Your token is scoped to repo
+          "${esc(orphanScope)}", which isn't registered</b> — every prompt will fail until it is. GitHub
+          permissions are not involved; the gateway just has no repo with that id.
+          <button class="btn sm primary" style="margin-left:10px" data-action="register-scope"
+            data-repo="${esc(orphanScope)}">Register “${esc(orphanScope)}”</button></div>`;
+      else
+        warn.innerHTML=`<div class="note warn" style="margin-bottom:10px"><b>Your token is scoped to repo
+          "${esc(orphanScope)}", which can never be registered</b> (repo ids are short names — letters,
+          digits, ".", "-", "_"; not a URL or owner/repo). Mint a new token without a repo scope
+          (<span class="mono">l00prite token mint --project ${esc(principal.project||"default")}</span>)
+          and use that here instead. GitHub permissions are not involved.</div>`;
+    }
     const cur=sel.value;
     sel.innerHTML=`<option value="">no repo selected</option>`+repos.map(r=>`<option value="${esc(r.id)}">repo: ${esc(r.id)}</option>`).join("");
     if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
-    else if(principal.repo) sel.value=principal.repo; // token is scoped to one repo — preselect it
+    else if(principal.repo && repos.length) sel.value=principal.repo; // token is scoped to one repo — preselect it
   }
   let playModelSig=null;
   async function loadModels(){
@@ -1470,6 +1500,8 @@
   $("repos-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(!b) return;
     if(b.dataset.action==="repo-add") addRepo();
     if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo); });
+  $("play-scope-warn").addEventListener("click",e=>{ const b=e.target.closest("[data-action='register-scope']");
+    if(b) addRepo(b.dataset.repo); });
   $("new-run-btn").onclick=()=>createRunModal();
   $("runs-body").addEventListener("click",e=>{
     const b=e.target.closest("[data-action]");

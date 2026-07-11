@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive launcher icon (API 26+ — this app's minSdkVersion, so every device
+  that can install the APK renders this; no legacy raster fallback is needed).
+  <monochrome> is read on API 33+ for themed icons and ignored by older
+  platforms' AdaptiveIconDrawable inflation.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
+</adaptive-icon>

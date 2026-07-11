@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "lock_id": "lock-20260706-015800-claude-pr1-review-and-bot-fixes",
+  "lock_id": "lock-20260710-191600-claude-android-icon-sideload-docs",
   "owner_agent": "claude",
-  "owner_session": "session_01Y7937FptxvwH8A9jCCkX3Y",
-  "acquired_at": "2026-07-06T01:58:00Z",
-  "expires_at": "2026-07-06T05:58:00Z",
-  "ttl_seconds": 14400,
-  "purpose": "Address Gemini Code Assist review findings on PR #1 and run the /review skill's 8-finder pipeline",
+  "owner_session": "session_01S68qFGWXzZNPFXXcnK1ndJ",
+  "acquired_at": "2026-07-10T19:16:00Z",
+  "expires_at": "2026-07-10T20:16:00Z",
+  "ttl_seconds": 3600,
+  "purpose": "Append ledger entry for the Android infinity launcher icon + website sideload-prep/Play-Protect guidance pass on branch claude/android-icon-sideload-docs-ttk7so",
   "protected_paths": [
     "ledger.md",
     "memory.md",

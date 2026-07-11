@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Monochrome launcher layer (Android 13+ themed icons): the bare infinity
+  loop, single colour — the system tints it to match the user's wallpaper.
+  Same figure-eight path as ic_launcher_foreground, stroked once, slightly
+  heavier so it survives the themed-icon downscale.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M54,54 C49.5,46.5 45.5,41 39,41 C31.5,41 26,46.8 26,54 C26,61.2 31.5,67 39,67 C45.5,67 49.5,61.5 54,54 C58.5,46.5 62.5,41 69,41 C76.5,41 82,46.8 82,54 C82,61.2 76.5,67 69,67 C62.5,67 58.5,61.5 54,54 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
