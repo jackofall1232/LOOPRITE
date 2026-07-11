@@ -4,6 +4,28 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.3.0-beta — 2026-07-11
+
+**Set a daily spending budget from the dashboard.** A new "Set budget" button and modal
+cap what a project can spend per day, with three stop modes: stop hard at the limit,
+allow a one-time 100% overage, or meter spend without ever stopping a run. Backed by a
+new `GET`/`POST /v1/budget` endpoint and an effective-ceiling calculation in the policy
+enforcement point.
+
+**Ask in plain words, get a reviewable run.** The Playground can now turn a request like
+"...and execute it" into a drafted Run — a new `propose_run` chat tool follows the same
+create-and-pre-flight path as the dashboard's "New run" button. Drafting is always
+side-effect-free: starting the run still requires typing `EXECUTE` in its pre-flight,
+which this tool can never reach on its own.
+
+**Lock a model in the Playground.** A model-lock toggle pins your choice so it survives
+reloads instead of resetting to auto. Client-side and entirely opt-in.
+
+**A Help section, in the app.** Since this dashboard is the whole Android app UI, a new
+Help section covers getting started, the Playground's run-drafting flow, the Runs
+pre-flight/`EXECUTE` gate, and the new budget modes — illustrated with real screenshots
+captured from a live dashboard.
+
 ## v0.2.0-beta — 2026-07-11
 
 **Chat can now see your repo.** Selecting a repo in chat used to inject only a static
