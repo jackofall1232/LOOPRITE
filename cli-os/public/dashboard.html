@@ -777,7 +777,7 @@
       const mode=curMode();
       const amtRaw=dailyIn.value.trim();
       const amt=amtRaw===""?NaN:Number(amtRaw);
-      if(mode!=="unlimited" && !(amt>0)){ note.innerHTML=`<div class="note err">Enter a daily amount greater than $0.</div>`; return; }
+      if((mode!=="unlimited" || amtRaw!=="") && !(amt>0)){ note.innerHTML=`<div class="note err">Enter a daily amount greater than $0.</div>`; return; }
       let payload;
       if(mode==="strict") payload={daily_usd:amt, overage_pct:0, unlimited:false};
       else if(mode==="overage") payload={daily_usd:amt, overage_pct:100, unlimited:false};

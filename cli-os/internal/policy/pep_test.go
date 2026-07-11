@@ -65,6 +65,51 @@ func TestReserveRejectsBadAmounts(t *testing.T) {
 	}
 }
 
+// TestCapForDistinguishesMissingRowFromRealError pins the exact bug flagged in PR #8's Gemini
+// review: a missing caps row (no explicit cap configured — the normal, common case) must return
+// defaultCap with a NIL error, but a genuine read failure (a corrupt/unreadable table) must return
+// a non-nil error instead of silently substituting defaultCap. Before the fix, capFor conflated
+// both cases into the same "return defaultCap" branch — this test fails against that code because
+// the corrupted-table case returned (CapInfo{LimitUSD: defaultCap}, no error) instead of an error.
+func TestCapForDistinguishesMissingRowFromRealError(t *testing.T) {
+	cfg, _ := testDB(t)
+	db, _ := state.Open(cfg.DBPath)
+	defer db.Close()
+
+	ci, err := capFor(db, "no-such-project", 7)
+	if err != nil {
+		t.Fatalf("missing row (sql.ErrNoRows) must not be treated as a real error, got: %v", err)
+	}
+	if ci.LimitUSD != 7 || ci.Unlimited || ci.Explicit {
+		t.Fatalf("missing row should yield the plain default cap, got: %+v", ci)
+	}
+
+	if _, err := db.Exec(`DROP TABLE caps`); err != nil {
+		t.Fatalf("drop caps: %v", err)
+	}
+	if _, err := capFor(db, "p", 7); err == nil {
+		t.Fatalf("a real read failure (dropped table) must be returned as an error, not silently swallowed into the default cap")
+	}
+}
+
+// TestReserveFailsClosedOnCapReadError pins Reserve's half of the same fix: a real cap-read
+// failure must deny the reservation (fail closed), never silently fall back to defaultCap — which
+// could be a HIGHER, more permissive ceiling than whatever the project actually had configured.
+// This test fails against the pre-fix code because Reserve would ignore capFor's (previously
+// error-less) return value entirely and happily reserve against defaultCap.
+func TestReserveFailsClosedOnCapReadError(t *testing.T) {
+	cfg, _ := testDB(t)
+	db, _ := state.Open(cfg.DBPath)
+	defer db.Close()
+	if _, err := db.Exec(`DROP TABLE caps`); err != nil {
+		t.Fatalf("drop caps: %v", err)
+	}
+	r := Reserve(db, "p", 0.01, 1000) // a huge defaultCap: if this silently succeeds, the fail-closed guarantee is broken
+	if r.OK {
+		t.Fatalf("Reserve must fail closed when the cap table is unreadable, got OK=true: %+v", r)
+	}
+}
+
 func TestReserveOveragePctExtendsButDoesNotEliminateCap(t *testing.T) {
 	cfg, _ := testDB(t)
 	db, err := state.Open(cfg.DBPath)
