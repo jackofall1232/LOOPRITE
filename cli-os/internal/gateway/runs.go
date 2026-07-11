@@ -181,15 +181,38 @@ func (app *App) HandleRunStart(w http.ResponseWriter, r *http.Request) {
 	confirmedBy := principal.TokenID
 	if err := app.Engine.StartRun(r.Context(), run.ID, confirmedBy, body.Confirm); err != nil {
 		status, code := 400, "start_rejected"
-		if errors.Is(err, engine.ErrBadState) {
+		switch {
+		case errors.Is(err, engine.ErrCheckpointFailed):
+			status, code = 409, "checkpoint_failed"
+		case errors.Is(err, engine.ErrBadState):
 			status, code = 409, "run_not_ready"
 		}
-		oaiError(w, status, "Could not start run: "+err.Error(), "invalid_request_error", code)
+		// The full technical error (which can include raw git/go-git text, e.g. from a failed
+		// checkout) goes to the audit log only — never to the client. See humanizeStartError.
+		app.auditAs(principal, "run.start.error", err.Error())
+		oaiError(w, status, humanizeStartError(err), "invalid_request_error", code)
 		return
 	}
 	app.auditAs(principal, "run.start", run.ID)
 	updated, _ := app.Engine.Store.GetRun(run.ID)
 	sendJSON(w, 200, map[string]any{"run": runView(updated), "started": true})
+}
+
+// humanizeStartError translates a StartRun failure into a plain-English message safe to show a
+// non-technical user. It deliberately has a generic fallback for any error class it does not
+// specifically recognize, so an unanticipated git/go-git failure (a corrupted repo, a mid-rebase
+// state, a permissions error) can never leak raw technical text to the dashboard the way a raw
+// "worktree contains unstaged changes" checkout error once did. The full error is always logged
+// separately by the caller via auditAs before this function is called.
+func humanizeStartError(err error) string {
+	switch {
+	case errors.Is(err, engine.ErrCheckpointFailed):
+		return "l00prite tried to save your unsaved changes before starting, but the save failed. Nothing was changed and the run was not started. Details were logged for support."
+	case errors.Is(err, engine.ErrBadState):
+		return `This run can't start right now — the project isn't in a startable state. Try "Rebuild pre-flight"; if that doesn't help, details were logged for support.`
+	default:
+		return "Something went wrong preparing the project for this run. Nothing was started. Details were logged for support."
+	}
 }
 
 // HandleRunGet is GET /v1/runs/get?id= — run detail + pending approvals + latest pre-flight.
