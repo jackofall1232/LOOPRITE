@@ -7,6 +7,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -98,10 +99,69 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 		return fmt.Errorf("could not acquire .l00prite lease to arm the run: %w", err)
 	}
 
+	// Read the Denylist fresh (not from a possibly-stale pre-flight) so AutoCheckpoint's refusal
+	// gate below is race-proof against a file dirtied after BuildPreflight last ran.
+	denylistSnap, dlerr := f.ReadSnapshot()
+	if dlerr != nil {
+		_ = f.ReleaseLock(run.ID)
+		return fmt.Errorf("could not read .l00prite memory to check the auto-checkpoint against your Denylist: %w", dlerr)
+	}
+	denylist := ParseDenylist(denylistSnap.Constraints)
+
+	// Auto-checkpoint: commit EVERYTHING dirty, including .l00prite/ (the AcquireLock call just
+	// above rewrote lock.json, and the gogit backend's checkout dirty-check is whole-tree with no
+	// path exemption — see AutoCheckpoint's doc comment), so the run branch is created from a
+	// clean tree. This is the run's only unprompted state mutation, and it is deliberately a
+	// commit, never a stash. AutoCheckpoint itself refuses (ErrCheckpointRefused) rather than
+	// committing a Denylisted or credential-shaped dirty path.
+	checkpointHash, cerr := AutoCheckpoint(e.Git, run.RepoRoot, run.ID, denylist)
+	if cerr != nil {
+		_ = f.ReleaseLock(run.ID)
+		if errors.Is(cerr, ErrCheckpointRefused) {
+			return cerr // preserve the more specific sentinel for humanizeStartError
+		}
+		return fmt.Errorf("%w: %v", ErrCheckpointFailed, cerr)
+	}
+
 	branch := runBranch(run.ID)
 	if err := EnsureRunBranch(e.Git, run.RepoRoot, branch); err != nil {
 		_ = f.ReleaseLock(run.ID)
 		return fmt.Errorf("%w: %v", ErrBadState, err)
+	}
+
+	// Record the checkpoint in ledger.md only AFTER the checkout succeeds -- not before it, even
+	// though the write logically documents what AutoCheckpoint just did. Load-bearing ordering
+	// (PR #6 review finding, empirically reproduced): if ledger.md is already git-tracked (e.g. any
+	// run after the very first one ever committed it, or a repo whose .l00prite/ was scaffolded and
+	// committed via Planning Mode), appending here BEFORE the checkout would re-dirty an
+	// already-tracked file immediately before EnsureRunBranch's gogit checkout -- reproducing the
+	// EXACT "worktree contains unstaged changes" bug this whole checkpoint mechanism exists to
+	// prevent, just with ledger.md as the trigger instead of lock.json. Writing it after the
+	// checkout is safe: it lands as an uncommitted change on the (already checked-out) run branch,
+	// which is exactly how every other ledger write in this engine already behaves (e.g.
+	// persistIteration's per-unit entries, exec.go) -- it rides along with the run's next real
+	// commit rather than needing to be committed immediately itself.
+	if checkpointHash != "" {
+		if lederr := f.AppendLedger(LedgerEntry{
+			Timestamp: now, RunID: run.ID,
+			Goal:            "auto-checkpoint before run " + run.ID,
+			TriggeringEvent: "none",
+			Decision:        "auto-commit dirty worktree before creating the run branch",
+			CompletedWork:   "WIP checkpoint commit " + checkpointHash,
+			ChangedFiles:    "all uncommitted changes at Start time (including .l00prite/)",
+			EventStatus:     "not applicable",
+			Confidence:      "high — mechanical checkpoint; user work preserved in commit " + checkpointHash,
+			NextAction:      "run branch created on top of this checkpoint",
+			LockNote:        "checkpointed under the run's own lease",
+		}); lederr != nil {
+			// A ledger write failure here must not abort an already-successful checkpoint+checkout
+			// (the user's work is safely committed and the run branch exists either way) — record
+			// it as a run event instead, mirroring BuildPreflight's tolerance for a failed
+			// recovery-note write.
+			_, _ = e.Store.AppendEvent(run.ID, EvStatus, map[string]any{
+				"warning": "failed to record the auto-checkpoint in ledger.md: " + lederr.Error(),
+			})
+		}
 	}
 
 	// Arm the repo files exactly per step 7, then the engine store. A snapshot read failure

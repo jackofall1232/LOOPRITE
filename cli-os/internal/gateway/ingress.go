@@ -317,7 +317,10 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ---- Path 4: default (non-bridge, non-streaming) ----
-	turn, err := runTurn(app, TurnOpts{Project: project, RepoID: repoID, RepoRoot: repoRoot, OpenaiReq: openaiReq, RouteHeader: routeHeader, ClientCtx: clientCtx, RequestID: requestID, Paths: paths, Depth: 0, InjectMemory: true})
+	// RunChatTools attaches read-only repo-browsing tools (read_file/list_dir/search_files) when
+	// repoRoot names a registered repo, and is a no-op passthrough to runTurn otherwise -- see
+	// chatloop.go's doc comment for why streaming/bridging aren't wired to it yet.
+	turn, err := RunChatTools(app, requestID, project, repoID, repoRoot, openaiReq, routeHeader, clientCtx, paths)
 	if err != nil {
 		logRouteError(app, requestID, project, repoID, err)
 		e := httpErr(err)

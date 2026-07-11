@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -440,6 +441,269 @@ func TestBranchAndCommit(t *testing.T) {
 	if err != nil || hash2 != "" {
 		t.Fatalf("CommitUnit noop should be (\"\", nil), got hash=%q err=%v", hash2, err)
 	}
+}
+
+// TestCommitUnitResetsIndexOnFailedCommit pins a PR #6 review finding: CommitUnit's AddAll
+// (`git add -A`) stages everything before Commit runs, but a Commit failure for any reason other
+// than "nothing to commit" or a missing identity (both already handled inside Commit itself) --
+// e.g. a rejecting pre-commit hook, a full disk -- used to leave that staging in place with no
+// commit to show for it, a surprising git state for whoever looks at the repo next. Only the exec
+// backend can be proven here: it's the only implementation with a working Raw() passthrough to
+// issue the best-effort `git reset` (gogit's Raw is unconditionally unsupported).
+func TestCommitUnitResetsIndexOnFailedCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "init")
+
+	hookPath := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	writeFileRaw(t, hookPath, "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(hookPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileRaw(t, filepath.Join(dir, "new.txt"), "x\n")
+
+	hash, err := CommitUnit(gitx.Detect(), dir, "should be rejected by the hook")
+	if err == nil {
+		t.Fatalf("expected the pre-commit hook to reject the commit, got hash=%q", hash)
+	}
+
+	status := gitRun(t, dir, "status", "--porcelain")
+	if strings.Contains(status, "A  new.txt") {
+		t.Fatalf("expected new.txt to be unstaged (reset) after the failed commit, got status: %q", status)
+	}
+	if !strings.Contains(status, "?? new.txt") {
+		t.Fatalf("expected new.txt to still be present as untracked after the reset, got status: %q", status)
+	}
+}
+
+// ---- AutoCheckpoint (Bug 2 regression: raw "worktree contains unstaged changes" on Start) ----
+
+// setupTrackedDirtyL00prite builds a repo whose .l00prite/lock.json is already git-tracked — as if
+// scaffolded and committed via Planning Mode before the engine's first run — then dirties it,
+// exactly what StartRun's own AcquireLock call does immediately before EnsureRunBranch.
+func setupTrackedDirtyL00prite(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "init")
+
+	lockPath := filepath.Join(dir, ".l00prite", "lock.json")
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileRaw(t, lockPath, `{"status":"released"}`)
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "scaffold .l00prite")
+
+	writeFileRaw(t, lockPath, `{"status":"active","lock_id":"lck_test"}`)
+	return dir
+}
+
+// TestGogitCheckoutFailsOnTrackedDirtyL00prite pins the bug this diagnosis found: under the gogit
+// backend, EnsureRunBranch's own .l00prite/ exemption (dirtyPathsOutsideL00prite) is invisible to
+// go-git's internal Checkout call, which runs its own whole-tree, unconditional dirty check with no
+// path exemption. A dirty-but-already-tracked .l00prite/ file — exactly what StartRun's
+// AcquireLock produces by rewriting lock.json — makes the checkout fail with the raw go-git
+// sentinel error, even though EnsureRunBranch itself considers the tree clean enough to proceed.
+// This test must keep failing (i.e. keep reproducing the bug) if AutoCheckpoint is ever removed
+// from StartRun's call path without a replacement.
+func TestGogitCheckoutFailsOnTrackedDirtyL00prite(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00prite(t)
+	gogit := gitx.NewGogitClient()
+	err := EnsureRunBranch(gogit, dir, "l00prite/run-repro")
+	if err == nil {
+		t.Fatal("expected the unfixed gogit checkout to fail on a dirty tracked .l00prite/ file")
+	}
+	if !strings.Contains(err.Error(), "worktree contains unstaged changes") {
+		t.Fatalf("expected the raw go-git ErrUnstagedChanges text, got: %v", err)
+	}
+}
+
+// TestAutoCheckpointFixesGogitCheckout proves the fix: committing everything dirty — including
+// .l00prite/ — before EnsureRunBranch's checkout call makes it succeed on the gogit backend,
+// mirroring StartRun's real call order (engine.go: AutoCheckpoint runs right after AcquireLock,
+// before EnsureRunBranch).
+func TestAutoCheckpointFixesGogitCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00prite(t)
+	gogit := gitx.NewGogitClient()
+
+	hash, err := AutoCheckpoint(gogit, dir, "repro", nil)
+	if err != nil {
+		t.Fatalf("AutoCheckpoint: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("expected a checkpoint commit hash for a dirty tree")
+	}
+	if err := EnsureRunBranch(gogit, dir, "l00prite/run-repro"); err != nil {
+		t.Fatalf("EnsureRunBranch after checkpoint should succeed, got: %v", err)
+	}
+	msg := strings.TrimSpace(gitRun(t, dir, "log", "-1", "--format=%s"))
+	if msg != "WIP: auto-checkpoint before run-repro" {
+		t.Fatalf("expected the checkpoint commit message on HEAD, got: %q", msg)
+	}
+
+	// AutoCheckpoint on an already-clean tree is a no-op (both gitx Commit contracts treat
+	// "nothing to commit" as success) -- never a duplicate/empty commit.
+	hash2, err := AutoCheckpoint(gogit, dir, "repro", nil)
+	if err != nil {
+		t.Fatalf("AutoCheckpoint on a clean tree: %v", err)
+	}
+	if hash2 != "" {
+		t.Fatalf("expected no-op on a clean tree, got a new commit hash %q", hash2)
+	}
+}
+
+// setupTrackedDirtyL00priteWithLedger is setupTrackedDirtyL00prite plus an already-tracked,
+// already-committed ledger.md — the shape of a repo whose .l00prite/ was scaffolded and committed
+// (by Planning Mode, or by any run before this one) before StartRun's own AcquireLock dirties
+// lock.json.
+func setupTrackedDirtyL00priteWithLedger(t *testing.T) string {
+	t.Helper()
+	dir := setupTrackedDirtyL00prite(t)
+	ledgerPath := filepath.Join(dir, ".l00prite", "ledger.md")
+	writeFileRaw(t, ledgerPath, "# Run Ledger\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "scaffold ledger.md")
+	// re-dirty lock.json the same way the helper's caller expects (setupTrackedDirtyL00prite
+	// already left it dirty; the commit above only touched ledger.md, so lock.json is still dirty).
+	return dir
+}
+
+// TestLedgerAppendBeforeCheckoutReDirtiesTrackedFile pins the exact failure mode PR #6 review
+// caught: if a ledger.md entry documenting the checkpoint is appended to an already-tracked
+// ledger.md BEFORE EnsureRunBranch's gogit checkout runs, it re-dirties the tree that
+// AutoCheckpoint just cleaned -- reproducing the identical "worktree contains unstaged changes"
+// failure this whole checkpoint mechanism exists to prevent, just with ledger.md as the trigger
+// instead of lock.json. This must keep failing (i.e. keep proving the ordering matters) for as
+// long as StartRun writes the checkpoint's ledger entry via Files.AppendLedger.
+func TestLedgerAppendBeforeCheckoutReDirtiesTrackedFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00priteWithLedger(t)
+	gogit := gitx.NewGogitClient()
+
+	if _, err := AutoCheckpoint(gogit, dir, "repro", nil); err != nil {
+		t.Fatalf("AutoCheckpoint: %v", err)
+	}
+
+	// Simulate the OLD (buggy) ordering: append the checkpoint's ledger entry before the checkout,
+	// exactly as StartRun used to.
+	if err := (Files{Root: dir}).AppendLedger(LedgerEntry{
+		Timestamp: "2026-07-11T00:00:00Z", RunID: "repro", Goal: "auto-checkpoint before run repro",
+	}); err != nil {
+		t.Fatalf("AppendLedger: %v", err)
+	}
+
+	err := EnsureRunBranch(gogit, dir, "l00prite/run-repro")
+	if err == nil {
+		t.Fatal("expected the gogit checkout to fail once the ledger append re-dirtied a tracked file")
+	}
+	if !strings.Contains(err.Error(), "worktree contains unstaged changes") {
+		t.Fatalf("expected the raw go-git ErrUnstagedChanges text, got: %v", err)
+	}
+}
+
+// TestLedgerAppendAfterCheckoutSucceeds proves the fix: appending the checkpoint's ledger entry
+// AFTER EnsureRunBranch's checkout (StartRun's current order) never re-dirties the tree the
+// checkout depends on, so the checkout succeeds even when ledger.md is already tracked.
+func TestLedgerAppendAfterCheckoutSucceeds(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00priteWithLedger(t)
+	gogit := gitx.NewGogitClient()
+
+	if _, err := AutoCheckpoint(gogit, dir, "repro", nil); err != nil {
+		t.Fatalf("AutoCheckpoint: %v", err)
+	}
+	if err := EnsureRunBranch(gogit, dir, "l00prite/run-repro"); err != nil {
+		t.Fatalf("EnsureRunBranch after checkpoint should succeed, got: %v", err)
+	}
+	if err := (Files{Root: dir}).AppendLedger(LedgerEntry{
+		Timestamp: "2026-07-11T00:00:00Z", RunID: "repro", Goal: "auto-checkpoint before run repro",
+	}); err != nil {
+		t.Fatalf("AppendLedger after checkout: %v", err)
+	}
+	cur := strings.TrimSpace(gitRun(t, dir, "rev-parse", "--abbrev-ref", "HEAD"))
+	if cur != "l00prite/run-repro" {
+		t.Fatalf("expected to be on the run branch, got %q", cur)
+	}
+}
+
+// A dirty path that matches the project's Denylist, or looks like it may hold credentials, must
+// never be silently committed by AutoCheckpoint (adversarial-review finding: the pre-run
+// checkpoint was a second, ungoverned write path that bypassed the same protection write_file
+// goes through mid-run). Nothing is committed when refused.
+func TestAutoCheckpointRefusesDenylistedAndSecretPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	git := gitx.Detect()
+
+	t.Run("Denylist match", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "init")
+		writeFileRaw(t, filepath.Join(dir, "prod.config.js"), "module.exports = {}\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "add config")
+		writeFileRaw(t, filepath.Join(dir, "prod.config.js"), "module.exports = { changed: true }\n")
+
+		hash, err := AutoCheckpoint(git, dir, "repro", []string{"prod.config.js"})
+		if !errors.Is(err, ErrCheckpointRefused) {
+			t.Fatalf("expected ErrCheckpointRefused, got hash=%q err=%v", hash, err)
+		}
+		if out := strings.TrimSpace(gitRun(t, dir, "status", "--porcelain")); out == "" {
+			t.Fatal("the denylisted file must remain uncommitted after a refused checkpoint")
+		}
+	})
+
+	t.Run("secret-shaped path, no Denylist entry needed", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "init")
+		writeFileRaw(t, filepath.Join(dir, ".env"), "API_KEY=one\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "add env")
+		writeFileRaw(t, filepath.Join(dir, ".env"), "API_KEY=two\n")
+
+		hash, err := AutoCheckpoint(git, dir, "repro", nil) // empty Denylist -- secret pattern alone must still refuse
+		if !errors.Is(err, ErrCheckpointRefused) {
+			t.Fatalf("expected ErrCheckpointRefused for a secret-shaped path even with no Denylist entry, got hash=%q err=%v", hash, err)
+		}
+	})
+
+	t.Run("non-matching dirty file still checkpoints normally", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "init")
+		writeFileRaw(t, filepath.Join(dir, "notes.txt"), "unrelated work\n")
+
+		hash, err := AutoCheckpoint(git, dir, "repro", []string{"prod.config.js"})
+		if err != nil || hash == "" {
+			t.Fatalf("expected a normal checkpoint for a non-matching file, got hash=%q err=%v", hash, err)
+		}
+	})
 }
 
 // ---- caps ----

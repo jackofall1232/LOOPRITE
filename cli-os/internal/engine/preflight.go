@@ -27,28 +27,56 @@ var perActionPermissions = []string{
 	"running any command not on the allowlist below",
 }
 
-// checkGitReady verifies the target is a git repo with at least one commit and a clean
-// worktree — read-only; the run branch itself is created at arming time. It goes through the
-// engine's gitx seam (exec git, or the pure-Go go-git fallback when no git binary is on PATH —
-// see docs/android-architecture.md §4 G4), so this can only ever report a genuine "not a git
-// repository" / "dirty tree" problem — never "git is not installed": with go-git compiled in,
-// some implementation can always at least read repository state.
-func checkGitReady(git gitx.Client, root string) []string {
+// checkGitReady verifies the target is a git repo with at least one commit — read-only; the run
+// branch itself is created at arming time. It goes through the engine's gitx seam (exec git, or
+// the pure-Go go-git fallback when no git binary is on PATH — see docs/android-architecture.md §4
+// G4), so this can only ever report a genuine "not a git repository" / "git status failed"
+// problem — never "git is not installed": with go-git compiled in, some implementation can always
+// at least read repository state. A dirty worktree is NOT ordinarily a blocker: StartRun's
+// AutoCheckpoint commits it automatically, so it is surfaced here as a Note (a Blocker would
+// disable the Start button entirely — see dashboard.html's hasBlockers gate — making that
+// checkpoint unreachable). The exception is a dirty path AutoCheckpoint itself will refuse to
+// auto-commit (a Denylist match or something that looks like a credential) — that's surfaced here
+// as an early Blocker too, so the human sees it before wasting a click on Start, though
+// AutoCheckpoint's own refusal (tools.go) is the actual enforcement point, not this advisory one:
+// a file dirtied between this pre-flight and Start would slip past this check but not that one.
+func checkGitReady(git gitx.Client, root, runID string, denylist []string) (blockers, notes []string) {
 	git = gitOrDetect(git)
-	var blockers []string
+	// Plain-English, fixed strings only -- never the raw git/go-git error text (adversarial-review
+	// finding: these two Blockers flow verbatim into the pre-flight display and from there straight
+	// into the dashboard, the same class of leak humanizeStartError (gateway/runs.go) closes for
+	// StartRun's own errors).
 	if _, err := git.RevParseHead(root); err != nil {
-		blockers = append(blockers, "repository has no commits (or is not a git repository): "+err.Error())
-		return blockers
+		blockers = append(blockers, "this project doesn't look like a ready git repository yet — it needs at least one commit before an autonomous run can start (and it must actually be a git repository)")
+		return blockers, notes
 	}
 	out, err := git.StatusPorcelain(root)
 	if err != nil {
-		blockers = append(blockers, "git status failed: "+err.Error())
-		return blockers
+		blockers = append(blockers, "l00prite couldn't check this project's git status — the repository may be corrupted, or the gateway may not have permission to read it")
+		return blockers, notes
 	}
-	if dirty := dirtyPathsOutsideL00prite(out); len(dirty) > 0 {
-		blockers = append(blockers, "working tree has uncommitted changes outside .l00prite/ (commit or stash them before starting an autonomous run): "+strings.Join(dirty, ", "))
+	var checkpointable []string
+	for _, rel := range dirtyPathsOutsideL00prite(out) {
+		if hit, pattern := MatchDenylist(denylist, rel); hit {
+			blockers = append(blockers, fmt.Sprintf(
+				"%q has unsaved changes and matches your Autonomous-Edit Denylist (%s) — review and commit or discard it yourself before starting a run; l00prite will not auto-save a file your own protection rules flagged",
+				rel, pattern))
+			continue
+		}
+		if isSecretLikePath(rel) {
+			blockers = append(blockers, fmt.Sprintf(
+				"%q has unsaved changes and looks like it may contain credentials or a key — review and commit or discard it yourself before starting a run; l00prite will not auto-save it",
+				rel))
+			continue
+		}
+		checkpointable = append(checkpointable, rel)
 	}
-	return blockers
+	if len(checkpointable) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"this project has %d unsaved file(s); l00prite will save them as a checkpoint commit (\"WIP: auto-checkpoint before run-%s\") when you press Start, so nothing is lost: %s",
+			len(checkpointable), runID, strings.Join(checkpointable, ", ")))
+	}
+	return blockers, notes
 }
 
 // extractSection returns the body of a "## <heading>" markdown section (until the next ## or EOF).
@@ -285,7 +313,9 @@ func (e *Engine) BuildPreflight(run *Run) (*Preflight, error) {
 		}
 	}
 
-	pf.Blockers = append(pf.Blockers, checkGitReady(e.Git, run.RepoRoot)...)
+	gitBlockers, gitNotes := checkGitReady(e.Git, run.RepoRoot, run.ID, pf.Denylist)
+	pf.Blockers = append(pf.Blockers, gitBlockers...)
+	pf.Notes = append(pf.Notes, gitNotes...)
 	return e.finishPreflight(run, pf, snap, true)
 }
 

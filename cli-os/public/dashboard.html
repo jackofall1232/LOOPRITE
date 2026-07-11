@@ -336,7 +336,7 @@
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
             <select id="play-model" class="play-select" title="Model, provider/model pin, or auto profile"><option value="auto">auto</option></select>
             <input type="text" id="play-model-custom" class="play-select hidden" placeholder="model id, e.g. glm-5.2" title="Sent as-is — for providers whose catalog isn't known">
-            <select id="play-repo" class="play-select" title="Inject a registered repo's .l00prite memory"><option value="">no repo memory</option></select>
+            <select id="play-repo" class="play-select" title="Let the model browse this repo's files and inject its .l00prite memory"><option value="">no repo selected</option></select>
             <button class="btn sm" id="play-clear">Clear</button>
           </div>
         </div>
@@ -623,7 +623,7 @@
 
   function renderRepos(d){
     const repos=d.repos||[]; $("repos-meta").textContent = repos.length? repos.length+" registered":"";
-    if(!repos.length){ $("repos-body").innerHTML=`<div class="empty"><b>No repositories registered.</b> Connect one so its <code>.l00prite</code> memory is injected into requests.<div style="margin-top:12px"><button class="btn primary sm" data-action="repo-add">Register a repository</button></div></div>`; return; }
+    if(!repos.length){ $("repos-body").innerHTML=`<div class="empty"><b>No repositories registered.</b> Connect one so the model can read its files and its <code>.l00prite</code> memory is injected into requests — a memory folder is set up automatically.<div style="margin-top:12px"><button class="btn primary sm" data-action="repo-add">Register a repository</button></div></div>`; return; }
     $("repos-body").innerHTML=`<div class="repo-grid">${repos.map(repoCard).join("")}</div>`;
   }
   function repoCard(r){
@@ -921,11 +921,16 @@
   function finishRegister(data, btn, note, label){
     const mem=(data&&data.memory)||{};
     if(!mem.present_count){
-      // Registered fine, but be honest that there's no memory to inject yet. The repo is already
-      // stored server-side, so refresh the list/picker NOW — any way the user dismisses this
-      // modal (Done, Esc, backdrop, Cancel) must leave the UI consistent.
+      // Registered fine, but be honest that there's no memory to inject yet. Prefer the backend's
+      // OWN note (e.g. ".l00prite scaffolding failed: <reason>") over a generic fallback -- the
+      // server computes the real cause (read-only filesystem, permissions, ...) and a hardcoded
+      // "will be injected as soon as the folder exists" message would otherwise silently contradict
+      // it. The repo is already stored server-side, so refresh the list/picker NOW — any way the
+      // user dismisses this modal (Done, Esc, backdrop, Cancel) must leave the UI consistent.
       unbusy(btn,label);
-      note.innerHTML=`<div class="note warn"><b>Registered.</b> No <span class="mono">.l00prite</span> memory found in that folder yet — requests work, and memory is injected as soon as the folder exists.</div>`;
+      const detail = (data&&data.note) ? esc(data.note)
+        : `No <span class="mono">.l00prite</span> memory found in that folder yet — requests work, and memory is injected as soon as the folder exists.`;
+      note.innerHTML=`<div class="note warn"><b>Registered.</b> ${detail}</div>`;
       btn.textContent="Done"; btn.onclick=()=>closeModal();
       refresh();
       return;
@@ -938,7 +943,9 @@
       <div class="eyebrow"><span class="tick"></span> Register repository</div>
       <h3>Connect a repository</h3>
       <div class="sub">Requests that name this repo (the <span class="mono">x-l00prite-repo</span> header, a
-        repo-scoped token, or the Playground's repo picker) get its <span class="mono">.l00prite</span> memory injected.</div>
+        repo-scoped token, or the Playground's repo picker) get its <span class="mono">.l00prite</span> memory injected
+        and can read its files with read-only tools (never write, run, or use git). A <span class="mono">.l00prite</span>
+        memory folder is created automatically if this repo doesn't already have one.</div>
       <div style="display:flex;gap:8px;margin-top:14px">
         <button class="btn sm primary" id="rp-tab-clone" style="flex:1">Clone from a URL</button>
         <button class="btn sm" id="rp-tab-path" style="flex:1">Register an existing path</button>
@@ -1363,7 +1370,7 @@
     const grew=chat.length>renderedChatLen;
     renderedChatLen=chat.length;
     if(!chat.length){
-      log.innerHTML=`<div class="empty" style="padding:18px">Send a prompt to try your gateway. <b>auto</b> picks the best provider for the task; pick a repo to inject its <code>.l00prite</code> memory. Cost lands in Activity below.</div>`;
+      log.innerHTML=`<div class="empty" style="padding:18px">Send a prompt to try your gateway. <b>auto</b> picks the best provider for the task; pick a repo to let the model read its files (via read-only tools) and inject its <code>.l00prite</code> memory. Cost lands in Activity below.</div>`;
       return;
     }
     log.innerHTML=chat.map(m=>{
@@ -1385,7 +1392,7 @@
     if(sig===playRepoSig) return; // unchanged — don't rebuild (an open dropdown would snap shut)
     playRepoSig=sig;
     const cur=sel.value;
-    sel.innerHTML=`<option value="">no repo memory</option>`+repos.map(r=>`<option value="${esc(r.id)}">repo: ${esc(r.id)}</option>`).join("");
+    sel.innerHTML=`<option value="">no repo selected</option>`+repos.map(r=>`<option value="${esc(r.id)}">repo: ${esc(r.id)}</option>`).join("");
     if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
     else if(principal.repo) sel.value=principal.repo; // token is scoped to one repo — preselect it
   }

@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -396,6 +397,47 @@ func MatchDenylist(patterns []string, rel string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+// secretDenyPatterns is a conservative, fixed set of filename/path patterns AutoCheckpoint (see
+// tools.go) refuses to auto-commit even when they aren't on the project's own Autonomous-Edit
+// Denylist -- a project that hasn't gotten around to denylisting its own .env file should not have
+// it silently committed to permanent git history the first time someone presses Start. Mirrors
+// gateway/chattools.go's chat-tool secret deny list; duplicated rather than shared because gateway
+// imports engine, not the reverse, so there's no common package either could sit in without
+// introducing one purely for this.
+var secretDenyPatterns = []string{
+	".env", ".env.*",
+	"*.pem", "*.key", "*.p12", "*.pfx",
+	"id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", "id_dsa", "id_dsa.*", "id_ecdsa", "id_ecdsa.*",
+	".netrc", ".npmrc",
+	"*.keystore", "*.jks",
+}
+
+// isSecretLikePath reports whether rel (repo-relative) matches the secret deny list above, or
+// contains a ".git" path segment at any depth (a nested/vendored/submodule .git directory can
+// carry real credentials). Matching is case-insensitive against both the base name and the full
+// path. rel always comes from `git status --porcelain` (dirtyPathsOutsideL00prite), which is
+// always forward-slash regardless of host OS -- path.Base/path.Match (not filepath's, which is
+// platform-dependent) are the semantically correct match for an already-forward-slash value.
+func isSecretLikePath(rel string) bool {
+	lowerRel := strings.ToLower(rel)
+	lowerBase := strings.ToLower(path.Base(rel))
+	for _, pat := range secretDenyPatterns {
+		lowerPat := strings.ToLower(pat)
+		if ok, _ := path.Match(lowerPat, lowerBase); ok {
+			return true
+		}
+		if ok, _ := path.Match(lowerPat, lowerRel); ok {
+			return true
+		}
+	}
+	for _, seg := range strings.Split(lowerRel, "/") {
+		if seg == ".git" {
+			return true
+		}
+	}
+	return false
 }
 
 func compileGlob(pattern string) (*regexp.Regexp, bool) {

@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jackofall1232/l00prite/cli-os/internal/engine"
 	"github.com/jackofall1232/l00prite/cli-os/internal/memory"
 	"github.com/jackofall1232/l00prite/cli-os/internal/state"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
@@ -111,17 +112,52 @@ func (app *App) HandleRepoRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.auditAs(principal, "repo.register", id)
-	// A real freshness snapshot so the UI can immediately say whether .l00prite memory was found —
-	// registering a repo with no memory folder yet is fine, but it shouldn't look like success at
-	// injecting memory.
+	sendJSON(w, 200, app.repoRegisteredResponse(id, absRoot, project))
+}
+
+// repoRegisteredResponse auto-scaffolds .l00prite/ (idempotent, never overwrites an existing
+// file — see engine.Files.Scaffold) so memory injection has something to inject from the moment a
+// repo is linked, instead of silently no-op'ing until the repo's first engine Run (Bug 1 of the
+// 2026-07-11 control-plane diagnosis). A scaffold failure (e.g. a read-only filesystem) must not
+// be reported as a registration failure — the row already exists — so it becomes a plain-language
+// note instead of an error response. Shared by HandleRepoRegister and HandleRepoClone.
+func (app *App) repoRegisteredResponse(id, absRoot, project string) map[string]any {
+	files := engine.Files{Root: absRoot}
+	// LOCKING.md/AGENTS.md's convention: check .l00prite/lock.json before mutating protected
+	// memory files. Scaffold itself never overwrites an existing file, but it DOES create
+	// whatever's missing -- and a lock being actively held (a real, foreign, unexpired run) means
+	// some other agent's understanding of what's in .l00prite/ could race a file appearing
+	// underneath it mid-run. session="" always classifies an active lock as foreign here (a
+	// register/clone request is never itself a run session), matching the fail-closed default
+	// LockAvailability documents. A free or stale lock does not block -- consistent with how
+	// BuildPreflight's own recovery path already treats a stale lease as reclaimable, not a reason
+	// to refuse writing.
+	lock, lockErr := files.ReadLock()
+	lockHeld := lockErr == nil && engine.LockAvailability(lock, "") == "foreign"
+
+	var scaffolded []string
+	var scafferr error
+	if !lockHeld {
+		scaffolded, scafferr = files.Scaffold(filepath.Base(absRoot), "")
+	}
+	// A real freshness snapshot so the UI can immediately say whether .l00prite memory was found.
 	fr := memory.RepoFreshness(absRoot)
-	sendJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"repo": map[string]any{"id": id, "root": absRoot, "project": project},
 		"memory": map[string]any{
 			"status": fr.Status, "present_count": fr.PresentCount,
 			"stale_count": fr.StaleCount, "total_files": fr.TotalFiles,
 		},
-	})
+	}
+	switch {
+	case lockHeld:
+		resp["note"] = "This repo was registered, but its .l00prite memory folder was not touched because another agent currently holds its lock (an active run is likely in progress). It will be set up automatically once that lock clears."
+	case scafferr != nil:
+		resp["note"] = "This repo was registered, but l00prite could not set up its .l00prite memory folder automatically (" + scafferr.Error() + "). Memory won't be available until that's fixed."
+	case len(scaffolded) > 0:
+		resp["note"] = "A .l00prite memory folder was added to this project so l00prite can start remembering things about it right away."
+	}
+	return resp
 }
 
 type repoRemoveReq struct {
