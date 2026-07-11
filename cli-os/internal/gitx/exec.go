@@ -83,8 +83,18 @@ func (c execClient) RevParseHead(repo string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// --untracked-files=all matters: real git's default ("normal") mode collapses an ENTIRELY
+// untracked directory to one "?? dirname/" line instead of listing the files inside it (verified:
+// `git status --porcelain` on a repo with a brand-new `config/` containing `prod.pem` reports only
+// "?? config/"). Every caller of this method (engine.checkGitReady, EnsureRunBranch,
+// AutoCheckpoint) walks the returned paths individually -- AutoCheckpoint's Denylist/secret-pattern
+// gate in particular needs to see "config/prod.pem", not "config/", or a credential file sitting in
+// any brand-new directory sails straight past the gate while `git add -A` (which does not consult
+// this output at all) stages and commits it anyway. gogitClient's equivalent has no such collapsing
+// (go-git's Worktree.Status() always keys by individual file), so this asymmetry was exec-backend
+// -only -- and exec is the DEFAULT backend on every host with a git binary, not just an edge case.
 func (c execClient) StatusPorcelain(repo string) (string, error) {
-	return c.runTimed(repo, "status", "--porcelain")
+	return c.runTimed(repo, "status", "--porcelain", "--untracked-files=all")
 }
 
 func (c execClient) CheckoutNewBranch(repo, name string) error {

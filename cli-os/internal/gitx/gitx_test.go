@@ -171,6 +171,44 @@ func TestClientsBasicFlow(t *testing.T) {
 	}
 }
 
+// TestStatusPorcelainListsFilesInsideUntrackedDirectories pins the fix for a real-git-only
+// collapsing bug (PR #6 review): `git status --porcelain`'s DEFAULT mode reports one "?? dir/"
+// line for an entirely-untracked directory instead of listing the files inside it. Every caller of
+// StatusPorcelain (AutoCheckpoint's Denylist/secret-pattern gate in particular) walks the returned
+// paths individually, so a credential file sitting in a brand-new directory would sail straight
+// past the gate under that collapsed form while `git add -A` (which ignores this output entirely)
+// stages and commits it anyway. execClient must pass --untracked-files=all to avoid the collapse;
+// gogitClient is unaffected by construction (go-git's Worktree.Status() always keys by file), so
+// this test must pass for both implementations.
+func TestStatusPorcelainListsFilesInsideUntrackedDirectories(t *testing.T) {
+	for name, cl := range clients(t) {
+		cl := cl
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			initGitRepo(t, dir)
+			writeFile(t, dir, "README.md", "hello\n")
+			gitFixture(t, dir, "add", "-A")
+			gitFixture(t, dir, "commit", "-m", "init")
+
+			if err := os.MkdirAll(filepath.Join(dir, "config"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, dir, filepath.Join("config", "prod.pem"), "-----BEGIN PRIVATE KEY-----\n")
+
+			st, err := cl.StatusPorcelain(dir)
+			if err != nil {
+				t.Fatalf("StatusPorcelain: %v", err)
+			}
+			if strings.Contains(st, "config/\n") || strings.HasSuffix(strings.TrimSpace(st), "config/") {
+				t.Fatalf("expected the individual file, not a collapsed directory line, got %q", st)
+			}
+			if !strings.Contains(st, "config/prod.pem") {
+				t.Fatalf("expected config/prod.pem to be listed individually, got %q", st)
+			}
+		})
+	}
+}
+
 func TestCloneFromLocalPath(t *testing.T) {
 	for name, cl := range clients(t) {
 		cl := cl
