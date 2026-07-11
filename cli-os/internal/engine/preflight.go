@@ -32,10 +32,15 @@ var perActionPermissions = []string{
 // the pure-Go go-git fallback when no git binary is on PATH — see docs/android-architecture.md §4
 // G4), so this can only ever report a genuine "not a git repository" / "git status failed"
 // problem — never "git is not installed": with go-git compiled in, some implementation can always
-// at least read repository state. A dirty worktree is NOT a blocker: StartRun's AutoCheckpoint
-// commits it automatically, so it is surfaced here as a Note (a Blocker would disable the Start
-// button entirely — see dashboard.html's hasBlockers gate — making that checkpoint unreachable).
-func checkGitReady(git gitx.Client, root, runID string) (blockers, notes []string) {
+// at least read repository state. A dirty worktree is NOT ordinarily a blocker: StartRun's
+// AutoCheckpoint commits it automatically, so it is surfaced here as a Note (a Blocker would
+// disable the Start button entirely — see dashboard.html's hasBlockers gate — making that
+// checkpoint unreachable). The exception is a dirty path AutoCheckpoint itself will refuse to
+// auto-commit (a Denylist match or something that looks like a credential) — that's surfaced here
+// as an early Blocker too, so the human sees it before wasting a click on Start, though
+// AutoCheckpoint's own refusal (tools.go) is the actual enforcement point, not this advisory one:
+// a file dirtied between this pre-flight and Start would slip past this check but not that one.
+func checkGitReady(git gitx.Client, root, runID string, denylist []string) (blockers, notes []string) {
 	git = gitOrDetect(git)
 	// Plain-English, fixed strings only -- never the raw git/go-git error text (adversarial-review
 	// finding: these two Blockers flow verbatim into the pre-flight display and from there straight
@@ -50,10 +55,26 @@ func checkGitReady(git gitx.Client, root, runID string) (blockers, notes []strin
 		blockers = append(blockers, "l00prite couldn't check this project's git status — the repository may be corrupted, or the gateway may not have permission to read it")
 		return blockers, notes
 	}
-	if dirty := dirtyPathsOutsideL00prite(out); len(dirty) > 0 {
+	var checkpointable []string
+	for _, rel := range dirtyPathsOutsideL00prite(out) {
+		if hit, pattern := MatchDenylist(denylist, rel); hit {
+			blockers = append(blockers, fmt.Sprintf(
+				"%q has unsaved changes and matches your Autonomous-Edit Denylist (%s) — review and commit or discard it yourself before starting a run; l00prite will not auto-save a file your own protection rules flagged",
+				rel, pattern))
+			continue
+		}
+		if isSecretLikePath(rel) {
+			blockers = append(blockers, fmt.Sprintf(
+				"%q has unsaved changes and looks like it may contain credentials or a key — review and commit or discard it yourself before starting a run; l00prite will not auto-save it",
+				rel))
+			continue
+		}
+		checkpointable = append(checkpointable, rel)
+	}
+	if len(checkpointable) > 0 {
 		notes = append(notes, fmt.Sprintf(
 			"this project has %d unsaved file(s); l00prite will save them as a checkpoint commit (\"WIP: auto-checkpoint before run-%s\") when you press Start, so nothing is lost: %s",
-			len(dirty), runID, strings.Join(dirty, ", ")))
+			len(checkpointable), runID, strings.Join(checkpointable, ", ")))
 	}
 	return blockers, notes
 }
@@ -292,7 +313,7 @@ func (e *Engine) BuildPreflight(run *Run) (*Preflight, error) {
 		}
 	}
 
-	gitBlockers, gitNotes := checkGitReady(e.Git, run.RepoRoot, run.ID)
+	gitBlockers, gitNotes := checkGitReady(e.Git, run.RepoRoot, run.ID, pf.Denylist)
 	pf.Blockers = append(pf.Blockers, gitBlockers...)
 	pf.Notes = append(pf.Notes, gitNotes...)
 	return e.finishPreflight(run, pf, snap, true)
