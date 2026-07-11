@@ -192,6 +192,23 @@ func TestRunsAPIStartSucceedsOnGogitWithTrackedDirtyLock(t *testing.T) {
 		}
 		t.Fatalf("Start should succeed on gogit with a tracked-dirty lock.json (the fixed scenario), got %d: %q", resp2.StatusCode, msg)
 	}
+
+	// A successful Start launches the engine's background loop goroutine (StartRun's
+	// `go e.loop(...)`), which keeps writing to the repo under t.TempDir() after this function's
+	// own assertions are done. Wait for a terminal status before returning -- otherwise it races
+	// t.TempDir()'s cleanup (RemoveAll), exactly the flaky "directory not empty" CI failure this
+	// same fix addresses in TestRunsAPIStartErrorsAreHumanized.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		_, gb := doJSON(t, "GET", srv.URL+"/v1/runs/get?id="+runID, token, nil)
+		run, _ := gb["run"].(map[string]any)
+		status, _ := run["status"].(string)
+		if status == "done" || status == "stopped" || status == "blocked" {
+			return
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatal("run did not reach a terminal state before the test's temp dir would be cleaned up")
 }
 
 func TestRunsAPIAuthRequired(t *testing.T) {
@@ -319,6 +336,24 @@ func TestRunsAPIStartErrorsAreHumanized(t *testing.T) {
 	if !strings.Contains(msg3, "Rebuild pre-flight") {
 		t.Fatalf("expected the humanized run_not_ready message to point the user at Rebuild pre-flight, got: %q", msg3)
 	}
+
+	// The successful Start above launched the engine's background loop goroutine (StartRun's
+	// `go e.loop(...)`), which keeps writing to the repo under t.TempDir() after this function's
+	// assertions are done. Wait for it to reach a terminal status before returning -- otherwise it
+	// races t.TempDir()'s cleanup (RemoveAll), which CI caught as a flaky
+	// "directory not empty" failure that never reproduced locally. Mirrors
+	// TestRunsAPICreateStartComplete's identical wait for the identical reason.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		_, gb := doJSON(t, "GET", srv.URL+"/v1/runs/get?id="+runID, token, nil)
+		run, _ := gb["run"].(map[string]any)
+		status, _ := run["status"].(string)
+		if status == "done" || status == "stopped" || status == "blocked" {
+			return
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatal("run did not reach a terminal state before the test's temp dir would be cleaned up")
 }
 
 func errMessage(t *testing.T, body map[string]any) string {
