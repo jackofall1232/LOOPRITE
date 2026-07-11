@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,6 +188,58 @@ func TestChatToolboxReadFileWindowing(t *testing.T) {
 	windowed := tb.readFile(map[string]any{"path": "lines.txt", "offset_line": float64(2), "limit_lines": float64(2)})
 	if !strings.HasPrefix(windowed, "two\nthree") {
 		t.Fatalf("expected a 2-line window starting at line 2, got: %q", windowed)
+	}
+}
+
+// Code-review finding (Gemini Code Assist, PR #6, HIGH severity): an unbounded limit_lines from
+// the model would overflow start+limit (Go int addition wraps rather than panicking), potentially
+// wrapping to a large negative number that passed the "start+limit < end" check and got assigned
+// to end; lines[start:end] with a negative end then panics ("slice bounds out of range"), crashing
+// the gateway process for every tenant, not just this request.
+//
+// The precise reproduction matters: math.MaxInt64 itself does NOT trigger it, because round-
+// tripping through JSON's float64 representation rounds it up to 2^63 (out of int64 range), and
+// Go's float64->int conversion saturates that to math.MinInt64 -- which the pre-existing
+// "limit >= 0" guard filters out before the addition. The actual danger zone is a float64 value
+// that survives the round trip as a large but VALID positive int (float64's ~2048-wide precision
+// gap near 2^63 means math.MaxInt64-2047 is the largest such value) combined with a large `total`
+// line count so `start` (itself clamped to `total`, regardless of how huge offset_line was) is
+// close enough to push start+limit past math.MaxInt64. Both conditions are independently
+// attacker/model-controlled: an arbitrarily large limit_lines value, against any file with enough
+// lines.
+func TestChatToolboxReadFileLimitLinesOverflowDoesNotPanic(t *testing.T) {
+	root := t.TempDir()
+	// 5000 short lines: within the 32 KiB read cap (so the file is read whole, not truncated
+	// first), but enough lines that a clamped `start` near `total` is large enough to matter.
+	var lines []byte
+	for i := 0; i < 5000; i++ {
+		lines = append(lines, []byte("x\n")...)
+	}
+	writeChatFixture(t, root, "lines.txt", string(lines))
+	tb := chatToolbox{Root: root}
+
+	dangerLimit := float64(math.MaxInt64 - 2047) // largest float64-representable value below 2^63
+	cases := []struct {
+		args        map[string]any
+		wantContent bool // false when offset_line clamps start to the end of the file (an empty,
+		// but legitimate, window -- not a bug), so there's genuinely nothing to assert content on
+	}{
+		{args: map[string]any{"path": "lines.txt", "limit_lines": dangerLimit}, wantContent: true},
+		{args: map[string]any{"path": "lines.txt", "offset_line": float64(999999999), "limit_lines": dangerLimit}, wantContent: false},
+		{args: map[string]any{"path": "lines.txt", "limit_lines": float64(math.MaxInt64)}, wantContent: true}, // saturates to MinInt64; must also not panic
+	}
+	for _, c := range cases {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("readFile panicked with args=%v: %v", c.args, r)
+				}
+			}()
+			out := tb.readFile(c.args)
+			if c.wantContent && !strings.Contains(out, "x") {
+				t.Fatalf("expected sane clamped content back for args=%v, got: %q", c.args, out)
+			}
+		}()
 	}
 }
 
