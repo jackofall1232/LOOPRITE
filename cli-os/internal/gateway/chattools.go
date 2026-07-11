@@ -36,24 +36,35 @@ const (
 // chatSecretDeny is a fixed set of filename/path patterns that read_file and search_files refuse
 // to return content for, regardless of the repo owner's own .gitignore. This is a conservative
 // default deny-list for common credential/key file shapes; it is deliberately not configurable
-// from chat. Patterns are matched against both the base name and the full repo-relative
-// (forward-slash) path via path.Match-style globs.
+// from chat. Patterns are matched case-insensitively against both the base name and the full
+// repo-relative (forward-slash) path via path.Match-style globs. Any ".git" path SEGMENT at any
+// depth (not just a literal top-level ".git/config") is denied outright, mirroring list_dir/
+// search_files' existing top-level ".git" exclusion but extended to a nested/vendored/submodule
+// ".git" directory, which can carry real credentials (a [credential] section, a stored
+// credential-store file) that a literal "*.git/config" glob would miss because filepath.Match
+// never spans path separators.
 var chatSecretDenyPatterns = []string{
 	".env", ".env.*",
 	"*.pem", "*.key", "*.p12", "*.pfx",
 	"id_rsa", "id_rsa.*", "id_ed25519", "id_ed25519.*", "id_dsa", "id_dsa.*", "id_ecdsa", "id_ecdsa.*",
 	".netrc", ".npmrc",
-	".git/config", ".git/credentials",
 	"*.keystore", "*.jks",
 }
 
 func isChatSecretPath(rel string) bool {
-	base := filepath.Base(rel)
+	lowerRel := strings.ToLower(rel)
+	lowerBase := strings.ToLower(filepath.Base(rel))
 	for _, pat := range chatSecretDenyPatterns {
-		if ok, _ := filepath.Match(pat, base); ok {
+		lowerPat := strings.ToLower(pat)
+		if ok, _ := filepath.Match(lowerPat, lowerBase); ok {
 			return true
 		}
-		if ok, _ := filepath.Match(pat, rel); ok {
+		if ok, _ := filepath.Match(lowerPat, lowerRel); ok {
+			return true
+		}
+	}
+	for _, seg := range strings.Split(lowerRel, "/") {
+		if seg == ".git" {
 			return true
 		}
 	}
@@ -93,6 +104,20 @@ func chatToolDefinitions() []any {
 			"required": []any{"query"},
 		}),
 	}
+}
+
+// activeChatToolDefinitions returns only the definitions named in active -- used by RunChatTools
+// (chatloop.go) to exclude any of the three tool names a client request already defines its own
+// tool for, so a same-named client tool is never silently hijacked by the gateway's file browser.
+func activeChatToolDefinitions(active map[string]bool) []any {
+	var out []any
+	for _, d := range chatToolDefinitions() {
+		name := asStr(asMap(d.(map[string]any)["function"])["name"])
+		if active[name] {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func chatFnTool(name, desc string, params map[string]any) map[string]any {
@@ -177,9 +202,6 @@ func (c chatToolbox) readFile(args map[string]any) string {
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	if isChatSecretPath(filepath.ToSlash(filepath.Clean(raw))) {
-		return "DENIED: this path looks like a credential or key file; it is never readable from chat"
-	}
 	info, err := os.Stat(abs)
 	if err != nil {
 		return "ERROR: " + err.Error()
@@ -187,7 +209,33 @@ func (c chatToolbox) readFile(args map[string]any) string {
 	if info.IsDir() {
 		return "ERROR: path is a directory; use list_dir"
 	}
-	data, err := os.ReadFile(abs)
+	// Resolve the FULL symlink chain to the real target before the secret-path check and the
+	// actual read. resolvePath's containment check only guarantees the deepest EXISTING ancestor
+	// is inside Root, so a caller-supplied alias (e.g. an innocuously-named symlink inside the
+	// repo pointing at .env) would otherwise reach isChatSecretPath keyed on the alias name, not
+	// the real target -- and the read would then transparently follow the symlink past that
+	// check. Resolving once here and reading via the SAME resolved path also removes the
+	// separate, independent symlink traversal the old two-step "check then read" flow left open
+	// to a swap between check and read.
+	resolvedAbs, rerr := filepath.EvalSymlinks(abs)
+	if rerr != nil {
+		return "ERROR: " + rerr.Error()
+	}
+	rootResolved, rerr := filepath.EvalSymlinks(c.Root)
+	if rerr != nil {
+		return "ERROR: path escapes the repository"
+	}
+	if resolvedAbs != rootResolved && !strings.HasPrefix(resolvedAbs, rootResolved+string(os.PathSeparator)) {
+		return "ERROR: path escapes the repository"
+	}
+	resolvedRel, rerr := filepath.Rel(rootResolved, resolvedAbs)
+	if rerr != nil {
+		return "ERROR: path escapes the repository"
+	}
+	if isChatSecretPath(filepath.ToSlash(resolvedRel)) {
+		return "DENIED: this path looks like a credential or key file; it is never readable from chat"
+	}
+	data, err := os.ReadFile(resolvedAbs)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
