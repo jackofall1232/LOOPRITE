@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jackofall1232/l00prite/cli-os/internal/engine"
 	"github.com/jackofall1232/l00prite/cli-os/internal/memory"
 	"github.com/jackofall1232/l00prite/cli-os/internal/state"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
@@ -111,17 +112,33 @@ func (app *App) HandleRepoRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.auditAs(principal, "repo.register", id)
-	// A real freshness snapshot so the UI can immediately say whether .l00prite memory was found —
-	// registering a repo with no memory folder yet is fine, but it shouldn't look like success at
-	// injecting memory.
+	sendJSON(w, 200, app.repoRegisteredResponse(id, absRoot, project))
+}
+
+// repoRegisteredResponse auto-scaffolds .l00prite/ (idempotent, never overwrites an existing
+// file — see engine.Files.Scaffold) so memory injection has something to inject from the moment a
+// repo is linked, instead of silently no-op'ing until the repo's first engine Run (Bug 1 of the
+// 2026-07-11 control-plane diagnosis). A scaffold failure (e.g. a read-only filesystem) must not
+// be reported as a registration failure — the row already exists — so it becomes a plain-language
+// note instead of an error response. Shared by HandleRepoRegister and HandleRepoClone.
+func (app *App) repoRegisteredResponse(id, absRoot, project string) map[string]any {
+	scaffolded, scafferr := engine.Files{Root: absRoot}.Scaffold(project, "")
+	// A real freshness snapshot so the UI can immediately say whether .l00prite memory was found.
 	fr := memory.RepoFreshness(absRoot)
-	sendJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"repo": map[string]any{"id": id, "root": absRoot, "project": project},
 		"memory": map[string]any{
 			"status": fr.Status, "present_count": fr.PresentCount,
 			"stale_count": fr.StaleCount, "total_files": fr.TotalFiles,
 		},
-	})
+	}
+	switch {
+	case scafferr != nil:
+		resp["note"] = "This repo was registered, but l00prite could not set up its .l00prite memory folder automatically (" + scafferr.Error() + "). Memory won't be available until that's fixed."
+	case len(scaffolded) > 0:
+		resp["note"] = "A .l00prite memory folder was added to this project so l00prite can start remembering things about it right away."
+	}
+	return resp
 }
 
 type repoRemoveReq struct {
