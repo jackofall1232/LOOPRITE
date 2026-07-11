@@ -25,20 +25,53 @@ type ReserveResult struct {
 
 // Spend is the current daily spend snapshot.
 type Spend struct {
-	Day       string
-	Cap       float64
-	Reserved  float64
-	Committed float64
+	Day          string
+	Cap          float64 // base daily limit (limit_usd, or the server default when no row exists)
+	OveragePct   float64
+	Unlimited    bool
+	Explicit     bool    // a caps row exists
+	EffectiveCap float64 // Cap*(1+OveragePct/100); 0 and meaningless when Unlimited
+	Reserved     float64
+	Committed    float64
 }
 
-func capFor(q state.Querier, project string, defaultCap float64) float64 {
-	var limit float64
-	err := q.QueryRowContext(state.Ctx(),
-		`SELECT limit_usd FROM caps WHERE project = ? AND window = 'daily'`, project).Scan(&limit)
-	if err != nil {
-		return defaultCap
+// CapInfo is a project's stored daily budget (or the server default when no caps row exists).
+type CapInfo struct {
+	LimitUSD   float64
+	OveragePct float64 // 0..1000: percent beyond LimitUSD reservations may still use
+	Unlimited  bool    // never deny on cost; spend is still reserved/committed/ledgered
+	Explicit   bool    // a caps row exists for this project
+}
+
+// EffectiveCeiling returns the dollar ceiling reservations may not exceed.
+// capped==false means unlimited: there is no ceiling and the usd value is meaningless.
+// Never store or marshal +Inf — json.Marshal fails on it (see budgetView / spendToday).
+func (c CapInfo) EffectiveCeiling() (usd float64, capped bool) {
+	if c.Unlimited {
+		return 0, false
 	}
-	return limit
+	return c.LimitUSD * (1 + c.OveragePct/100), true
+}
+
+// capFor reads a project's stored daily cap. A missing row (sql.ErrNoRows) is the expected,
+// normal "no explicit cap configured" case and returns defaultCap with a nil error. Any OTHER
+// error (a locked/corrupt DB, an I/O failure) is a real read failure and is returned as such —
+// callers that enforce policy (Reserve) must fail closed on it rather than silently substituting
+// defaultCap, which could be a HIGHER, more permissive ceiling than whatever was actually
+// configured for this project.
+func capFor(q state.Querier, project string, defaultCap float64) (CapInfo, error) {
+	var limit, over float64
+	var unl int
+	err := q.QueryRowContext(state.Ctx(),
+		`SELECT limit_usd, overage_pct, unlimited FROM caps WHERE project = ? AND window = 'daily'`, project).
+		Scan(&limit, &over, &unl)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return CapInfo{LimitUSD: defaultCap}, nil
+		}
+		return CapInfo{}, err
+	}
+	return CapInfo{LimitUSD: limit, OveragePct: over, Unlimited: unl != 0, Explicit: true}, nil
 }
 
 func spendRow(q state.Querier, project, day string) (reserved, committed float64, err error) {
@@ -60,14 +93,19 @@ func Reserve(db *sql.DB, project string, amountUsd, defaultCap float64) ReserveR
 	}
 	day := util.UTCDay()
 	res, err := state.Tx(db, func(q state.Querier) (ReserveResult, error) {
-		cap := capFor(q, project, defaultCap)
+		ci, cerr := capFor(q, project, defaultCap)
+		if cerr != nil {
+			return ReserveResult{}, cerr // fail CLOSED: an unreadable cap must not fall back to a possibly-more-permissive default
+		}
+		ceil, capped := ci.EffectiveCeiling()
 		reserved, committed, serr := spendRow(q, project, day)
 		if serr != nil {
 			return ReserveResult{}, serr // fail CLOSED: a DB read failure must not proceed on unknown spend
 		}
 		inUse := reserved + committed
-		if inUse+amountUsd > cap+1e-9 {
-			return ReserveResult{OK: false, Reason: "cost_cap", Cap: cap, Spent: inUse, Requested: amountUsd}, nil
+		// An unlimited project NEVER gets {OK:false, Reason:"cost_cap"} — spend is still metered below.
+		if capped && inUse+amountUsd > ceil+1e-9 {
+			return ReserveResult{OK: false, Reason: "cost_cap", Cap: ceil, Spent: inUse, Requested: amountUsd}, nil
 		}
 		id := util.RID("rsv")
 		if _, err := q.ExecContext(state.Ctx(),
@@ -80,7 +118,7 @@ func Reserve(db *sql.DB, project string, amountUsd, defaultCap float64) ReserveR
 			amountUsd, project, day); err != nil {
 			return ReserveResult{}, err
 		}
-		return ReserveResult{OK: true, ReservationID: id, Cap: cap, Spent: inUse}, nil
+		return ReserveResult{OK: true, ReservationID: id, Cap: ceil, Spent: inUse}, nil
 	})
 	if err != nil {
 		// A transaction/DB error denies (fail closed) rather than silently proceeding.
@@ -187,7 +225,23 @@ func GetSpend(db *sql.DB, project string, defaultCap float64) Spend {
 	day := util.UTCDay()
 	s, _ := state.Tx(db, func(q state.Querier) (Spend, error) {
 		reserved, committed, _ := spendRow(q, project, day) // best-effort read for display
-		return Spend{Day: day, Cap: capFor(q, project, defaultCap), Reserved: reserved, Committed: committed}, nil
+		// GetSpend has no enforcement power (Reserve is the actual policy gate) — it is documented
+		// as a best-effort display snapshot, so an unreadable cap here falls back to defaultCap for
+		// display purposes only, exactly like the best-effort spendRow read above it, rather than
+		// failing the whole snapshot. (capFor's zero-value CapInfo{} on error must NOT be used
+		// directly — it would display a false $0 cap instead of the intended fallback.)
+		ci, cerr := capFor(q, project, defaultCap)
+		if cerr != nil {
+			ci = CapInfo{LimitUSD: defaultCap}
+		}
+		eff, capped := ci.EffectiveCeiling()
+		if !capped {
+			eff = 0
+		}
+		return Spend{
+			Day: day, Cap: ci.LimitUSD, OveragePct: ci.OveragePct, Unlimited: ci.Unlimited,
+			Explicit: ci.Explicit, EffectiveCap: eff, Reserved: reserved, Committed: committed,
+		}, nil
 	})
 	return s
 }

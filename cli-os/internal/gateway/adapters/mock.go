@@ -9,7 +9,8 @@
 // Also drives the read-only chat-tool loop (RunChatTools, cli-os/internal/gateway/chatloop.go): a
 // last user message of "/chattool <name> <json-args>" emits ONE tool_call for that tool name/args
 // (only when the request actually offers it in "tools"), then finalizes on the next turn by
-// echoing the tool result content -- so a test can assert real file content made the round trip.
+// echoing the tool result content -- so a test can assert real file content (or, for propose_run,
+// the real drafted-run JSON) made the round trip.
 package adapters
 
 import (
@@ -91,7 +92,10 @@ func mockBridgeDirective(req map[string]any) *mockDirective {
 	return &mockDirective{loop: m[1] == "bridgeloop", target: m[2], task: strings.TrimSpace(m[3])}
 }
 
-var chatToolNamesForTest = map[string]bool{"read_file": true, "list_dir": true, "search_files": true}
+// chatToolNamesForTest deliberately mirrors gateway's chatToolNames + propose_run (chatrun.go) --
+// duplicated here (not imported) because this is an adapters-package test hook with no dependency
+// on gateway's internals; it only needs to recognize the SAME names RunChatTools might attach.
+var chatToolNamesForTest = map[string]bool{"read_file": true, "list_dir": true, "search_files": true, "propose_run": true}
 
 func mockHasChatTool(req map[string]any) bool {
 	for _, t := range asArr(req["tools"]) {

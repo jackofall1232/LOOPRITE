@@ -6,8 +6,11 @@ package server
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/config"
@@ -37,6 +40,43 @@ func serveDashboard(w http.ResponseWriter) {
 
 func serveSetup(w http.ResponseWriter) {
 	serveHTML(w, public.Setup, "l00prite CLI-OS first-run setup. Setup asset not found.")
+}
+
+// serveAsset serves an embedded static file at /assets/... — content-type by extension, a long
+// client cache (the files are fixed at build time and change only with the binary), and 404 for
+// anything not in the embedded FS. embed.FS + fs.ValidPath make traversal impossible: ".." is
+// not a valid embed path, and the FS contains only what was compiled in.
+func serveAsset(w http.ResponseWriter, urlPath string) {
+	rel := strings.TrimPrefix(urlPath, "/")
+	if !strings.HasPrefix(rel, "assets/") || !fs.ValidPath(rel) {
+		notFound(w)
+		return
+	}
+	data, err := public.Assets.ReadFile(rel)
+	if err != nil {
+		notFound(w)
+		return
+	}
+	ctype := ""
+	switch strings.ToLower(path.Ext(rel)) {
+	case ".png":
+		ctype = "image/png"
+	case ".jpg", ".jpeg":
+		ctype = "image/jpeg"
+	case ".webp":
+		ctype = "image/webp"
+	case ".svg":
+		ctype = "image/svg+xml"
+	case ".md":
+		ctype = "text/plain; charset=utf-8"
+	default:
+		ctype = "application/octet-stream"
+	}
+	w.Header().Set("content-type", ctype)
+	w.Header().Set("cache-control", "public, max-age=86400")
+	w.Header().Set("content-length", fmt.Sprint(len(data)))
+	w.WriteHeader(200)
+	w.Write(data)
 }
 
 func notFound(w http.ResponseWriter) {
@@ -73,6 +113,8 @@ func Handler(app *gateway.App) http.Handler {
 			serveSetup(w)
 		case r.Method == http.MethodGet && p == "/healthz":
 			app.HandleHealth(w, r)
+		case r.Method == http.MethodGet && strings.HasPrefix(p, "/assets/"):
+			serveAsset(w, p)
 		case r.Method == http.MethodGet && p == "/v1/models":
 			app.HandleModels(w, r)
 		case r.Method == http.MethodGet && p == "/v1/dashboard/summary":
@@ -87,6 +129,11 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleSetupProvider(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/token":
 			app.HandleSetupToken(w, r)
+		// Authenticated per-project daily budget (dashboard "Set budget" modal).
+		case r.Method == http.MethodGet && p == "/v1/budget":
+			app.HandleBudgetGet(w, r)
+		case r.Method == http.MethodPost && p == "/v1/budget":
+			app.HandleBudgetSet(w, r)
 		// Authenticated provider lifecycle management (Part E) — flat POST actions, name in the body.
 		case r.Method == http.MethodPost && p == "/v1/providers":
 			app.HandleProviderAdd(w, r)

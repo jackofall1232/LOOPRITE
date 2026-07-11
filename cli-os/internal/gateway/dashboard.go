@@ -282,13 +282,19 @@ func listRepos(db *sql.DB) []repoRow {
 // unions the caps table (projects with a cap but no spend yet) with the spend table (projects that
 // have spent), so a configured cap is visible even before its first request.
 func (app *App) spendToday(day string) (byProject []any, committedTotal, reservedTotal float64) {
-	caps := map[string]float64{}
-	if rows, err := app.DB.QueryContext(state.Ctx(), `SELECT project, limit_usd FROM caps WHERE window='daily'`); err == nil {
+	type capRow struct {
+		limit, overage float64
+		unlimited      bool
+	}
+	caps := map[string]capRow{}
+	if rows, err := app.DB.QueryContext(state.Ctx(), `SELECT project, limit_usd, overage_pct, unlimited FROM caps WHERE window='daily'`); err == nil {
 		for rows.Next() {
 			var p string
-			var lim float64
-			if rows.Scan(&p, &lim) == nil {
-				caps[p] = lim
+			var c capRow
+			var unl int
+			if rows.Scan(&p, &c.limit, &c.overage, &unl) == nil {
+				c.unlimited = unl != 0
+				caps[p] = c
 			}
 		}
 		rows.Close()
@@ -314,14 +320,18 @@ func (app *App) spendToday(day string) (byProject []any, committedTotal, reserve
 		}
 		seen[project] = true
 		s := spends[project]
-		cap := app.Cfg.DefaultDailyCapUsd
-		hasCap := false
+		capUSD, over, unl, hasCap := app.Cfg.DefaultDailyCapUsd, 0.0, false, false
 		if c, ok := caps[project]; ok {
-			cap, hasCap = c, true
+			capUSD, over, unl, hasCap = c.limit, c.overage, c.unlimited, true
+		}
+		var eff any // null when unlimited — never marshal +Inf
+		if !unl {
+			eff = capUSD * (1 + over/100)
 		}
 		byProject = append(byProject, map[string]any{
 			"project": project, "committed_usd": s.committed, "reserved_usd": s.reserved,
-			"cap_usd": cap, "cap_explicit": hasCap,
+			"cap_usd": capUSD, "cap_explicit": hasCap,
+			"overage_pct": over, "unlimited": unl, "effective_cap_usd": eff,
 		})
 	}
 	for p := range spends {
@@ -409,17 +419,40 @@ func (app *App) deriveAlerts(providers []ProviderRow, spendByProject []any, stal
 	}
 	for _, rawp := range spendByProject {
 		p := rawp.(map[string]any)
+		if unl, _ := p["unlimited"].(bool); unl {
+			continue // no cap to approach — cap alerts are meaningless for an uncapped project
+		}
 		cap, _ := p["cap_usd"].(float64)
+		eff, _ := p["effective_cap_usd"].(float64)
+		if eff <= 0 {
+			eff = cap
+		}
 		committed, _ := p["committed_usd"].(float64)
 		reserved, _ := p["reserved_usd"].(float64)
 		used := committed + reserved
-		if cap > 0 && used >= cap*0.8 {
-			pct := int(used / cap * 100)
+		project := asStr(p["project"])
+		if op, _ := p["overage_pct"].(float64); op > 0 && cap > 0 {
+			// Overage-enabled project: alert as soon as the BASE limit is crossed, independent of
+			// the 80%-of-effective-ceiling threshold below — the dashboard's own budget modal
+			// promises "you'll see an alert the moment you cross the base limit" (dashboard.html's
+			// "Allow up to 100% over" copy), which a gate keyed on 80% of the DOUBLED effective
+			// ceiling would otherwise miss entirely for the first 60 points of overage.
+			switch {
+			case used >= eff:
+				add("error", "Project \""+project+"\" has reached its hard stop, including the allowed overage.")
+			case used >= cap:
+				pct := int(used / eff * 100)
+				add("warn", "Project \""+project+"\" is past its base budget and running in the allowed overage ("+strconv.Itoa(pct)+"% of the hard stop).")
+			}
+			continue
+		}
+		if eff > 0 && used >= eff*0.8 {
+			pct := int(used / eff * 100)
 			lvl := "warn"
-			if used >= cap {
+			if used >= eff {
 				lvl = "error"
 			}
-			add(lvl, "Daily cap "+strconv.Itoa(pct)+"% reached on project \""+asStr(p["project"])+"\".")
+			add(lvl, "Daily budget "+strconv.Itoa(pct)+"% used on project \""+project+"\".")
 		}
 	}
 	if staleRepos > 0 {

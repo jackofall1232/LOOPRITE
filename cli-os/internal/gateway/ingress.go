@@ -47,7 +47,9 @@ func sendJSON(w http.ResponseWriter, status int, obj any) {
 	w.Write(b)
 }
 
-func oaiError(w http.ResponseWriter, status int, message, typ, code string) {
+// extra is optional, additive top-level fields merged into the error body (e.g.
+// l00prite_proposed_runs) -- variadic so every existing 5-arg call site is unaffected.
+func oaiError(w http.ResponseWriter, status int, message, typ, code string, extra ...map[string]any) {
 	if typ == "" {
 		typ = "invalid_request_error"
 	}
@@ -55,7 +57,13 @@ func oaiError(w http.ResponseWriter, status int, message, typ, code string) {
 	if code != "" {
 		codeVal = code
 	}
-	sendJSON(w, status, map[string]any{"error": map[string]any{"message": message, "type": typ, "code": codeVal, "param": nil}})
+	body := map[string]any{"error": map[string]any{"message": message, "type": typ, "code": codeVal, "param": nil}}
+	for _, e := range extra {
+		for k, v := range e {
+			body[k] = v
+		}
+	}
+	sendJSON(w, status, body)
 }
 
 var bearerRE = regexp.MustCompile(`(?i)^Bearer\s+(.+)$`)
@@ -210,7 +218,7 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 			}
 			msg := "Request denied by policy"
 			if result.Denied.Reason == "cost_cap" {
-				msg = fmt.Sprintf("Daily cost cap reached mid-bridge after %d delegation(s) and $%.4f committed. Raise it with \"l00prite cap set\" or wait for the UTC-day reset.", result.SubCalls, result.TotalCostUsd)
+				msg = fmt.Sprintf("Daily budget reached mid-bridge after %d delegation(s) and $%.4f committed. Raise or change it in the dashboard (Costs → Set budget), or wait for the UTC-day reset.", result.SubCalls, result.TotalCostUsd)
 			}
 			oaiError(w, 402, msg, "insufficient_quota", firstNonEmpty(result.Denied.Code, result.Denied.Reason))
 			return
@@ -294,7 +302,7 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 			ledger.Append(app.DB, cfg.LedgerPath, ledger.Entry{RequestID: requestID, Project: project, Repo: repoID, Provider: route.Provider, Model: route.Model, RuleID: ruleID, Decision: route.Decision, Outcome: "denied_" + resv.Reason})
 			msg := "Request denied by policy"
 			if resv.Reason == "cost_cap" {
-				msg = fmt.Sprintf("Daily cost cap reached ($%.4f of $%.2f). Raise it with \"l00prite cap set\" or wait for the UTC-day reset.", resv.Spent, resv.Cap)
+				msg = fmt.Sprintf("Daily budget reached ($%.4f of $%.2f). Raise or change it in the dashboard (Costs → Set budget), or wait for the UTC-day reset.", resv.Spent, resv.Cap)
 			}
 			oaiError(w, 402, msg, "insufficient_quota", resv.Reason)
 			return
@@ -328,7 +336,7 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	// RunChatTools attaches read-only repo-browsing tools (read_file/list_dir/search_files) when
 	// repoRoot names a registered repo, and is a no-op passthrough to runTurn otherwise -- see
 	// chatloop.go's doc comment for why streaming/bridging aren't wired to it yet.
-	turn, err := RunChatTools(app, requestID, project, repoID, repoRoot, openaiReq, routeHeader, clientCtx, paths)
+	turn, err := RunChatTools(app, principal, requestID, project, repoID, repoRoot, openaiReq, routeHeader, clientCtx, paths)
 	if err != nil {
 		logRouteError(app, requestID, project, repoID, err)
 		e := httpErr(err)
@@ -341,9 +349,16 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 		msg := "Request denied by policy"
 		if turn.Denial.Reason == "cost_cap" {
-			msg = fmt.Sprintf("Daily cost cap reached ($%.4f of $%.2f). Raise it with \"l00prite cap set\" or wait for the UTC-day reset.", turn.Denial.Spent, turn.Denial.Cap)
+			msg = fmt.Sprintf("Daily budget reached ($%.4f of $%.2f). Raise or change it in the dashboard (Costs → Set budget), or wait for the UTC-day reset.", turn.Denial.Spent, turn.Denial.Cap)
 		}
-		oaiError(w, 402, msg, "insufficient_quota", firstNonEmpty(turn.Denial.Code, turn.Denial.Reason))
+		// A run drafted by propose_run in an earlier round of THIS turn is a real, persisted side
+		// effect even when a later round's own reservation is denied -- surface it here too, not
+		// only on a successful reply (Codex review, PR #8).
+		extra := map[string]any{}
+		if len(turn.Denial.ProposedRuns) > 0 {
+			extra["l00prite_proposed_runs"] = turn.Denial.ProposedRuns
+		}
+		oaiError(w, 402, msg, "insufficient_quota", firstNonEmpty(turn.Denial.Code, turn.Denial.Reason), extra)
 		return
 	}
 	w.Header().Set("x-l00prite-provider", turn.Route.Provider)

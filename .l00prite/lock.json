@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "lock_id": "lock-20260710-191600-claude-android-icon-sideload-docs",
+  "lock_id": "lock-20260711-213500-claude-budget-execute-lock-help",
   "owner_agent": "claude",
-  "owner_session": "session_01S68qFGWXzZNPFXXcnK1ndJ",
-  "acquired_at": "2026-07-10T19:16:00Z",
-  "expires_at": "2026-07-10T20:16:00Z",
-  "ttl_seconds": 3600,
-  "purpose": "Append ledger entry for the Android infinity launcher icon + website sideload-prep/Play-Protect guidance pass on branch claude/android-icon-sideload-docs-ttk7so",
+  "owner_session": "session_0186mMz3Zmek1zaFcXSVNCa8",
+  "acquired_at": "2026-07-11T21:35:00Z",
+  "expires_at": "2026-07-11T22:05:00Z",
+  "ttl_seconds": 1800,
+  "purpose": "Append ledger entry for the budget/overage controls, propose_run chat tool, Playground model lock, in-app Help section, and v0.3.0-beta APK rebuild pass on branch claude/android-onboarding-run-execution-e4ni06",
   "protected_paths": [
     "ledger.md",
     "memory.md",

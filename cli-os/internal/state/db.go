@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS caps (
   project TEXT NOT NULL,
   window TEXT NOT NULL,
   limit_usd REAL NOT NULL,
+  overage_pct REAL NOT NULL DEFAULT 0,
+  unlimited INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, window)
 );
 
@@ -207,6 +209,10 @@ func migrate(db *sql.DB) {
 	if _, err := db.Exec(`ALTER TABLE providers ADD COLUMN verified INTEGER NOT NULL DEFAULT 0`); err == nil {
 		_, _ = db.Exec(`UPDATE providers SET verified = 1`)
 	}
+	// caps predates overage/unlimited (v0.2 budget controls); a fresh DB already has the columns
+	// via the schema const, so the duplicate-column error here is expected and ignored.
+	_, _ = db.Exec(`ALTER TABLE caps ADD COLUMN overage_pct REAL NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE caps ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`UPDATE meta SET value = '2' WHERE key = 'schema_version' AND value = '1'`)
 }
 

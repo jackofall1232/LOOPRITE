@@ -108,18 +108,34 @@ func (app *App) HandleRunCreate(w http.ResponseWriter, r *http.Request) {
 		CommandAllowlist: body.CommandAllowlist, MaxIterations: body.MaxIterations,
 		ApprovalTimeoutSec: body.ApprovalTimeoutSec, NoProgressThreshold: body.NoProgressThreshold,
 	}
-	run, err := app.Engine.Store.CreateRun(principal.Project, root, cfg)
-	if err != nil {
+	run, pf, err := app.createDraftRun(principal.Project, root, cfg)
+	if run == nil {
 		oaiError(w, 400, "Could not create run: "+err.Error(), "invalid_request_error", "")
 		return
 	}
 	app.auditAs(principal, "run.create", run.ID)
-	pf, err := app.Engine.BuildPreflight(run)
 	if err != nil {
 		oaiError(w, 500, "Run created but pre-flight failed: "+err.Error(), "api_error", "")
 		return
 	}
 	sendJSON(w, 200, map[string]any{"run": runView(run), "preflight": pf})
+}
+
+// createDraftRun is the single code path that drafts a run and builds its first pre-flight. Both
+// POST /v1/runs (HandleRunCreate above) and the Playground's propose_run chat tool
+// (chatrun.go) call it, so the two surfaces can never drift. It NEVER starts anything: Start is a
+// separate, human-confirmed endpoint (HandleRunStart), and neither this helper nor the chat path
+// may call engine.StartRun. Caller must ensure app.Engine != nil.
+func (app *App) createDraftRun(project, repoRoot string, cfg engine.RunConfig) (*engine.Run, *engine.Preflight, error) {
+	run, err := app.Engine.Store.CreateRun(project, repoRoot, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	pf, err := app.Engine.BuildPreflight(run)
+	if err != nil {
+		return run, nil, err // run exists but its pre-flight failed — caller decides how to surface
+	}
+	return run, pf, nil
 }
 
 // HandleRunPreflight is POST /v1/runs/preflight — rebuild the pre-flight (recovery/migration/lock

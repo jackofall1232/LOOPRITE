@@ -59,6 +59,11 @@ type Denial struct {
 	Code   string
 	Cap    float64
 	Spent  float64
+	// ProposedRuns carries any run(s) genuinely drafted by propose_run in an EARLIER round of the
+	// same RunChatTools turn, before a LATER round's reservation was denied (Codex review, PR #8).
+	// A draft is a real, persisted side effect even though the reply that would have described it
+	// got denied — it must not go invisible to the client just because the turn as a whole failed.
+	ProposedRuns []*proposedRun
 }
 
 // TurnResult is the runTurn outcome.
