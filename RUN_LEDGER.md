@@ -302,3 +302,5 @@ A pull request (PR #6) was opened from this branch after Section 7's implementat
 9. *(A ninth, lower-priority item from the same batch — the base-branch-lineage gap already recorded as deliberately deferred in Section 7 — was re-flagged by Codex and left deferred for the same reason.)*
 
 **Final verification (Codex round):** `go build ./...`, `go vet ./...`, `go test -race ./...` (all packages green after every commit), `node scripts/validate-l00prite.js` (519 PASS, 0 FAIL), zero edits to the two review-gated files across both review rounds. Every fix was pushed to the existing PR #6 branch (`claude/looprite-control-plane-diagnosis-ao4v62`) rather than opening a new PR, per the standing instruction to reference the already-open PR.
+
+**Outcome:** PR #6 was merged by the maintainer into `ANDROID` at `56090e1` (2026-07-11T18:02:13Z). Both bugs' fixes and every reviewer finding recorded in this file are now on the base branch.
