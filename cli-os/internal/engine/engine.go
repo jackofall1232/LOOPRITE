@@ -122,6 +122,25 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 		}
 		return fmt.Errorf("%w: %v", ErrCheckpointFailed, cerr)
 	}
+
+	branch := runBranch(run.ID)
+	if err := EnsureRunBranch(e.Git, run.RepoRoot, branch); err != nil {
+		_ = f.ReleaseLock(run.ID)
+		return fmt.Errorf("%w: %v", ErrBadState, err)
+	}
+
+	// Record the checkpoint in ledger.md only AFTER the checkout succeeds -- not before it, even
+	// though the write logically documents what AutoCheckpoint just did. Load-bearing ordering
+	// (PR #6 review finding, empirically reproduced): if ledger.md is already git-tracked (e.g. any
+	// run after the very first one ever committed it, or a repo whose .l00prite/ was scaffolded and
+	// committed via Planning Mode), appending here BEFORE the checkout would re-dirty an
+	// already-tracked file immediately before EnsureRunBranch's gogit checkout -- reproducing the
+	// EXACT "worktree contains unstaged changes" bug this whole checkpoint mechanism exists to
+	// prevent, just with ledger.md as the trigger instead of lock.json. Writing it after the
+	// checkout is safe: it lands as an uncommitted change on the (already checked-out) run branch,
+	// which is exactly how every other ledger write in this engine already behaves (e.g.
+	// persistIteration's per-unit entries, exec.go) -- it rides along with the run's next real
+	// commit rather than needing to be committed immediately itself.
 	if checkpointHash != "" {
 		if lederr := f.AppendLedger(LedgerEntry{
 			Timestamp: now, RunID: run.ID,
@@ -135,19 +154,14 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 			NextAction:      "run branch created on top of this checkpoint",
 			LockNote:        "checkpointed under the run's own lease",
 		}); lederr != nil {
-			// A ledger write failure here must not abort an already-successful checkpoint (the
-			// user's work is safely committed either way) — record it as a run event instead,
-			// mirroring BuildPreflight's tolerance for a failed recovery-note write.
+			// A ledger write failure here must not abort an already-successful checkpoint+checkout
+			// (the user's work is safely committed and the run branch exists either way) — record
+			// it as a run event instead, mirroring BuildPreflight's tolerance for a failed
+			// recovery-note write.
 			_, _ = e.Store.AppendEvent(run.ID, EvStatus, map[string]any{
 				"warning": "failed to record the auto-checkpoint in ledger.md: " + lederr.Error(),
 			})
 		}
-	}
-
-	branch := runBranch(run.ID)
-	if err := EnsureRunBranch(e.Git, run.RepoRoot, branch); err != nil {
-		_ = f.ReleaseLock(run.ID)
-		return fmt.Errorf("%w: %v", ErrBadState, err)
 	}
 
 	// Arm the repo files exactly per step 7, then the engine store. A snapshot read failure

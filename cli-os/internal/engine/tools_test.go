@@ -528,6 +528,84 @@ func TestAutoCheckpointFixesGogitCheckout(t *testing.T) {
 	}
 }
 
+// setupTrackedDirtyL00priteWithLedger is setupTrackedDirtyL00prite plus an already-tracked,
+// already-committed ledger.md — the shape of a repo whose .l00prite/ was scaffolded and committed
+// (by Planning Mode, or by any run before this one) before StartRun's own AcquireLock dirties
+// lock.json.
+func setupTrackedDirtyL00priteWithLedger(t *testing.T) string {
+	t.Helper()
+	dir := setupTrackedDirtyL00prite(t)
+	ledgerPath := filepath.Join(dir, ".l00prite", "ledger.md")
+	writeFileRaw(t, ledgerPath, "# Run Ledger\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "scaffold ledger.md")
+	// re-dirty lock.json the same way the helper's caller expects (setupTrackedDirtyL00prite
+	// already left it dirty; the commit above only touched ledger.md, so lock.json is still dirty).
+	return dir
+}
+
+// TestLedgerAppendBeforeCheckoutReDirtiesTrackedFile pins the exact failure mode PR #6 review
+// caught: if a ledger.md entry documenting the checkpoint is appended to an already-tracked
+// ledger.md BEFORE EnsureRunBranch's gogit checkout runs, it re-dirties the tree that
+// AutoCheckpoint just cleaned -- reproducing the identical "worktree contains unstaged changes"
+// failure this whole checkpoint mechanism exists to prevent, just with ledger.md as the trigger
+// instead of lock.json. This must keep failing (i.e. keep proving the ordering matters) for as
+// long as StartRun writes the checkpoint's ledger entry via Files.AppendLedger.
+func TestLedgerAppendBeforeCheckoutReDirtiesTrackedFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00priteWithLedger(t)
+	gogit := gitx.NewGogitClient()
+
+	if _, err := AutoCheckpoint(gogit, dir, "repro", nil); err != nil {
+		t.Fatalf("AutoCheckpoint: %v", err)
+	}
+
+	// Simulate the OLD (buggy) ordering: append the checkpoint's ledger entry before the checkout,
+	// exactly as StartRun used to.
+	if err := (Files{Root: dir}).AppendLedger(LedgerEntry{
+		Timestamp: "2026-07-11T00:00:00Z", RunID: "repro", Goal: "auto-checkpoint before run repro",
+	}); err != nil {
+		t.Fatalf("AppendLedger: %v", err)
+	}
+
+	err := EnsureRunBranch(gogit, dir, "l00prite/run-repro")
+	if err == nil {
+		t.Fatal("expected the gogit checkout to fail once the ledger append re-dirtied a tracked file")
+	}
+	if !strings.Contains(err.Error(), "worktree contains unstaged changes") {
+		t.Fatalf("expected the raw go-git ErrUnstagedChanges text, got: %v", err)
+	}
+}
+
+// TestLedgerAppendAfterCheckoutSucceeds proves the fix: appending the checkpoint's ledger entry
+// AFTER EnsureRunBranch's checkout (StartRun's current order) never re-dirties the tree the
+// checkout depends on, so the checkout succeeds even when ledger.md is already tracked.
+func TestLedgerAppendAfterCheckoutSucceeds(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00priteWithLedger(t)
+	gogit := gitx.NewGogitClient()
+
+	if _, err := AutoCheckpoint(gogit, dir, "repro", nil); err != nil {
+		t.Fatalf("AutoCheckpoint: %v", err)
+	}
+	if err := EnsureRunBranch(gogit, dir, "l00prite/run-repro"); err != nil {
+		t.Fatalf("EnsureRunBranch after checkpoint should succeed, got: %v", err)
+	}
+	if err := (Files{Root: dir}).AppendLedger(LedgerEntry{
+		Timestamp: "2026-07-11T00:00:00Z", RunID: "repro", Goal: "auto-checkpoint before run repro",
+	}); err != nil {
+		t.Fatalf("AppendLedger after checkout: %v", err)
+	}
+	cur := strings.TrimSpace(gitRun(t, dir, "rev-parse", "--abbrev-ref", "HEAD"))
+	if cur != "l00prite/run-repro" {
+		t.Fatalf("expected to be on the run branch, got %q", cur)
+	}
+}
+
 // A dirty path that matches the project's Denylist, or looks like it may hold credentials, must
 // never be silently committed by AutoCheckpoint (adversarial-review finding: the pre-run
 // checkpoint was a second, ungoverned write path that bypassed the same protection write_file
