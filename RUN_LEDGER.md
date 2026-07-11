@@ -1,9 +1,9 @@
-# RUN_LEDGER.md — Diagnosis Run: cli-os Control-Plane Bugs 1 & 2
+# RUN_LEDGER.md — Diagnosis + Implementation: cli-os Control-Plane Bugs 1 & 2
 
-**Run type:** diagnosis-only (no code written).
+**Run type:** diagnosis (below), followed by implementation in the same session (see §7).
 **Date:** 2026-07-11.
 **Inputs:** two independent direct-code-reading diagnoses per bug, each adversarially verified by a second agent against the actual compiling source (build confirmed clean) and, for Bug 2, against the exact pinned dependency source (go-git v5.18.0 per `cli-os/go.mod`) plus two empirical reproductions (real `git` CLI and a throwaway Go test driving the real `gogitClient`).
-**Output:** this document — the authoritative handoff for the implementing agent (Opus). A prior stale draft at `cli-os/RUN_LEDGER.md` (produced on the wrong model, carrying Bug 2's since-refuted root cause) has been deleted.
+**Output:** this document was originally the authoritative diagnosis handoff; §7 records that the fixes described below were then implemented, adversarially reviewed a second time, and the review's confirmed findings fixed, all on this same branch. A prior stale draft at `cli-os/RUN_LEDGER.md` (produced on the wrong model, carrying Bug 2's since-refuted root cause) was deleted during the diagnosis pass.
 
 ---
 
@@ -254,3 +254,29 @@ No change needed in `dashboard.html`'s `mErr` (740-747): once the server only em
 10. Tests: gateway test proving tools are attached only when a repo is selected and are read-only (a `write_file` name in a model tool-call must be rejected); jail test (path traversal + symlink escape rejected); register/clone tests asserting `.l00prite/` exists afterward and existing files are never overwritten.
 
 **Both bugs:** finish with `go test -race ./...`, `node scripts/validate-l00prite.js` (0 FAIL), `node scripts/l00prite-doctor.js .` (HEALTHY); zero edits to `.claude/commands/build-loop.md` and `scripts/validate-l00prite.js`; feature branch + PR per Section 6 branch policy; append the implementation run to CLAUDE.md's Run Ledger.
+
+---
+
+## 7. Implementation record (same session, same branch)
+
+Both bugs were implemented per the checklist above, following this project's own Agent Operating Loop (CLAUDE.md §5: one file per iteration, build+test after each, per-file commits). Every commit's message states what was written and what was verified — see `git log` on this branch for the full per-file record; this section is a summary, not a duplicate of it.
+
+**Bug 2, implemented as specified:** `AutoCheckpoint` (tools.go) added beside `CommitUnit`; wired into `StartRun` (engine.go) immediately after `AcquireLock` and before `EnsureRunBranch` — the load-bearing ordering identified in §2.2, since a pre-flight-only checkpoint would not fix the bug; `checkGitReady` (preflight.go) changed to return `(blockers, notes)`, with a dirty tree becoming a Note instead of a Blocker; `humanizeStartError` (gateway/runs.go) added with a generic fallback, wired into `HandleRunStart`. New regression tests reproduce the exact original bug under the gogit backend (`TestGogitCheckoutFailsOnTrackedDirtyL00prite`) and prove the fix resolves it (`TestAutoCheckpointFixesGogitCheckout`), plus an end-to-end HTTP-level test forcing gogit through the real `/v1/runs/start` handler.
+
+**Bug 1, implemented as specified:** `chattools.go` (new) — a deliberately self-contained, read-only (`read_file`/`list_dir`/`search_files`) tool surface, explicitly not reusing `engine.Toolbox`, with its own symlink-safe path jail and a fixed secret-path deny list. `chatloop.go` (new) — `RunChatTools`, mirroring `RunBridge`'s bounded-loop shape, wired into `ingress.go`'s default (non-streaming, non-bridge) path only, with streaming/bridging deliberately deferred and documented. `repos.go`/`repos_clone.go` — auto-scaffold `.l00prite/` at link/clone time via the existing idempotent `engine.Files.Scaffold`. `dashboard.html` — copy updated to describe the new capability.
+
+**Adversarial review (same session):** three independent reviewers (Bug 2 correctness, Bug 1 security, integration correctness) examined the implemented diff, each finding independently re-verified by a second, skeptical pass, synthesized into a go/no-go verdict. Nine findings were CONFIRMED and are now fixed, each with its own regression test that was manually confirmed to fail against the pre-fix code:
+
+1. **Secret deny-list symlink-alias bypass** (`chattools.go`) — `readFile` now resolves the full symlink chain once and checks/reads via that same resolved path, instead of checking the caller-supplied alias name.
+2. **AutoCheckpoint had no Denylist/secret gate** (`tools.go`, `preflight.go`, `engine.go`, `l00pfiles.go`) — the most severe finding: the pre-run checkpoint was a second, ungoverned write path that would have silently committed a locally-dirty, already-tracked secret file. `AutoCheckpoint` now refuses (`ErrCheckpointRefused`) on a Denylist match or a secret-shaped filename; `checkGitReady` surfaces the same check as an early Blocker; the refusal lives in `AutoCheckpoint` itself (not just the advisory pre-flight) so it is race-proof against a file dirtied after pre-flight last ran.
+3. **Deny-list case-sensitivity and `.git`-depth gaps** (`chattools.go`) — matching is now case-insensitive, and any `.git` path segment at any depth is denied, not just a literal top-level `.git/config`.
+4. **Cross-round cost/usage silently dropped** (`chatloop.go`) — each tool-call round is a separately billed `runTurn` call; the response now accumulates cost/usage across all rounds (mirroring `RunBridge`), patching both the `TurnResult` fields and the response body's own `usage` object.
+5. **Raw git error text via pre-flight Blockers** (`preflight.go`) — the two hard-failure Blockers (`RevParseHead`/`StatusPorcelain` failures) no longer concatenate the raw error; this was explicitly called for in §2.2 above but missed in the first implementation pass.
+6. **Scaffold identity bug** (`repos.go`) — `Scaffold`'s project-identity argument is now the repo's own name (`filepath.Base`), not the gateway's multi-tenant project scope.
+7. **Client tool-name collision** (`chatloop.go`) — a client's own tool literally named `read_file`/`list_dir`/`search_files` is no longer silently hijacked; the gateway now excludes any colliding name from the set it attaches/intercepts.
+8. **Misleading test + coverage gap** (`runs_api_test.go`) — added `TestRunsAPIStartSucceedsOnGogitWithTrackedDirtyLock`, which forces the gogit backend and a pre-committed `.l00prite/lock.json` and drives the exact originally-diagnosed scenario through the real HTTP handlers; corrected the other test's overclaiming comment.
+9. **Dashboard discarded the backend's scaffold note** (`dashboard.html`) — `finishRegister` now surfaces `data.note` when present instead of always showing stale hardcoded copy.
+
+**Deliberately deferred (not blocking, recorded rather than silently dropped):** a run never checks the working tree back to a base branch when it ends, so a run started after a crashed/interrupted prior run against the same repo checkpoints and branches on top of that prior run's leftover commits — this predates the checkpoint feature (`EnsureRunBranch` already inherited "whatever HEAD is") and the correct fix (record and restore a base branch at Start/exit) is a design decision, not a patch; `list_dir`'s missing symlink filter (metadata-only disclosure — name/size of the link itself, never target content) was judged cosmetic. Both are worth a `.l00prite/todos.md` entry for a future pass.
+
+**Final verification:** `go build ./...`, `go test -race ./...` (all packages green), `node scripts/validate-l00prite.js` (519 PASS, 0 FAIL), zero edits to the two review-gated files (`.claude/commands/build-loop.md`, `scripts/validate-l00prite.js`) across the entire session. No pull request was opened — per this session's operating instructions, PRs are only created when explicitly requested.
