@@ -5,6 +5,11 @@
 //
 //	"/bridge <target> :: <task>"      -> emit ONE bridge tool_call, then finalize on the next turn
 //	"/bridgeloop <target> :: <task>"  -> emit a bridge tool_call on EVERY turn (drives the hop cap)
+//
+// Also drives the read-only chat-tool loop (RunChatTools, cli-os/internal/gateway/chatloop.go): a
+// last user message of "/chattool <name> <json-args>" emits ONE tool_call for that tool name/args
+// (only when the request actually offers it in "tools"), then finalizes on the next turn by
+// echoing the tool result content -- so a test can assert real file content made the round trip.
 package adapters
 
 import (
@@ -86,6 +91,44 @@ func mockBridgeDirective(req map[string]any) *mockDirective {
 	return &mockDirective{loop: m[1] == "bridgeloop", target: m[2], task: strings.TrimSpace(m[3])}
 }
 
+var chatToolNamesForTest = map[string]bool{"read_file": true, "list_dir": true, "search_files": true}
+
+func mockHasChatTool(req map[string]any) bool {
+	for _, t := range asArr(req["tools"]) {
+		if chatToolNamesForTest[asStr(asMap(asMap(t)["function"])["name"])] {
+			return true
+		}
+	}
+	return false
+}
+
+func mockHadChatToolCall(req map[string]any) bool {
+	for _, mm := range asArr(req["messages"]) {
+		m := asMap(mm)
+		if asStr(m["role"]) != "assistant" {
+			continue
+		}
+		for _, tc := range asArr(m["tool_calls"]) {
+			if chatToolNamesForTest[asStr(asMap(asMap(tc)["function"])["name"])] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var chatToolDirectiveRE = regexp.MustCompile(`^/chattool\s+(\S+)\s+([\s\S]+)$`)
+
+type mockChatToolDirective struct{ name, argsJSON string }
+
+func mockChatToolDirectiveFrom(req map[string]any) *mockChatToolDirective {
+	m := chatToolDirectiveRE.FindStringSubmatch(strings.TrimSpace(mockLastUserText(req)))
+	if m == nil {
+		return nil
+	}
+	return &mockChatToolDirective{name: m[1], argsJSON: m[2]}
+}
+
 // truncate caps s at n characters (runes), never splitting a multibyte rune — closer to JS
 // String.slice than a raw byte slice (which could emit invalid UTF-8).
 func truncate(s string, n int) string {
@@ -143,6 +186,37 @@ func (mockAdapter) DirectFull(req map[string]any, model string) FullResult {
 		}}}
 		u := mockUsage(promptChars, strings.Repeat("x", len(args)))
 		return FullResult{Response: oai.Response(oai.CmplID(), model, message, "tool_calls", u), Usage: u}
+	}
+
+	// Emit a chat-tool call when the request offers one and the last user message directs it,
+	// exactly once (until its result has been folded back in).
+	if mockHasChatTool(req) && !mockHasToolResult(req) {
+		if directive := mockChatToolDirectiveFrom(req); directive != nil {
+			cid := oai.CmplID()
+			callID := "call_" + cid[len(cid)-10:]
+			message := map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
+				"id": callID, "type": "function", "function": map[string]any{"name": directive.name, "arguments": directive.argsJSON},
+			}}}
+			u := mockUsage(promptChars, directive.argsJSON)
+			return FullResult{Response: oai.Response(oai.CmplID(), model, message, "tool_calls", u), Usage: u}
+		}
+	}
+
+	// Finalization turn after a chat-tool round trip: echo the tool result content back so a test
+	// can assert the real file/dir/search content made it into the model's context.
+	if mockHasToolResult(req) && mockHadChatToolCall(req) && !mockHadBridgeCall(req) {
+		var excerpt string
+		msgs := asArr(req["messages"])
+		for i := len(msgs) - 1; i >= 0; i-- {
+			m := asMap(msgs[i])
+			if asStr(m["role"]) == "tool" {
+				excerpt = truncate(collapseSpaces(asStr(m["content"])), 400)
+				break
+			}
+		}
+		text := "Mock final answer using the chat-tool result: " + excerpt
+		u := mockUsage(promptChars, text)
+		return FullResult{Response: oai.Response(oai.CmplID(), model, map[string]any{"role": "assistant", "content": text}, "stop", u), Usage: u}
 	}
 
 	// Finalization turn: incorporate the delegate result(s) — ONLY when this conversation actually
