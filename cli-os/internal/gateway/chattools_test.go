@@ -113,6 +113,65 @@ func TestChatToolboxDeniesSecretPaths(t *testing.T) {
 	}
 }
 
+// Regression test for an adversarial-review finding: a symlink INSIDE the repo root, given an
+// innocuous name, must not be able to alias a denied secret file -- the deny check has to key off
+// the RESOLVED target, not the caller-supplied name, or the read follows the symlink straight
+// through the check.
+func TestChatToolboxDeniesSecretPathsViaSymlinkAlias(t *testing.T) {
+	root := t.TempDir()
+	writeChatFixture(t, root, ".env", "API_KEY=super-secret\n")
+	if err := os.Symlink(filepath.Join(root, ".env"), filepath.Join(root, "totally_fine_notes.md")); err != nil {
+		t.Skipf("symlinks not supported in this environment: %v", err)
+	}
+	tb := chatToolbox{Root: root}
+	out := tb.readFile(map[string]any{"path": "totally_fine_notes.md"})
+	if strings.Contains(out, "super-secret") {
+		t.Fatalf("a symlink alias to a secret file must not leak its content, got: %q", out)
+	}
+	if !strings.HasPrefix(out, "DENIED:") {
+		t.Fatalf("expected the resolved target to be denied as a secret path, got: %q", out)
+	}
+}
+
+// Deny-list matching must be case-insensitive (a filesystem that preserves case, e.g. a
+// case-sensitive Linux host, would otherwise let ".ENV" or "ID_RSA" slip through the exact-case
+// pattern list).
+func TestChatToolboxDeniesSecretPathsCaseInsensitive(t *testing.T) {
+	root := t.TempDir()
+	writeChatFixture(t, root, ".ENV", "API_KEY=super-secret\n")
+	tb := chatToolbox{Root: root}
+	out := tb.readFile(map[string]any{"path": ".ENV"})
+	if strings.Contains(out, "super-secret") {
+		t.Fatalf(".ENV (differently-cased) leaked secret content: %q", out)
+	}
+	if !strings.HasPrefix(out, "DENIED:") {
+		t.Fatalf("expected .ENV to be denied case-insensitively, got: %q", out)
+	}
+}
+
+// A nested/vendored .git directory (e.g. a submodule or vendored checkout) must be denied at any
+// depth, not just a literal top-level ".git/config" -- filepath.Match never spans path
+// separators, so a plain "*.git/config" glob only ever matches the top-level case.
+func TestChatToolboxDeniesNestedDotGit(t *testing.T) {
+	root := t.TempDir()
+	writeChatFixture(t, root, "vendor/lib/.git/config", "[credential]\n\thelper = store --file=/secret/creds\n")
+	writeChatFixture(t, root, ".git/config", "top-level config\n")
+	tb := chatToolbox{Root: root}
+
+	nested := tb.readFile(map[string]any{"path": "vendor/lib/.git/config"})
+	if strings.Contains(nested, "secret/creds") {
+		t.Fatalf("nested .git/config leaked content: %q", nested)
+	}
+	if !strings.HasPrefix(nested, "DENIED:") {
+		t.Fatalf("expected a nested .git/config to be denied, got: %q", nested)
+	}
+
+	topLevel := tb.readFile(map[string]any{"path": ".git/config"})
+	if !strings.HasPrefix(topLevel, "DENIED:") {
+		t.Fatalf("expected the literal top-level .git/config to still be denied, got: %q", topLevel)
+	}
+}
+
 // ---- read_file / list_dir / search_files behavior ----
 
 func TestChatToolboxReadFileWindowing(t *testing.T) {
