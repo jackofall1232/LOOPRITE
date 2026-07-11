@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -501,7 +502,7 @@ func TestAutoCheckpointFixesGogitCheckout(t *testing.T) {
 	dir := setupTrackedDirtyL00prite(t)
 	gogit := gitx.NewGogitClient()
 
-	hash, err := AutoCheckpoint(gogit, dir, "repro")
+	hash, err := AutoCheckpoint(gogit, dir, "repro", nil)
 	if err != nil {
 		t.Fatalf("AutoCheckpoint: %v", err)
 	}
@@ -518,13 +519,75 @@ func TestAutoCheckpointFixesGogitCheckout(t *testing.T) {
 
 	// AutoCheckpoint on an already-clean tree is a no-op (both gitx Commit contracts treat
 	// "nothing to commit" as success) -- never a duplicate/empty commit.
-	hash2, err := AutoCheckpoint(gogit, dir, "repro")
+	hash2, err := AutoCheckpoint(gogit, dir, "repro", nil)
 	if err != nil {
 		t.Fatalf("AutoCheckpoint on a clean tree: %v", err)
 	}
 	if hash2 != "" {
 		t.Fatalf("expected no-op on a clean tree, got a new commit hash %q", hash2)
 	}
+}
+
+// A dirty path that matches the project's Denylist, or looks like it may hold credentials, must
+// never be silently committed by AutoCheckpoint (adversarial-review finding: the pre-run
+// checkpoint was a second, ungoverned write path that bypassed the same protection write_file
+// goes through mid-run). Nothing is committed when refused.
+func TestAutoCheckpointRefusesDenylistedAndSecretPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	git := gitx.Detect()
+
+	t.Run("Denylist match", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "init")
+		writeFileRaw(t, filepath.Join(dir, "prod.config.js"), "module.exports = {}\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "add config")
+		writeFileRaw(t, filepath.Join(dir, "prod.config.js"), "module.exports = { changed: true }\n")
+
+		hash, err := AutoCheckpoint(git, dir, "repro", []string{"prod.config.js"})
+		if !errors.Is(err, ErrCheckpointRefused) {
+			t.Fatalf("expected ErrCheckpointRefused, got hash=%q err=%v", hash, err)
+		}
+		if out := strings.TrimSpace(gitRun(t, dir, "status", "--porcelain")); out == "" {
+			t.Fatal("the denylisted file must remain uncommitted after a refused checkpoint")
+		}
+	})
+
+	t.Run("secret-shaped path, no Denylist entry needed", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "init")
+		writeFileRaw(t, filepath.Join(dir, ".env"), "API_KEY=one\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "add env")
+		writeFileRaw(t, filepath.Join(dir, ".env"), "API_KEY=two\n")
+
+		hash, err := AutoCheckpoint(git, dir, "repro", nil) // empty Denylist -- secret pattern alone must still refuse
+		if !errors.Is(err, ErrCheckpointRefused) {
+			t.Fatalf("expected ErrCheckpointRefused for a secret-shaped path even with no Denylist entry, got hash=%q err=%v", hash, err)
+		}
+	})
+
+	t.Run("non-matching dirty file still checkpoints normally", func(t *testing.T) {
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+		gitRun(t, dir, "add", "-A")
+		gitRun(t, dir, "commit", "-m", "init")
+		writeFileRaw(t, filepath.Join(dir, "notes.txt"), "unrelated work\n")
+
+		hash, err := AutoCheckpoint(git, dir, "repro", []string{"prod.config.js"})
+		if err != nil || hash == "" {
+			t.Fatalf("expected a normal checkpoint for a non-matching file, got hash=%q err=%v", hash, err)
+		}
+	})
 }
 
 // ---- caps ----
