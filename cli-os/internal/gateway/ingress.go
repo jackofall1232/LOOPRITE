@@ -47,7 +47,9 @@ func sendJSON(w http.ResponseWriter, status int, obj any) {
 	w.Write(b)
 }
 
-func oaiError(w http.ResponseWriter, status int, message, typ, code string) {
+// extra is optional, additive top-level fields merged into the error body (e.g.
+// l00prite_proposed_runs) -- variadic so every existing 5-arg call site is unaffected.
+func oaiError(w http.ResponseWriter, status int, message, typ, code string, extra ...map[string]any) {
 	if typ == "" {
 		typ = "invalid_request_error"
 	}
@@ -55,7 +57,13 @@ func oaiError(w http.ResponseWriter, status int, message, typ, code string) {
 	if code != "" {
 		codeVal = code
 	}
-	sendJSON(w, status, map[string]any{"error": map[string]any{"message": message, "type": typ, "code": codeVal, "param": nil}})
+	body := map[string]any{"error": map[string]any{"message": message, "type": typ, "code": codeVal, "param": nil}}
+	for _, e := range extra {
+		for k, v := range e {
+			body[k] = v
+		}
+	}
+	sendJSON(w, status, body)
 }
 
 var bearerRE = regexp.MustCompile(`(?i)^Bearer\s+(.+)$`)
@@ -343,7 +351,14 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		if turn.Denial.Reason == "cost_cap" {
 			msg = fmt.Sprintf("Daily budget reached ($%.4f of $%.2f). Raise or change it in the dashboard (Costs → Set budget), or wait for the UTC-day reset.", turn.Denial.Spent, turn.Denial.Cap)
 		}
-		oaiError(w, 402, msg, "insufficient_quota", firstNonEmpty(turn.Denial.Code, turn.Denial.Reason))
+		// A run drafted by propose_run in an earlier round of THIS turn is a real, persisted side
+		// effect even when a later round's own reservation is denied -- surface it here too, not
+		// only on a successful reply (Codex review, PR #8).
+		extra := map[string]any{}
+		if len(turn.Denial.ProposedRuns) > 0 {
+			extra["l00prite_proposed_runs"] = turn.Denial.ProposedRuns
+		}
+		oaiError(w, 402, msg, "insufficient_quota", firstNonEmpty(turn.Denial.Code, turn.Denial.Reason), extra)
 		return
 	}
 	w.Header().Set("x-l00prite-provider", turn.Route.Provider)

@@ -430,17 +430,29 @@ func (app *App) deriveAlerts(providers []ProviderRow, spendByProject []any, stal
 		committed, _ := p["committed_usd"].(float64)
 		reserved, _ := p["reserved_usd"].(float64)
 		used := committed + reserved
+		project := asStr(p["project"])
+		if op, _ := p["overage_pct"].(float64); op > 0 && cap > 0 {
+			// Overage-enabled project: alert as soon as the BASE limit is crossed, independent of
+			// the 80%-of-effective-ceiling threshold below — the dashboard's own budget modal
+			// promises "you'll see an alert the moment you cross the base limit" (dashboard.html's
+			// "Allow up to 100% over" copy), which a gate keyed on 80% of the DOUBLED effective
+			// ceiling would otherwise miss entirely for the first 60 points of overage.
+			switch {
+			case used >= eff:
+				add("error", "Project \""+project+"\" has reached its hard stop, including the allowed overage.")
+			case used >= cap:
+				pct := int(used / eff * 100)
+				add("warn", "Project \""+project+"\" is past its base budget and running in the allowed overage ("+strconv.Itoa(pct)+"% of the hard stop).")
+			}
+			continue
+		}
 		if eff > 0 && used >= eff*0.8 {
 			pct := int(used / eff * 100)
 			lvl := "warn"
 			if used >= eff {
 				lvl = "error"
 			}
-			msg := "Daily budget " + strconv.Itoa(pct) + "% used on project \"" + asStr(p["project"]) + "\"."
-			if op, _ := p["overage_pct"].(float64); op > 0 && used >= cap {
-				msg = "Project \"" + asStr(p["project"]) + "\" is past its base budget and running in the allowed overage (" + strconv.Itoa(pct) + "% of the hard stop)."
-			}
-			add(lvl, msg)
+			add(lvl, "Daily budget "+strconv.Itoa(pct)+"% used on project \""+project+"\".")
 		}
 	}
 	if staleRepos > 0 {

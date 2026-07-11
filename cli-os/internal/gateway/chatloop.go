@@ -146,7 +146,14 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 		if !turn.OK {
 			// A denial carries no cost of its own (runTurn denies before billing); any cost
 			// already accumulated from earlier rounds in THIS loop was real, but the denial
-			// response itself is an error the caller doesn't read Cost/Usage from -- return as-is.
+			// response itself is an error the caller doesn't read Cost/Usage from -- return as-is,
+			// EXCEPT any run(s) already drafted by propose_run in an earlier round of this same
+			// turn (Codex review, PR #8): that draft is a real, persisted DB row regardless of
+			// whether this later round's reservation succeeds, so it must still be surfaced to the
+			// client instead of silently vanishing behind the denial.
+			if len(proposed) > 0 && turn.Denial != nil {
+				turn.Denial.ProposedRuns = proposed
+			}
 			return turn, nil
 		}
 		accumulate(turn)

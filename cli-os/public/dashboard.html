@@ -1678,6 +1678,13 @@
     if(gen!==chatGen) return; // conversation was cleared while in flight — a stale reply would poison the new one
     if(!res || !res.ok){
       chat.push({role:"error",content:mErr(data, res?("The request failed (HTTP "+res.status+").") : "Network error — is the gateway reachable?")});
+      // A run can be genuinely drafted in an earlier round of the same turn even when a LATER
+      // round's own reservation is denied (e.g. the budget covers the tool-call round but not the
+      // summarizing round) — the draft must not go invisible just because the reply came back as
+      // an error (Codex review, PR #8).
+      const deniedProposed=Array.isArray(data&&data.l00prite_proposed_runs)?data.l00prite_proposed_runs:[];
+      deniedProposed.forEach(r=>chat.push({role:"run",run:r}));
+      if(deniedProposed.length) loadRuns();
       renderChat(); return;
     }
     const msg=(data&&data.choices&&data.choices[0]&&data.choices[0].message)||{};
