@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -416,16 +417,18 @@ var secretDenyPatterns = []string{
 // isSecretLikePath reports whether rel (repo-relative) matches the secret deny list above, or
 // contains a ".git" path segment at any depth (a nested/vendored/submodule .git directory can
 // carry real credentials). Matching is case-insensitive against both the base name and the full
-// path.
+// path. rel always comes from `git status --porcelain` (dirtyPathsOutsideL00prite), which is
+// always forward-slash regardless of host OS -- path.Base/path.Match (not filepath's, which is
+// platform-dependent) are the semantically correct match for an already-forward-slash value.
 func isSecretLikePath(rel string) bool {
 	lowerRel := strings.ToLower(rel)
-	lowerBase := strings.ToLower(filepath.Base(rel))
+	lowerBase := strings.ToLower(path.Base(rel))
 	for _, pat := range secretDenyPatterns {
 		lowerPat := strings.ToLower(pat)
-		if ok, _ := filepath.Match(lowerPat, lowerBase); ok {
+		if ok, _ := path.Match(lowerPat, lowerBase); ok {
 			return true
 		}
-		if ok, _ := filepath.Match(lowerPat, lowerRel); ok {
+		if ok, _ := path.Match(lowerPat, lowerRel); ok {
 			return true
 		}
 	}
