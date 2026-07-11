@@ -382,3 +382,84 @@ func TestRunsAPIProjectScoped(t *testing.T) {
 		t.Fatalf("unknown run must be 404, got %d", resp.StatusCode)
 	}
 }
+
+// TestRunsAPIListRespectsRepoScope pins a Codex review finding on PR #7: HandleRunList filtered
+// only by principal.Project, never by principal.Repo, so a token scoped to one repo (the same
+// scope run creation and chat already enforce via repoRootForToken) could see run ids, goals,
+// statuses, and costs for every OTHER repo in the same project through /v1/runs/list. A
+// project-scoped (unscoped) token must still see everything.
+func TestRunsAPIListRespectsRepoScope(t *testing.T) {
+	srv, projectToken, _ := runEngineServer(t)
+
+	// A second repo in the same project ("ops"), registered directly against the DB exactly like
+	// runEngineServer's own r1 setup.
+	repo2 := t.TempDir()
+	for _, a := range [][]string{{"init", "-q"}, {"config", "user.email", "t@e.com"}, {"config", "user.name", "t"}, {"config", "commit.gpgsign", "false"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo2}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", a, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo2, "README.md"), []byte("# r2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repo2, "add", "-A").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo2, "commit", "-q", "-m", "init").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
+	// Register repo2 the same way the dashboard would, through the authenticated repo-register
+	// endpoint (runEngineServer only hands back the minted project token, not the underlying
+	// *sql.DB).
+	if resp, body := doJSON(t, "POST", srv.URL+"/v1/repos", projectToken, map[string]any{"id": "r2", "root": repo2}); resp.StatusCode != 200 {
+		t.Fatalf("register r2: %d %v", resp.StatusCode, body)
+	}
+
+	// One run against each repo, both under the same project-scoped token.
+	_, b1 := doJSON(t, "POST", srv.URL+"/v1/runs", projectToken, map[string]any{
+		"repo": "r1", "goal": "x", "command_allowlist": []string{"true"},
+	})
+	run1ID := b1["run"].(map[string]any)["id"].(string)
+	_, b2 := doJSON(t, "POST", srv.URL+"/v1/runs", projectToken, map[string]any{
+		"repo": "r2", "goal": "y", "command_allowlist": []string{"true"},
+	})
+	run2ID := b2["run"].(map[string]any)["id"].(string)
+
+	// A token scoped to r1 only. LOOPRITE_HOME is still set from runEngineServer's t.Setenv call
+	// (it only unwinds at THIS test's cleanup), so config.Load()+state.Open reconnects to the exact
+	// same sqlite file the running server is using, the same way runEngineServer's own setup does.
+	cfg := config.Load()
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopedRepo := "r1"
+	_, scopedToken, err := security.MintToken(db, "ops", &scopedRepo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, listBody := doJSON(t, "GET", srv.URL+"/v1/runs/list", scopedToken, nil)
+	runs, _ := listBody["runs"].([]any)
+	seen := map[string]bool{}
+	for _, r := range runs {
+		seen[r.(map[string]any)["id"].(string)] = true
+	}
+	if !seen[run1ID] {
+		t.Fatalf("r1-scoped token should see its own repo's run %s, got %v", run1ID, runs)
+	}
+	if seen[run2ID] {
+		t.Fatalf("r1-scoped token must NOT see r2's run %s, but it did: %v", run2ID, runs)
+	}
+
+	// The unscoped project token still sees both.
+	_, allBody := doJSON(t, "GET", srv.URL+"/v1/runs/list", projectToken, nil)
+	allRuns, _ := allBody["runs"].([]any)
+	allSeen := map[string]bool{}
+	for _, r := range allRuns {
+		allSeen[r.(map[string]any)["id"].(string)] = true
+	}
+	if !allSeen[run1ID] || !allSeen[run2ID] {
+		t.Fatalf("the unscoped project token should see both runs, got %v", allRuns)
+	}
+}

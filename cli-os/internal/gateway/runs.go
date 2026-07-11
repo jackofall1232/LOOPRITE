@@ -250,8 +250,18 @@ func (app *App) HandleRunList(w http.ResponseWriter, r *http.Request) {
 		oaiError(w, 500, "Failed to list runs: "+err.Error(), "api_error", "")
 		return
 	}
+	// A repo-scoped token (principal.Repo != "") must only ever see its own repo's runs -- run
+	// creation and chat already enforce this scope (repoRootForToken), but this list endpoint used
+	// to return every run in the whole project regardless, leaking other repos' run ids, goals,
+	// statuses, and costs to a token that was never granted access to them (Codex review, PR #7).
+	// Note: the 50-run cap is applied by ListRuns BEFORE this filter, so a repo-scoped token in a
+	// busy multi-repo project could see fewer than 50 of its own runs if others crowd the page --
+	// an under-return, not an over-exposure; a repo-filtered query would need a new Store method.
 	views := make([]any, 0, len(runs))
 	for _, run := range runs {
+		if principal.Repo != "" && run.Config.RepoID != principal.Repo {
+			continue
+		}
 		views = append(views, runView(run))
 	}
 	sendJSON(w, 200, map[string]any{"runs": views})
