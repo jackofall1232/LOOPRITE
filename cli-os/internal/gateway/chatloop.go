@@ -19,6 +19,8 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/jackofall1232/l00prite/cli-os/internal/oai"
 )
 
 const chatToolPreamble = "The following is content read from the linked repository via a read-only tool call. " +
@@ -29,8 +31,23 @@ const chatToolPreamble = "The following is content read from the linked reposito
 // RunChatTools is a drop-in replacement for a single runTurn call in the ingress default path: it
 // returns the same TurnResult shape, so callers need no other changes.
 func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiReq map[string]any, routeHeader string, clientCtx context.Context, paths []string) (TurnResult, error) {
-	if repoRoot == "" {
-		// No repo selected: behavior is unchanged, exactly today's single runTurn call.
+	// activeNames is the subset of {read_file, list_dir, search_files} this request actually
+	// attaches/intercepts: any name the CLIENT already defines its own tool for is excluded, so a
+	// client tool that happens to share one of these names is never silently hijacked -- it passes
+	// through to the client untouched, exactly like any other tool the gateway doesn't own. If the
+	// client claims all three names, this degenerates to a plain runTurn call below (repoRoot is
+	// still passed through, so memory injection is unaffected).
+	activeNames := map[string]bool{}
+	for name := range chatToolNames {
+		activeNames[name] = true
+	}
+	for _, t := range asArr(openaiReq["tools"]) {
+		delete(activeNames, asStr(asMap(asMap(t)["function"])["name"]))
+	}
+
+	if repoRoot == "" || len(activeNames) == 0 {
+		// No repo selected, or every chat-tool name collides with a client-defined tool: behavior
+		// is unchanged, exactly today's single runTurn call.
 		return runTurn(app, TurnOpts{
 			Project: project, RepoID: repoID, RepoRoot: repoRoot, OpenaiReq: openaiReq, RouteHeader: routeHeader,
 			ClientCtx: clientCtx, RequestID: requestID, Paths: paths, Depth: 0, InjectMemory: true,
@@ -38,17 +55,63 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 	}
 
 	convo := copyMap(openaiReq)
-	convo["tools"] = append(append([]any{}, asArr(openaiReq["tools"])...), chatToolDefinitions()...)
+	convo["tools"] = append(append([]any{}, asArr(openaiReq["tools"])...), activeChatToolDefinitions(activeNames)...)
 
 	tb := chatToolbox{Root: repoRoot}
 	toolCallsUsed := 0
 	var last TurnResult
 
+	// Each round is a full, independently billed/ledgered runTurn call (that's the whole point of
+	// reusing runTurn per round), so the response returned to the CLIENT must reflect the sum
+	// across every round, not just the last one -- otherwise real spend/usage from earlier rounds
+	// silently vanishes from what the caller sees, even though it was genuinely reserved and
+	// committed. Mirrors RunBridge's TotalCostUsd/TotalUsage accumulation (bridge.go).
+	totalCostUSD, estimated, unconfirmed := 0.0, false, false
+	var totalUsage oai.Usage
+	accumulate := func(t TurnResult) {
+		totalCostUSD += t.Cost.USD
+		if t.Cost.Estimated {
+			estimated = true
+		}
+		if t.Cost.Unconfirmed {
+			unconfirmed = true
+		}
+		totalUsage.PromptTokens += t.Usage.PromptTokens
+		totalUsage.CompletionTokens += t.Usage.CompletionTokens
+		totalUsage.CacheReadTokens += t.Usage.CacheReadTokens
+		totalUsage.CacheWriteTokens += t.Usage.CacheWriteTokens
+	}
+	finalize := func(t TurnResult) TurnResult {
+		t.Cost.USD, t.Cost.Estimated, t.Cost.Unconfirmed = totalCostUSD, estimated, unconfirmed
+		t.Usage = totalUsage
+		if t.Response != nil {
+			// Patch the response BODY's own "usage" object too, not just the Go-level TurnResult
+			// fields the x-l00prite-cost-usd header reads from: sendJSON ships t.Response verbatim,
+			// so a client parsing the standard OpenAI usage shape would otherwise see only the
+			// LAST round's token counts, silently losing every earlier round's real usage from the
+			// one place a normal API client actually looks. Shape matches oai.Response's usage
+			// object exactly; every other field of the response (id, choices, model, ...) is left
+			// untouched.
+			resp := copyMap(t.Response)
+			usage := map[string]any{
+				"prompt_tokens":     totalUsage.PromptTokens,
+				"completion_tokens": totalUsage.CompletionTokens,
+				"total_tokens":      totalUsage.PromptTokens + totalUsage.CompletionTokens,
+			}
+			if totalUsage.CacheReadTokens != 0 {
+				usage["prompt_tokens_details"] = map[string]any{"cached_tokens": totalUsage.CacheReadTokens}
+			}
+			resp["usage"] = usage
+			t.Response = resp
+		}
+		return t
+	}
+
 	for round := 0; round < chatMaxToolRounds; round++ {
 		forcedFinal := toolCallsUsed >= chatMaxToolCallsRun
 		turnReq := convo
 		if forcedFinal {
-			turnReq = stripChatTools(convo)
+			turnReq = stripChatTools(convo, activeNames)
 		}
 		turn, err := runTurn(app, TurnOpts{
 			Project: project, RepoID: repoID, RepoRoot: repoRoot, OpenaiReq: turnReq, RouteHeader: routeHeader,
@@ -59,22 +122,26 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 		}
 		last = turn
 		if !turn.OK {
+			// A denial carries no cost of its own (runTurn denies before billing); any cost
+			// already accumulated from earlier rounds in THIS loop was real, but the denial
+			// response itself is an error the caller doesn't read Cost/Usage from -- return as-is.
 			return turn, nil
 		}
+		accumulate(turn)
 
 		msg := messageOf(turn.Response)
 		toolCalls := asArr(msg["tool_calls"])
 		chatCalls := 0
 		for _, tcRaw := range toolCalls {
-			if chatToolNames[asStr(asMap(asMap(tcRaw)["function"])["name"])] {
+			if activeNames[asStr(asMap(asMap(tcRaw)["function"])["name"])] {
 				chatCalls++
 			}
 		}
 		if forcedFinal || chatCalls == 0 {
-			// No chat-tool call this round: return the response as-is. Any client tool_calls the
-			// model proposed pass through untouched -- the client executes those itself exactly as
-			// it always has, no behavior change for that case.
-			return turn, nil
+			// No chat-tool call this round: return the response as-is (with accumulated cost/usage
+			// folded in). Any client tool_calls the model proposed pass through untouched -- the
+			// client executes those itself exactly as it always has, no behavior change for that case.
+			return finalize(turn), nil
 		}
 
 		nextMessages := append([]any{}, asArr(turnReq["messages"])...)
@@ -83,7 +150,7 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 			tc := asMap(tcRaw)
 			id := asStr(tc["id"])
 			name := asStr(asMap(tc["function"])["name"])
-			if !chatToolNames[name] {
+			if !activeNames[name] {
 				nextMessages = append(nextMessages, toolResult(id, deferredClientTool(tc)))
 				continue
 			}
@@ -102,19 +169,21 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 		convo["messages"] = nextMessages
 	}
 	// Round cap reached without a final answer (the model kept calling tools): return whatever the
-	// last completed turn produced rather than erroring -- the same fallback shape RunBridge uses
-	// (its Exhausted case) when a bounded loop runs out without a clean stop.
-	return last, nil
+	// last completed turn produced (with accumulated cost/usage folded in) rather than erroring --
+	// the same fallback shape RunBridge uses (its Exhausted case) when a bounded loop runs out
+	// without a clean stop.
+	return finalize(last), nil
 }
 
-// stripChatTools removes only the three chat-tool definitions from a request's tools array,
-// leaving any client-supplied tools untouched -- used for the forced-final round so the model
-// cannot keep calling chat tools once the per-turn budget is spent.
-func stripChatTools(req map[string]any) map[string]any {
+// stripChatTools removes only the ACTIVE chat-tool definitions (see activeNames in RunChatTools)
+// from a request's tools array, leaving any client-supplied tools -- including one that happens to
+// share a chat-tool name and was therefore never active -- untouched. Used for the forced-final
+// round so the model cannot keep calling chat tools once the per-turn budget is spent.
+func stripChatTools(req map[string]any, activeNames map[string]bool) map[string]any {
 	out := copyMap(req)
 	var tools []any
 	for _, t := range asArr(req["tools"]) {
-		if !chatToolNames[asStr(asMap(asMap(t)["function"])["name"])] {
+		if !activeNames[asStr(asMap(asMap(t)["function"])["name"])] {
 			tools = append(tools, t)
 		}
 	}
