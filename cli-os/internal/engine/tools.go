@@ -914,7 +914,23 @@ func CommitUnit(git gitx.Client, root, message string) (string, error) {
 	if err := git.AddAll(root); err != nil {
 		return "", err
 	}
-	return git.Commit(root, message)
+	hash, err := git.Commit(root, message)
+	if err != nil {
+		// A commit failure for any reason other than "nothing to commit" or a missing identity
+		// (both already handled inside Commit itself) leaves AddAll's staging in place with no
+		// commit to show for it — a surprising git state for whoever looks at this repo next (e.g. a
+		// hook rejection, a full disk). Best-effort undo it via a plain `git reset` so a failed
+		// checkpoint/unit commit doesn't also leave the index dirtied in a way the working tree
+		// itself never was. Only meaningful under the exec backend: gogit's Raw is unconditionally
+		// unsupported (see gitx.Client's doc comment), so this is a silent no-op there rather than a
+		// gap this call can close without a broader Client interface change. The reset's own error is
+		// deliberately ignored — a failed best-effort cleanup must never mask the real commit error.
+		cctx, cancel := context.WithTimeout(context.Background(), gitTimeoutSec*time.Second)
+		_, _ = git.Raw(cctx, root, "reset")
+		cancel()
+		return "", err
+	}
+	return hash, nil
 }
 
 // AutoCheckpoint commits ALL dirty paths — the user's own uncommitted work and .l00prite/ alike —

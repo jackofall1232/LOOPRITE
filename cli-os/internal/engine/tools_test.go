@@ -443,6 +443,44 @@ func TestBranchAndCommit(t *testing.T) {
 	}
 }
 
+// TestCommitUnitResetsIndexOnFailedCommit pins a PR #6 review finding: CommitUnit's AddAll
+// (`git add -A`) stages everything before Commit runs, but a Commit failure for any reason other
+// than "nothing to commit" or a missing identity (both already handled inside Commit itself) --
+// e.g. a rejecting pre-commit hook, a full disk -- used to leave that staging in place with no
+// commit to show for it, a surprising git state for whoever looks at the repo next. Only the exec
+// backend can be proven here: it's the only implementation with a working Raw() passthrough to
+// issue the best-effort `git reset` (gogit's Raw is unconditionally unsupported).
+func TestCommitUnitResetsIndexOnFailedCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "init")
+
+	hookPath := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	writeFileRaw(t, hookPath, "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(hookPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileRaw(t, filepath.Join(dir, "new.txt"), "x\n")
+
+	hash, err := CommitUnit(gitx.Detect(), dir, "should be rejected by the hook")
+	if err == nil {
+		t.Fatalf("expected the pre-commit hook to reject the commit, got hash=%q", hash)
+	}
+
+	status := gitRun(t, dir, "status", "--porcelain")
+	if strings.Contains(status, "A  new.txt") {
+		t.Fatalf("expected new.txt to be unstaged (reset) after the failed commit, got status: %q", status)
+	}
+	if !strings.Contains(status, "?? new.txt") {
+		t.Fatalf("expected new.txt to still be present as untracked after the reset, got status: %q", status)
+	}
+}
+
 // ---- AutoCheckpoint (Bug 2 regression: raw "worktree contains unstaged changes" on Start) ----
 
 // setupTrackedDirtyL00prite builds a repo whose .l00prite/lock.json is already git-tracked — as if
