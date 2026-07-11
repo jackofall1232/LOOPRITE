@@ -61,7 +61,12 @@ public class GatewayService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         startForegroundNotification();
-        if (monitorThread == null) {
+        // isAlive(), not just a null check: runAndSupervise() itself returns (leaving a dead,
+        // non-null Thread object behind) when the launch fails outright or the rapid-crash limit is
+        // hit -- a later onStartCommand (e.g. reopening the app) would otherwise see a non-null
+        // monitorThread forever and never restart the gateway again until the whole service process
+        // is killed (Codex review, PR #7).
+        if (monitorThread == null || !monitorThread.isAlive()) {
             monitorThread = new Thread(new Runnable() {
                 @Override
                 public void run() {

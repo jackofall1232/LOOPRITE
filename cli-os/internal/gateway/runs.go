@@ -181,15 +181,42 @@ func (app *App) HandleRunStart(w http.ResponseWriter, r *http.Request) {
 	confirmedBy := principal.TokenID
 	if err := app.Engine.StartRun(r.Context(), run.ID, confirmedBy, body.Confirm); err != nil {
 		status, code := 400, "start_rejected"
-		if errors.Is(err, engine.ErrBadState) {
+		switch {
+		case errors.Is(err, engine.ErrCheckpointRefused):
+			status, code = 409, "checkpoint_refused"
+		case errors.Is(err, engine.ErrCheckpointFailed):
+			status, code = 409, "checkpoint_failed"
+		case errors.Is(err, engine.ErrBadState):
 			status, code = 409, "run_not_ready"
 		}
-		oaiError(w, status, "Could not start run: "+err.Error(), "invalid_request_error", code)
+		// The full technical error (which can include raw git/go-git text, e.g. from a failed
+		// checkout) goes to the audit log only — never to the client. See humanizeStartError.
+		app.auditAs(principal, "run.start.error", err.Error())
+		oaiError(w, status, humanizeStartError(err), "invalid_request_error", code)
 		return
 	}
 	app.auditAs(principal, "run.start", run.ID)
 	updated, _ := app.Engine.Store.GetRun(run.ID)
 	sendJSON(w, 200, map[string]any{"run": runView(updated), "started": true})
+}
+
+// humanizeStartError translates a StartRun failure into a plain-English message safe to show a
+// non-technical user. It deliberately has a generic fallback for any error class it does not
+// specifically recognize, so an unanticipated git/go-git failure (a corrupted repo, a mid-rebase
+// state, a permissions error) can never leak raw technical text to the dashboard the way a raw
+// "worktree contains unstaged changes" checkout error once did. The full error is always logged
+// separately by the caller via auditAs before this function is called.
+func humanizeStartError(err error) string {
+	switch {
+	case errors.Is(err, engine.ErrCheckpointRefused):
+		return "Some of your unsaved changes look sensitive (they match your project's Denylist, or look like they might contain a credential or key), so l00prite won't save them automatically. Review and commit or discard them yourself, then try Start again."
+	case errors.Is(err, engine.ErrCheckpointFailed):
+		return "l00prite tried to save your unsaved changes before starting, but the save failed. Nothing was changed and the run was not started. Details were logged for support."
+	case errors.Is(err, engine.ErrBadState):
+		return `This run can't start right now — the project isn't in a startable state. Try "Rebuild pre-flight"; if that doesn't help, details were logged for support.`
+	default:
+		return "Something went wrong preparing the project for this run. Nothing was started. Details were logged for support."
+	}
 }
 
 // HandleRunGet is GET /v1/runs/get?id= — run detail + pending approvals + latest pre-flight.
@@ -223,8 +250,18 @@ func (app *App) HandleRunList(w http.ResponseWriter, r *http.Request) {
 		oaiError(w, 500, "Failed to list runs: "+err.Error(), "api_error", "")
 		return
 	}
+	// A repo-scoped token (principal.Repo != "") must only ever see its own repo's runs -- run
+	// creation and chat already enforce this scope (repoRootForToken), but this list endpoint used
+	// to return every run in the whole project regardless, leaking other repos' run ids, goals,
+	// statuses, and costs to a token that was never granted access to them (Codex review, PR #7).
+	// Note: the 50-run cap is applied by ListRuns BEFORE this filter, so a repo-scoped token in a
+	// busy multi-repo project could see fewer than 50 of its own runs if others crowd the page --
+	// an under-return, not an over-exposure; a repo-filtered query would need a new Store method.
 	views := make([]any, 0, len(runs))
 	for _, run := range runs {
+		if principal.Repo != "" && run.Config.RepoID != principal.Repo {
+			continue
+		}
 		views = append(views, runView(run))
 	}
 	sendJSON(w, 200, map[string]any{"runs": views})

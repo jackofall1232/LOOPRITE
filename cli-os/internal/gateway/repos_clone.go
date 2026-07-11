@@ -30,7 +30,6 @@ import (
 	"strings"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
-	"github.com/jackofall1232/l00prite/cli-os/internal/memory"
 	"github.com/jackofall1232/l00prite/cli-os/internal/state"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
 )
@@ -137,11 +136,9 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.auditAs(principal, "repo.clone", id)
-	fr := memory.RepoFreshness(absRoot)
-	sendJSON(w, 200, map[string]any{
-		"repo":   map[string]any{"id": id, "root": absRoot, "project": principal.Project, "cloned_from": url},
-		"memory": map[string]any{"status": fr.Status, "present_count": fr.PresentCount, "total_files": fr.TotalFiles},
-	})
+	resp := app.repoRegisteredResponse(id, absRoot, principal.Project)
+	resp["repo"].(map[string]any)["cloned_from"] = url
+	sendJSON(w, 200, resp)
 }
 
 // looksLikeAuthFailure matches the stderr shapes git (and go-git) produce when a clone needs

@@ -2,8 +2,10 @@ package server_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -111,6 +113,81 @@ func TestRepoRegisterValidatesAndStores(t *testing.T) {
 	if _, _, found := repoRow(t, db, "norepo"); found {
 		t.Fatal("a rejected register must store nothing")
 	}
+}
+
+// TestRepoRegisterAutoScaffoldsL00prite (Bug 1 of the 2026-07-11 control-plane diagnosis): linking
+// a repo that has no .l00prite/ folder at all gets one scaffolded immediately, so memory injection
+// has something to inject from the moment of registration instead of silently no-op'ing until the
+// repo's first engine Run. Scaffolding is idempotent: an existing file (e.g. a hand-authored or
+// Planning-Mode-committed memory.md) is never overwritten, only the files that were actually
+// missing get created.
+func TestRepoRegisterAutoScaffoldsL00prite(t *testing.T) {
+	srv, _, _, _, token := configured(t)
+	base := srv.URL
+
+	t.Run("no .l00prite/ at all: fully scaffolded", func(t *testing.T) {
+		repoDir := t.TempDir()
+		resp, body := doJSON(t, "POST", base+"/v1/repos", token, map[string]any{"id": "bare", "root": repoDir, "project": "ops"})
+		if resp.StatusCode != 200 {
+			t.Fatalf("register must be 200, got %d (%v)", resp.StatusCode, body)
+		}
+		for _, rel := range []string{"blueprint.md", "memory.md", "todos.md", "failures.md", "constraints.md", "heartbeat.json", "state.json", "lock.json"} {
+			if _, err := os.Stat(filepath.Join(repoDir, ".l00prite", rel)); err != nil {
+				t.Fatalf(".l00prite/%s should have been scaffolded, got: %v", rel, err)
+			}
+		}
+		note, _ := body["note"].(string)
+		if !strings.Contains(note, "memory folder was added") {
+			t.Fatalf("expected a plain-language note about the new memory folder, got: %q", note)
+		}
+		mem := body["memory"].(map[string]any)
+		if mem["present_count"].(float64) < 1 {
+			t.Fatalf("freshness snapshot must see the freshly scaffolded files, got %v", mem)
+		}
+
+		// Adversarial-review finding: Scaffold's project-identity argument must be the repo's OWN
+		// name (matching the engine's own preflight.go convention), not the gateway's multi-tenant
+		// project scope -- otherwise every repo registered under the same project (here "ops")
+		// gets the identical, indistinguishable project_name baked into its own state.json.
+		stateBytes, err := os.ReadFile(filepath.Join(repoDir, ".l00prite", "state.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var state map[string]any
+		if err := json.Unmarshal(stateBytes, &state); err != nil {
+			t.Fatal(err)
+		}
+		wantName := filepath.Base(repoDir)
+		if state["project_name"] != wantName {
+			t.Fatalf("state.json project_name = %v, want the repo's own name %q (not the gateway project \"ops\")", state["project_name"], wantName)
+		}
+	})
+
+	t.Run("existing .l00prite/ file is never overwritten", func(t *testing.T) {
+		repoDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(repoDir, ".l00prite"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		custom := "# My Own Memory\nHand-written before linking.\n"
+		if err := os.WriteFile(filepath.Join(repoDir, ".l00prite", "memory.md"), []byte(custom), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		resp, body := doJSON(t, "POST", base+"/v1/repos", token, map[string]any{"id": "haspartial", "root": repoDir, "project": "ops"})
+		if resp.StatusCode != 200 {
+			t.Fatalf("register must be 200, got %d (%v)", resp.StatusCode, body)
+		}
+		got, err := os.ReadFile(filepath.Join(repoDir, ".l00prite", "memory.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != custom {
+			t.Fatalf("scaffold must never overwrite an existing file; memory.md changed to: %q", string(got))
+		}
+		// The files that WERE missing still get filled in alongside the untouched one.
+		if _, err := os.Stat(filepath.Join(repoDir, ".l00prite", "blueprint.md")); err != nil {
+			t.Fatalf("blueprint.md should still have been scaffolded, got: %v", err)
+		}
+	})
 }
 
 // TestRepoRemove: removing unregisters the mapping (files untouched), 404s on an unknown id, and

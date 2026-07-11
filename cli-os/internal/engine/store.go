@@ -27,6 +27,18 @@ var (
 	// ErrAlreadyDecided is returned by the approval compare-and-set when the row was already
 	// decided by another actor; the caller receives the pre-existing decision unchanged.
 	ErrAlreadyDecided = errors.New("engine: approval already decided")
+	// ErrCheckpointFailed is returned by StartRun when the pre-run auto-checkpoint commit (the
+	// run's only unprompted state mutation) fails. Start must not proceed to checkout when this
+	// happens — nothing about the repository or the lock is left armed.
+	ErrCheckpointFailed = errors.New("engine: pre-run auto-checkpoint failed")
+	// ErrCheckpointRefused is returned by AutoCheckpoint (and, wrapping it, StartRun) when a dirty
+	// path outside .l00prite/ matches the project's own Autonomous-Edit Denylist or looks like it
+	// may contain credentials: the auto-checkpoint is the run's ONLY unprompted state mutation, and
+	// it must not become a second, ungoverned bypass of the one piece of policy the rest of this
+	// design treats as load-bearing (the same protection the autonomous coder's write_file goes
+	// through — see Toolbox.writeFile). Distinct from ErrCheckpointFailed (a mechanical failure)
+	// so the human-facing message can say "this needs your review," not "something broke."
+	ErrCheckpointRefused = errors.New("engine: pre-run auto-checkpoint refused a sensitive file")
 )
 
 // Store persists runs, run events, and approvals over the shared state DB.

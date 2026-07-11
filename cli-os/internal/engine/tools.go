@@ -914,7 +914,60 @@ func CommitUnit(git gitx.Client, root, message string) (string, error) {
 	if err := git.AddAll(root); err != nil {
 		return "", err
 	}
-	return git.Commit(root, message)
+	hash, err := git.Commit(root, message)
+	if err != nil {
+		// A commit failure for any reason other than "nothing to commit" or a missing identity
+		// (both already handled inside Commit itself) leaves AddAll's staging in place with no
+		// commit to show for it — a surprising git state for whoever looks at this repo next (e.g. a
+		// hook rejection, a full disk). Best-effort undo it via a plain `git reset` so a failed
+		// checkpoint/unit commit doesn't also leave the index dirtied in a way the working tree
+		// itself never was. Only meaningful under the exec backend: gogit's Raw is unconditionally
+		// unsupported (see gitx.Client's doc comment), so this is a silent no-op there rather than a
+		// gap this call can close without a broader Client interface change. The reset's own error is
+		// deliberately ignored — a failed best-effort cleanup must never mask the real commit error.
+		cctx, cancel := context.WithTimeout(context.Background(), gitTimeoutSec*time.Second)
+		_, _ = git.Raw(cctx, root, "reset")
+		cancel()
+		return "", err
+	}
+	return hash, nil
+}
+
+// AutoCheckpoint commits ALL dirty paths — the user's own uncommitted work and .l00prite/ alike —
+// as a WIP checkpoint before the run branch is created. Including .l00prite/ matters: the gogit
+// backend's checkout goes through go-git's whole-tree, non-scopable dirty check (see
+// EnsureRunBranch's doc comment), so leaving any tracked .l00prite/ file dirty (e.g. right after
+// StartRun's own AcquireLock call rewrites lock.json) still trips it. This is deliberately a
+// commit, never a stash: a stash is invisible and easy to orphan for a non-technical user, while a
+// commit is durable, shows up in the project's normal history, and is exactly what the run's own
+// ledger entry can point to. Returns ("", nil) on an already-clean tree (both gitx backends' Commit
+// treats "nothing to commit" as success, and CommitUnit passes that through here).
+//
+// denylist gates this: a dirty path OUTSIDE .l00prite/ that matches the project's own
+// Autonomous-Edit Denylist, or looks like it may hold credentials (isSecretLikePath), is refused
+// with ErrCheckpointRefused and NOTHING is committed — this is the actual point of mutation, so
+// the check has to live here, not just in the pre-flight display (BuildPreflight's checkGitReady
+// advises the same thing earlier, but a file dirtied between pre-flight and Start would slip past
+// an advisory-only check). .l00prite/ itself is never subject to this gate: it is the engine's own
+// bookkeeping, not user content, and go-git's checkout requires it to be committed regardless.
+func AutoCheckpoint(git gitx.Client, root, runID string, denylist []string) (string, error) {
+	git = gitOrDetect(git)
+	out, err := git.StatusPorcelain(root)
+	if err != nil {
+		return "", fmt.Errorf("could not inspect the project's current state: %w", err)
+	}
+	if strings.TrimSpace(out) == "" {
+		return "", nil
+	}
+	for _, rel := range dirtyPathsOutsideL00prite(out) {
+		if hit, pattern := MatchDenylist(denylist, rel); hit {
+			return "", fmt.Errorf("%w: %q matches your Autonomous-Edit Denylist (%s)", ErrCheckpointRefused, rel, pattern)
+		}
+		if isSecretLikePath(rel) {
+			return "", fmt.Errorf("%w: %q looks like it may contain credentials or a key", ErrCheckpointRefused, rel)
+		}
+	}
+	return CommitUnit(git, root, "WIP: auto-checkpoint before run-"+runID)
 }
 
 // CurrentDiff returns a diff of the worktree against HEAD, capped at maxBytes (used by the

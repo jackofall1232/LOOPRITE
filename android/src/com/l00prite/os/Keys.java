@@ -52,9 +52,19 @@ final class Keys {
                 rawKey = new byte[RAW_KEY_BYTES];
                 new SecureRandom().nextBytes(rawKey);
                 byte[] combined = encrypt(wrapKey, rawKey);
-                prefs.edit()
+                // commit(), not apply(): the raw key below is about to be handed to the gateway
+                // process and used to encrypt provider secrets immediately. apply() only queues the
+                // disk write asynchronously and gives no failure signal -- if the app/process is
+                // killed, or the write fails, before it lands, the next boot generates a NEW master
+                // key and every secret encrypted this session becomes permanently undecryptable.
+                // commit() blocks until the write actually lands (or fails), so a failure can be
+                // caught here instead of silently corrupting state (Codex review, PR #7).
+                boolean persisted = prefs.edit()
                         .putString(PREF_WRAPPED_KEY, Base64.encodeToString(combined, Base64.NO_WRAP))
-                        .apply();
+                        .commit();
+                if (!persisted) {
+                    throw new RuntimeException("l00prite: failed to persist the wrapped master key; refusing to hand out a key that may not survive a restart");
+                }
             } else {
                 byte[] combined = Base64.decode(wrapped, Base64.NO_WRAP);
                 rawKey = decrypt(wrapKey, combined);
