@@ -122,7 +122,12 @@ func (app *App) HandleRepoRegister(w http.ResponseWriter, r *http.Request) {
 // be reported as a registration failure — the row already exists — so it becomes a plain-language
 // note instead of an error response. Shared by HandleRepoRegister and HandleRepoClone.
 func (app *App) repoRegisteredResponse(id, absRoot, project string) map[string]any {
-	scaffolded, scafferr := engine.Files{Root: absRoot}.Scaffold(project, "")
+	// Scaffold's first argument is the REPO's own identity (it's written into state.json as
+	// project_name and used in blueprint.md's title) -- matching the engine's own convention at
+	// preflight.go's BuildPreflight (filepath.Base(run.RepoRoot)), not the gateway's multi-tenant
+	// project scope. Passing `project` here would bake e.g. "ops" into every repo registered under
+	// that project's state.json, indistinguishable from any other repo in the same project.
+	scaffolded, scafferr := engine.Files{Root: absRoot}.Scaffold(filepath.Base(absRoot), "")
 	// A real freshness snapshot so the UI can immediately say whether .l00prite memory was found.
 	fr := memory.RepoFreshness(absRoot)
 	resp := map[string]any{

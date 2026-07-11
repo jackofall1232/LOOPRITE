@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,6 +143,23 @@ func TestRepoRegisterAutoScaffoldsL00prite(t *testing.T) {
 		mem := body["memory"].(map[string]any)
 		if mem["present_count"].(float64) < 1 {
 			t.Fatalf("freshness snapshot must see the freshly scaffolded files, got %v", mem)
+		}
+
+		// Adversarial-review finding: Scaffold's project-identity argument must be the repo's OWN
+		// name (matching the engine's own preflight.go convention), not the gateway's multi-tenant
+		// project scope -- otherwise every repo registered under the same project (here "ops")
+		// gets the identical, indistinguishable project_name baked into its own state.json.
+		stateBytes, err := os.ReadFile(filepath.Join(repoDir, ".l00prite", "state.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var state map[string]any
+		if err := json.Unmarshal(stateBytes, &state); err != nil {
+			t.Fatal(err)
+		}
+		wantName := filepath.Base(repoDir)
+		if state["project_name"] != wantName {
+			t.Fatalf("state.json project_name = %v, want the repo's own name %q (not the gateway project \"ops\")", state["project_name"], wantName)
 		}
 	})
 
