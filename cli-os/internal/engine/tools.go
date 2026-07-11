@@ -926,7 +926,15 @@ func CommitUnit(git gitx.Client, root, message string) (string, error) {
 // commit is durable, shows up in the project's normal history, and is exactly what the run's own
 // ledger entry can point to. Returns ("", nil) on an already-clean tree (both gitx backends' Commit
 // treats "nothing to commit" as success, and CommitUnit passes that through here).
-func AutoCheckpoint(git gitx.Client, root, runID string) (string, error) {
+//
+// denylist gates this: a dirty path OUTSIDE .l00prite/ that matches the project's own
+// Autonomous-Edit Denylist, or looks like it may hold credentials (isSecretLikePath), is refused
+// with ErrCheckpointRefused and NOTHING is committed — this is the actual point of mutation, so
+// the check has to live here, not just in the pre-flight display (BuildPreflight's checkGitReady
+// advises the same thing earlier, but a file dirtied between pre-flight and Start would slip past
+// an advisory-only check). .l00prite/ itself is never subject to this gate: it is the engine's own
+// bookkeeping, not user content, and go-git's checkout requires it to be committed regardless.
+func AutoCheckpoint(git gitx.Client, root, runID string, denylist []string) (string, error) {
 	git = gitOrDetect(git)
 	out, err := git.StatusPorcelain(root)
 	if err != nil {
@@ -934,6 +942,14 @@ func AutoCheckpoint(git gitx.Client, root, runID string) (string, error) {
 	}
 	if strings.TrimSpace(out) == "" {
 		return "", nil
+	}
+	for _, rel := range dirtyPathsOutsideL00prite(out) {
+		if hit, pattern := MatchDenylist(denylist, rel); hit {
+			return "", fmt.Errorf("%w: %q matches your Autonomous-Edit Denylist (%s)", ErrCheckpointRefused, rel, pattern)
+		}
+		if isSecretLikePath(rel) {
+			return "", fmt.Errorf("%w: %q looks like it may contain credentials or a key", ErrCheckpointRefused, rel)
+		}
 	}
 	return CommitUnit(git, root, "WIP: auto-checkpoint before run-"+runID)
 }
