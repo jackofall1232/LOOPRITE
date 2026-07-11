@@ -132,13 +132,23 @@ func (app *App) repoRegisteredResponse(id, absRoot, project string) map[string]a
 	// LockAvailability documents. A free or stale lock does not block -- consistent with how
 	// BuildPreflight's own recovery path already treats a stale lease as reclaimable, not a reason
 	// to refuse writing.
-	lock, lockErr := files.ReadLock()
-	lockHeld := lockErr == nil && engine.LockAvailability(lock, "") == "foreign"
+	// Acquire the lock ourselves before scaffolding, not just read it: a plain read-then-Scaffold
+	// has a real window between the check and the writes where a concurrent Start can acquire the
+	// lease and begin a run, racing this endpoint's file creation against that run's own
+	// understanding of what's in .l00prite/ (Codex review, PR #7). AcquireLock's own read-then-write
+	// is the same "reduce, not eliminate" race every other lock user in this codebase already
+	// accepts (LOCKING.md) -- this closes the specific gap of registration skipping the lock
+	// entirely, it does not claim perfect mutual exclusion. session is a fixed literal because the
+	// lease is acquired and released within this single call, never held across requests.
+	const registerScaffoldSession = "gateway-register-scaffold"
+	_, _, acquireErr := files.AcquireLock(registerScaffoldSession, "auto-scaffold on repo register/clone", 60)
+	lockHeld := acquireErr != nil
 
 	var scaffolded []string
 	var scafferr error
 	if !lockHeld {
 		scaffolded, scafferr = files.Scaffold(filepath.Base(absRoot), "")
+		_ = files.ReleaseLock(registerScaffoldSession)
 	}
 	// A real freshness snapshot so the UI can immediately say whether .l00prite memory was found.
 	fr := memory.RepoFreshness(absRoot)
