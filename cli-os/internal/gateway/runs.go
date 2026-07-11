@@ -182,6 +182,8 @@ func (app *App) HandleRunStart(w http.ResponseWriter, r *http.Request) {
 	if err := app.Engine.StartRun(r.Context(), run.ID, confirmedBy, body.Confirm); err != nil {
 		status, code := 400, "start_rejected"
 		switch {
+		case errors.Is(err, engine.ErrCheckpointRefused):
+			status, code = 409, "checkpoint_refused"
 		case errors.Is(err, engine.ErrCheckpointFailed):
 			status, code = 409, "checkpoint_failed"
 		case errors.Is(err, engine.ErrBadState):
@@ -206,6 +208,8 @@ func (app *App) HandleRunStart(w http.ResponseWriter, r *http.Request) {
 // separately by the caller via auditAs before this function is called.
 func humanizeStartError(err error) string {
 	switch {
+	case errors.Is(err, engine.ErrCheckpointRefused):
+		return "Some of your unsaved changes look sensitive (they match your project's Denylist, or look like they might contain a credential or key), so l00prite won't save them automatically. Review and commit or discard them yourself, then try Start again."
 	case errors.Is(err, engine.ErrCheckpointFailed):
 		return "l00prite tried to save your unsaved changes before starting, but the save failed. Nothing was changed and the run was not started. Details were logged for support."
 	case errors.Is(err, engine.ErrBadState):
