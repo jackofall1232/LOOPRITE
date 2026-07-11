@@ -1564,3 +1564,112 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260710-191600-claude-android-icon-sideload-docs acquired for this append;
   released at end of run.
+
+### Run 2026-07-11T21:35:00Z — Claude (Fable 5 architect, Sonnet 5 authors, Opus 4.8 reviewer), branch claude/android-onboarding-run-execution-e4ni06
+- **Goal:** Four maintainer-requested, Android-app-facing additions — recall the app's whole UI
+  IS this dashboard.html, WebView-served from the embedded gateway binary: (1) detailed in-app
+  usage instructions with real screenshots, (2) let the Playground draft a Run when plain text
+  asks the model to build-and-execute something, (3) a bold budget/overage control with a
+  stop-at-limit / 100%-overage / no-stoppage choice, (4) a Playground model-lock toggle.
+- **Triggering event:** none — direct maintainer instruction in-session.
+- **Reviewer/comment reference:** none (pre-PR; adversarial review was internal to this run, see
+  below).
+- **Decision:** Normal work, run as two sequenced multi-agent workflows (architect → parallel
+  backend implementers → frontend implementer → adversarial reviewer → fixer → verifier; then a
+  second pass: screenshot capture → screenshot verifier → APK packager → release-copy writer →
+  final verifier), per the maintainer's explicit "Fable architect, Sonnet/Opus author" instruction.
+- **Completed work:**
+  - **Budget/overage control:** `caps` table gains `overage_pct`/`unlimited` columns (migrate()
+    ALTER pattern); `policy/pep.go` gains `CapInfo`/`EffectiveCeiling()` so `Reserve`/`GetSpend`
+    enforce (or, when `unlimited`, deliberately never deny for) an effective ceiling instead of
+    the raw `limit_usd`; new `GET`/`POST /v1/budget` (`gateway/budget.go`), scoped to the acting
+    token's own project like every other per-project endpoint; `dashboard.go`'s `spendToday`/
+    `deriveAlerts` extended and made overage/unlimited-aware; a bold "Set budget" button + modal
+    in the dashboard's Costs section with the three-mode chooser.
+  - **Chat-triggered draft Run:** a new `propose_run` chat tool (`gateway/chatrun.go`), gated
+    exactly like the existing read-only `read_file`/`list_dir`/`search_files` tools (only offered
+    when a repo is selected, same per-turn call/round budget); `runs.go`'s `HandleRunCreate` core
+    refactored into a shared `createDraftRun` helper used by both the HTTP endpoint and the new
+    tool, so a chat-drafted run can never reach anything but `CreateRun`+`BuildPreflight` — it can
+    never call `StartRun`, preserving the EXECUTE-confirmation invariant absolutely. Drafted runs
+    surface via a new, additive `l00prite_proposed_runs` response field; the Playground renders a
+    green "Run drafted" banner with a "Review & start" button reusing the existing
+    `openRunDetail()`.
+  - **Model lock:** a padlock button beside the Playground's model picker persists the chosen
+    model to `localStorage` (opt-in) so it survives reloads instead of resetting to `auto`.
+  - **In-app Help section:** a new "Help" nav item/section with a real walkthrough (getting
+    started; Playground incl. the new plain-text "…and execute it" run-drafting flow and model
+    lock; Runs' pre-flight/EXECUTE/approvals gate; the three budget modes) plus a screenshots
+    grid; six REAL screenshots captured against a live mock-provider-backed gateway driven through
+    a genuine Playwright/Chromium session (including a run actually Started and suspended at a
+    real destructive-action approval, for an authentic live-feed capture) — not fabricated
+    mockups. One review pass on the screenshots themselves (an agent viewing each PNG against its
+    caption) found two real defects and both were fixed directly in a follow-up pass: the
+    locked-model shot was recaptured as a tight `#sec-play` element crop (the first pass mostly
+    showed the page above it), and the Help-section shot's alt text was corrected to name the
+    accordion it actually shows.
+  - Rebuilt the Android APK as `l00prite-os-0.3.0-beta.apk` (the compiled arm64 binary is what
+    actually ships these features to a device — go:embed picks up dashboard.html + the new
+    `public/assets/` screenshots automatically); a new `cli-os/internal/server` `/assets/` static
+    route (`embed.FS`) serves them. Updated `CHANGELOG.md`, `index.html` (version/filename/size/
+    SHA-256, 4 places), and `downloads/` (+`SHA256SUMS`) to match.
+- **Fix implemented (adversarial-review finding, Opus 4.8):** `l00prite cap set`/`cap list` (CLI)
+  wrote/read only `limit_usd`, silently preserving a project's prior `unlimited`/`overage_pct`
+  flags — re-capping a project previously set to "no stop" via the dashboard left it
+  *still uncapped* despite the CLI claiming a new dollar limit. Fixed: `cap set` now resets both
+  columns to 0/false on every upsert (an explicit CLI daily-cap set is a request for hard
+  enforcement); `cap list` now reports the real effective state instead of just `limit_usd`. A
+  pre-existing test that had pinned the buggy behavior as intentional was corrected alongside it.
+- **Changed files:** `cli-os/cmd/l00prite/main.go`,
+  `cli-os/internal/gateway/{budget.go (new), chatrun.go (new), chatrun_test.go (new), chatloop.go,
+  chattools.go, dashboard.go, ingress.go, runs.go, adapters/mock.go}`,
+  `cli-os/internal/policy/{pep.go, pep_test.go}`,
+  `cli-os/internal/server/{server.go, assets_test.go (new), budget_api_test.go (new),
+  chatrun_api_test.go (new)}`, `cli-os/internal/state/{db.go, db_test.go}`,
+  `cli-os/public/{dashboard.html, embed.go, assets/screenshots/*.png (new, 6 files)}`,
+  `CHANGELOG.md`, `index.html`, `downloads/{SHA256SUMS, l00prite-os-0.3.0-beta.apk}`,
+  `.l00prite/ledger.md`, `.l00prite/lock.json`, `CLAUDE.md` (Run Ledger row). Zero edits to the
+  two review-gated files.
+- **Tests run / Verification:**
+  - `command`: `cd cli-os && go build ./... && go vet ./... && go test -race ./...` · `exit_code`:
+    0 · `summary`: all packages ok, no races, including new focused tests for
+    overage/unlimited enforcement, the `propose_run` gating/safety invariants, and the `/assets/`
+    static route · `timestamp`: 2026-07-11T21:20Z
+  - `command`: `node scripts/validate-l00prite.js` · `exit_code`: 0 · `summary`: 519 PASS, 0 FAIL
+    · `timestamp`: 2026-07-11T21:24Z
+  - `command`: adversarial code review (Opus 4.8, focused on the EXECUTE-confirmation invariant,
+    cost-cap-bypass risk, SQL injection, project-scoping, tool-call budget interaction, XSS) ·
+    `summary`: 1 confirmed medium finding (CLI cap-reset gap, above), fixed and re-verified;
+    `safety_invariant_holds: true` · `timestamp`: 2026-07-11T20:55Z
+  - `command`: agent-viewed verification of all 6 screenshots against their dashboard.html
+    captions · `summary`: 4/6 accurate on first capture; 2 defects found and fixed in a follow-up
+    pass (see Completed work) · `timestamp`: 2026-07-11T21:15Z
+  - `command`: `bash cli-os/scripts/build-apk.sh 0.3.0-beta` (run twice — once per screenshot
+    fix) · `exit_code`: 0 · `summary`: final sha256 `4137c684e13f97d7bc0fc9935e77babdb12a0bdb39c845b20cffd78c0b38b46e`
+    (16,540,744 bytes) · `timestamp`: 2026-07-11T21:22Z
+  - `command`: `apksigner verify --verbose` on the final APK · `exit_code`: 0 · `summary`: v2 true,
+    v3 true · `timestamp`: 2026-07-11T21:23Z
+  - `command`: `sha256sum -c downloads/SHA256SUMS --strict` · `exit_code`: 0 · `summary`: OK ·
+    `timestamp`: 2026-07-11T21:36Z
+- **Response drafted/sent:** progress updates + final summary sent to maintainer in-session.
+- **Event status:** not applicable.
+- **Failures:** none outstanding. Two screenshot defects were found and fixed in-session (see
+  above) rather than shipped uncorrected.
+- **Decisions:** chat-drafted runs count against the SAME per-turn tool-call/round budget as the
+  read-only chat tools (no new unbounded surface); an unlimited-budget project still meters spend,
+  it just never denies; the CLI's `cap set` was made to reset overage/unlimited on every call
+  (an explicit hard-limit request should always mean a hard limit); screenshots were captured
+  live against a real (mock-provider-backed) server rather than hand-authored, including a
+  genuinely started-and-suspended run for the live-feed shot.
+- **Confidence:** High — every safety-relevant claim (EXECUTE gate never bypassable, cost-cap
+  never silently defeated) was independently traced by the adversarial reviewer and by direct
+  reading of the diff in-session; every screenshot was visually confirmed against its caption
+  before shipping; the compiled binary inside the final APK was confirmed (via `strings` on the
+  extracted `.so`) to actually contain the new dashboard.html/screenshots.
+- **Next action:** maintainer review/merge; on-device (physical Android) verification of the new
+  budget modal/model-lock/Help-section rendering remains untested (no emulator ABI in this
+  container, the same standing limitation recorded for every prior APK pass); no PR was opened
+  (not requested this session).
+- **Do-not-retry notes:** none new.
+- **Lock:** lock-20260711-213500-claude-budget-execute-lock-help acquired for this append;
+  released at end of run.
