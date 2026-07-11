@@ -87,7 +87,14 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 	f := Files{Root: run.RepoRoot}
 	now := util.NowISO()
 
-	// Lock check first, then arm under our lease.
+	// Lock availability check first (read-only) -- but the actual AcquireLock WRITE is deliberately
+	// deferred until after EnsureRunBranch below, not done here. AcquireLock rewrites lock.json with
+	// an active lease; if that write happened before the checkpoint+checkout (as it used to), the
+	// checkpoint below commits it together with everything else onto whatever branch is CURRENTLY
+	// checked out -- so every clean Start polluted the user's own source branch with a WIP commit
+	// carrying an active run lease, and checking that branch back out later made it look locked by a
+	// run that may already have finished (Codex review, PR #7). Writing the lease after the run
+	// branch exists lands it there instead, uncommitted, exactly like the ledger append below.
 	lock, err := f.ReadLock()
 	if err != nil {
 		return err
@@ -95,28 +102,22 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 	if LockAvailability(lock, run.ID) == "foreign" {
 		return fmt.Errorf("%w: another agent holds the .l00prite lock", ErrBadState)
 	}
-	if _, _, err := f.AcquireLock(run.ID, "execute-loop run (l00prite OS engine)", e.LeaseTTLSec); err != nil {
-		return fmt.Errorf("could not acquire .l00prite lease to arm the run: %w", err)
-	}
 
 	// Read the Denylist fresh (not from a possibly-stale pre-flight) so AutoCheckpoint's refusal
 	// gate below is race-proof against a file dirtied after BuildPreflight last ran.
 	denylistSnap, dlerr := f.ReadSnapshot()
 	if dlerr != nil {
-		_ = f.ReleaseLock(run.ID)
 		return fmt.Errorf("could not read .l00prite memory to check the auto-checkpoint against your Denylist: %w", dlerr)
 	}
 	denylist := ParseDenylist(denylistSnap.Constraints)
 
-	// Auto-checkpoint: commit EVERYTHING dirty, including .l00prite/ (the AcquireLock call just
-	// above rewrote lock.json, and the gogit backend's checkout dirty-check is whole-tree with no
-	// path exemption — see AutoCheckpoint's doc comment), so the run branch is created from a
-	// clean tree. This is the run's only unprompted state mutation, and it is deliberately a
-	// commit, never a stash. AutoCheckpoint itself refuses (ErrCheckpointRefused) rather than
-	// committing a Denylisted or credential-shaped dirty path.
+	// Auto-checkpoint: commit everything dirty right now (the user's own uncommitted work, plus any
+	// pre-existing .l00prite/ drift) onto whatever branch is currently checked out, so the run
+	// branch is created from a clean tree. This is deliberately a commit, never a stash.
+	// AutoCheckpoint itself refuses (ErrCheckpointRefused) rather than committing a Denylisted or
+	// credential-shaped dirty path.
 	checkpointHash, cerr := AutoCheckpoint(e.Git, run.RepoRoot, run.ID, denylist)
 	if cerr != nil {
-		_ = f.ReleaseLock(run.ID)
 		if errors.Is(cerr, ErrCheckpointRefused) {
 			return cerr // preserve the more specific sentinel for humanizeStartError
 		}
@@ -125,8 +126,14 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 
 	branch := runBranch(run.ID)
 	if err := EnsureRunBranch(e.Git, run.RepoRoot, branch); err != nil {
-		_ = f.ReleaseLock(run.ID)
 		return fmt.Errorf("%w: %v", ErrBadState, err)
+	}
+
+	// Only now claim the lease -- see the comment above LockAvailability's check for why this can't
+	// happen any earlier. The write lands as an uncommitted change on the run branch just checked
+	// out, not on the branch the checkpoint above just committed to.
+	if _, _, err := f.AcquireLock(run.ID, "execute-loop run (l00prite OS engine)", e.LeaseTTLSec); err != nil {
+		return fmt.Errorf("could not acquire .l00prite lease to arm the run: %w", err)
 	}
 
 	// Record the checkpoint in ledger.md only AFTER the checkout succeeds -- not before it, even

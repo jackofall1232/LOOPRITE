@@ -213,6 +213,48 @@ func TestRunReachesDefinitionOfDone(t *testing.T) {
 	}
 }
 
+// TestStartRunDoesNotLeakActiveLeaseOntoSourceBranch pins a Codex review finding on PR #7:
+// StartRun used to call AcquireLock (which rewrites lock.json with an ACTIVE lease) before
+// AutoCheckpoint's commit-everything-dirty step, so that active lease landed in the checkpoint
+// commit made on whatever branch was checked out BEFORE the run branch existed -- polluting the
+// user's own source branch with a WIP commit carrying a run's active lease on every clean Start,
+// and making that branch look locked if checked back out before the lease's TTL expired. The fix
+// defers the AcquireLock write until after EnsureRunBranch, so the lease write lands on the run
+// branch instead.
+func TestStartRunDoesNotLeakActiveLeaseOntoSourceBranch(t *testing.T) {
+	caller := &scriptedCaller{
+		planner: []map[string]any{
+			{"action": "unit", "description": "create greeting.txt", "target_paths": []string{"greeting.txt"}, "verification_command": "true"},
+			{"action": "done", "done_reason": "greeting.txt exists and the done-check passes"},
+		},
+		coder: [][]step{
+			{{name: "write_file", args: map[string]any{"path": "greeting.txt", "content": "hello\n"}}, {name: "unit_done", args: map[string]any{"summary": "wrote greeting.txt", "files_changed": []string{"greeting.txt"}}}},
+		},
+	}
+	e := newEngine(t, caller)
+	root := newRepo(t)
+	sourceBranch := strings.TrimSpace(gitRun(t, root, "rev-parse", "--abbrev-ref", "HEAD"))
+
+	run := startRun(t, e, root, "add a greeting file", nil)
+	final := waitTerminal(t, e, run.ID)
+	if final.Status != StatusDone {
+		t.Fatalf("want done, got %s/%s (%s)", final.Status, final.Boundary, final.Summary)
+	}
+
+	// Inspect what actually got committed on the SOURCE branch (not the run branch the loop left
+	// HEAD on) -- this must never show this run's session holding an active lease. Read via `git
+	// show <branch>:<path>` rather than checking the branch out, since the run branch HEAD is left
+	// with its own uncommitted .l00prite/ changes that a checkout would otherwise collide with.
+	lockJSON := gitRun(t, root, "show", sourceBranch+":.l00prite/lock.json")
+	var lock map[string]any
+	if err := json.Unmarshal([]byte(lockJSON), &lock); err != nil {
+		t.Fatalf("lock.json on the source branch did not parse: %v\n%s", err, lockJSON)
+	}
+	if lock["status"] == "active" && lock["owner_session"] == run.ID {
+		t.Fatalf("source branch %q carries this run's ACTIVE lease in its committed lock.json: %v", sourceBranch, lock)
+	}
+}
+
 // A denylist-protected write requires approval; a deny stops at destructive_operation_required.
 func TestRunDenylistWriteBlocksOnDeny(t *testing.T) {
 	caller := &scriptedCaller{
