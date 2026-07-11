@@ -442,6 +442,91 @@ func TestBranchAndCommit(t *testing.T) {
 	}
 }
 
+// ---- AutoCheckpoint (Bug 2 regression: raw "worktree contains unstaged changes" on Start) ----
+
+// setupTrackedDirtyL00prite builds a repo whose .l00prite/lock.json is already git-tracked — as if
+// scaffolded and committed via Planning Mode before the engine's first run — then dirties it,
+// exactly what StartRun's own AcquireLock call does immediately before EnsureRunBranch.
+func setupTrackedDirtyL00prite(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFileRaw(t, filepath.Join(dir, "README.md"), "hello\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "init")
+
+	lockPath := filepath.Join(dir, ".l00prite", "lock.json")
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileRaw(t, lockPath, `{"status":"released"}`)
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "scaffold .l00prite")
+
+	writeFileRaw(t, lockPath, `{"status":"active","lock_id":"lck_test"}`)
+	return dir
+}
+
+// TestGogitCheckoutFailsOnTrackedDirtyL00prite pins the bug this diagnosis found: under the gogit
+// backend, EnsureRunBranch's own .l00prite/ exemption (dirtyPathsOutsideL00prite) is invisible to
+// go-git's internal Checkout call, which runs its own whole-tree, unconditional dirty check with no
+// path exemption. A dirty-but-already-tracked .l00prite/ file — exactly what StartRun's
+// AcquireLock produces by rewriting lock.json — makes the checkout fail with the raw go-git
+// sentinel error, even though EnsureRunBranch itself considers the tree clean enough to proceed.
+// This test must keep failing (i.e. keep reproducing the bug) if AutoCheckpoint is ever removed
+// from StartRun's call path without a replacement.
+func TestGogitCheckoutFailsOnTrackedDirtyL00prite(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00prite(t)
+	gogit := gitx.NewGogitClient()
+	err := EnsureRunBranch(gogit, dir, "l00prite/run-repro")
+	if err == nil {
+		t.Fatal("expected the unfixed gogit checkout to fail on a dirty tracked .l00prite/ file")
+	}
+	if !strings.Contains(err.Error(), "worktree contains unstaged changes") {
+		t.Fatalf("expected the raw go-git ErrUnstagedChanges text, got: %v", err)
+	}
+}
+
+// TestAutoCheckpointFixesGogitCheckout proves the fix: committing everything dirty — including
+// .l00prite/ — before EnsureRunBranch's checkout call makes it succeed on the gogit backend,
+// mirroring StartRun's real call order (engine.go: AutoCheckpoint runs right after AcquireLock,
+// before EnsureRunBranch).
+func TestAutoCheckpointFixesGogitCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := setupTrackedDirtyL00prite(t)
+	gogit := gitx.NewGogitClient()
+
+	hash, err := AutoCheckpoint(gogit, dir, "repro")
+	if err != nil {
+		t.Fatalf("AutoCheckpoint: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("expected a checkpoint commit hash for a dirty tree")
+	}
+	if err := EnsureRunBranch(gogit, dir, "l00prite/run-repro"); err != nil {
+		t.Fatalf("EnsureRunBranch after checkpoint should succeed, got: %v", err)
+	}
+	msg := strings.TrimSpace(gitRun(t, dir, "log", "-1", "--format=%s"))
+	if msg != "WIP: auto-checkpoint before run-repro" {
+		t.Fatalf("expected the checkpoint commit message on HEAD, got: %q", msg)
+	}
+
+	// AutoCheckpoint on an already-clean tree is a no-op (both gitx Commit contracts treat
+	// "nothing to commit" as success) -- never a duplicate/empty commit.
+	hash2, err := AutoCheckpoint(gogit, dir, "repro")
+	if err != nil {
+		t.Fatalf("AutoCheckpoint on a clean tree: %v", err)
+	}
+	if hash2 != "" {
+		t.Fatalf("expected no-op on a clean tree, got a new commit hash %q", hash2)
+	}
+}
+
 // ---- caps ----
 
 func TestToolCaps(t *testing.T) {
