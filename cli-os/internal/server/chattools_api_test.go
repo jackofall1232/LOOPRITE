@@ -147,3 +147,101 @@ func TestChatToolsRejectsTraversalAndSecrets(t *testing.T) {
 		t.Fatalf("expected the DENIED-secret-path tool result to be echoed, got: %q", c)
 	}
 }
+
+// A client's OWN tool literally named "read_file" must never be silently hijacked by the gateway's
+// jailed file browser (adversarial-review finding). The mock adapter's /chattool directive still
+// proposes a "read_file" tool_call (it only checks that SOME tool named read_file is present, which
+// is true here -- it's the client's), but RunChatTools must recognize the name collides with a
+// client-supplied tool and defer to the client instead of executing its own local read: the real
+// file's marker content must never appear, and the raw tool_call must pass through unexecuted for
+// the client to handle.
+func TestChatToolsNeverHijacksClientOwnedToolName(t *testing.T) {
+	base, token, _ := chatToolsServer(t)
+	clientReadFileTool := map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name": "read_file", "description": "the CLIENT's own tool, unrelated to the repo",
+			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+	}
+	resp := post(t, base, token, map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": `/chattool read_file {"path":"main.go"}`}},
+		"tools":    []any{clientReadFileTool},
+	}, map[string]string{"x-l00prite-repo": "demo"})
+	body := bodyJSON(t, resp)
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+	}
+	choices, _ := body["choices"].([]any)
+	if len(choices) == 0 {
+		t.Fatalf("no choices in response: %v", body)
+	}
+	msg, _ := choices[0].(map[string]any)["message"].(map[string]any)
+	content, _ := msg["content"].(string)
+	if strings.Contains(content, "chat-tools-e2e-marker") {
+		t.Fatalf("a client-owned \"read_file\" tool must never be executed by the gateway's file browser; real file content leaked: %q", content)
+	}
+	toolCalls, _ := msg["tool_calls"].([]any)
+	if len(toolCalls) == 0 {
+		t.Fatalf("expected the unexecuted \"read_file\" tool_call to pass through to the client, got message: %v", msg)
+	}
+	fn, _ := toolCalls[0].(map[string]any)["function"].(map[string]any)
+	if fn["name"] != "read_file" {
+		t.Fatalf("expected the passed-through tool_call to be named read_file, got: %v", fn)
+	}
+}
+
+// A tool-call round trip is two separate, independently billed/ledgered runTurn calls (the
+// tool-proposing round and the finalization round). The client-visible response's usage object
+// must report the SUM across both, not just the last round's numbers (adversarial-review finding:
+// empirically, the last-round-only figure silently dropped the first round's real, already-billed
+// usage). Ground truth comes straight from the ledger table, keyed by the request id the server
+// itself reports in the x-l00prite-request-id header -- not a hardcoded expectation, so this test
+// can't pass by coincidentally matching a guessed number.
+func TestChatToolsUsageAccumulatesAcrossRounds(t *testing.T) {
+	base, token, _ := chatToolsServer(t)
+	cfg := config.Load() // same LOOPRITE_HOME the test harness just set for chatToolsServer
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	resp := post(t, base, token, map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": `/chattool read_file {"path":"main.go"}`}},
+	}, map[string]string{"x-l00prite-repo": "demo"})
+	body := bodyJSON(t, resp)
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d: %v", resp.StatusCode, body)
+	}
+	reqID := resp.Header.Get("x-l00prite-request-id")
+	if reqID == "" {
+		t.Fatal("expected an x-l00prite-request-id response header")
+	}
+
+	var rows int
+	var truePrompt, trueCompletion int
+	if err := db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0) FROM ledger WHERE request_id = ?`, reqID).
+		Scan(&rows, &truePrompt, &trueCompletion); err != nil {
+		t.Fatal(err)
+	}
+	if rows < 2 {
+		t.Fatalf("expected at least 2 ledger rows for one tool-call round trip (proposing round + finalization round), got %d", rows)
+	}
+
+	usage, _ := body["usage"].(map[string]any)
+	if usage == nil {
+		t.Fatalf("expected a usage object in the response, got: %v", body)
+	}
+	gotPrompt, _ := usage["prompt_tokens"].(float64)
+	gotCompletion, _ := usage["completion_tokens"].(float64)
+	if int(gotPrompt) != truePrompt || int(gotCompletion) != trueCompletion {
+		t.Fatalf("response usage (prompt=%v, completion=%v) does not match the true summed ledger usage across all %d rounds (prompt=%d, completion=%d) -- earlier rounds' usage was dropped",
+			gotPrompt, gotCompletion, rows, truePrompt, trueCompletion)
+	}
+
+	gotHeaderCost := resp.Header.Get("x-l00prite-cost-usd")
+	if gotHeaderCost == "" {
+		t.Fatal("expected an x-l00prite-cost-usd response header")
+	}
+}
