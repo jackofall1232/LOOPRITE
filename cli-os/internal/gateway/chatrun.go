@@ -31,7 +31,7 @@ type proposedRun struct {
 
 func proposeRunToolDefinition() map[string]any {
 	return chatFnTool(chatRunToolName,
-		"Draft a l00prite Run against the linked repository from the user's request. This ONLY creates a reviewable draft: nothing executes, no file changes, and no git operation happens until a human opens the draft in the dashboard's Runs section, reviews its pre-flight, and types EXECUTE. Use it when the user asks for something to actually be built or carried out (e.g. \"…and execute it\", \"go ahead and do it\").",
+		"Draft a l00prite Run against the linked repository from the user's request. This ONLY creates a reviewable draft: no CODE change, no COMMAND, and no GIT operation happens until a human opens the draft in the dashboard's Runs section, reviews its pre-flight, and types EXECUTE. (The one exception: if this repository has no .l00prite memory folder yet, drafting scaffolds it — additive, never overwrites, never touches your own files — exactly as registering or cloning the repository already would.) Use it when the user asks for something to actually be built or carried out (e.g. \"…and execute it\", \"go ahead and do it\").",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
