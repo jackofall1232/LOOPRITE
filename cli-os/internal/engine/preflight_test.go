@@ -142,6 +142,88 @@ func TestDirtyWorktreeIsANoteNotABlockerAndAutoCheckpoints(t *testing.T) {
 	}
 }
 
+// Adversarial-review finding: a dirty file that looks like it may hold credentials (here, no
+// Denylist entry needed -- isSecretLikePath alone must catch it) has to block Start with a clear
+// reason, not get silently folded into the ordinary auto-checkpoint Note, and StartRun's actual
+// enforcement (AutoCheckpoint's own refusal) must then really refuse to commit it if Start is
+// attempted anyway (e.g. against a stale pre-flight).
+func TestSecretLikeDirtyPathBlocksStartAndIsNeverAutoCommitted(t *testing.T) {
+	e := newEngine(t, &scriptedCaller{})
+	root := newRepo(t)
+
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("API_KEY=secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := e.Store.CreateRun("proj", root, RunConfig{RepoID: "r1", Goal: "test", CommandAllowlist: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pf, err := e.BuildPreflight(run)
+	if err != nil {
+		t.Fatalf("BuildPreflight: %v", err)
+	}
+	foundBlocker := false
+	for _, b := range pf.Blockers {
+		if strings.Contains(b, ".env") {
+			foundBlocker = true
+			if strings.Contains(b, "API_KEY") || strings.Contains(b, "secret") {
+				t.Fatalf(".env's own content must never appear in a Blocker string, got: %q", b)
+			}
+		}
+	}
+	if !foundBlocker {
+		t.Fatalf("expected a Blocker naming .env, got blockers: %v", pf.Blockers)
+	}
+	for _, n := range pf.Notes {
+		if strings.Contains(n, ".env") {
+			t.Fatalf(".env must not also appear in the ordinary auto-checkpoint Note (it's blocked, not queued for checkpoint), got note: %q", n)
+		}
+	}
+
+	// Layer 1 (this Blocker) correctly stops Start from even being attempted through the normal
+	// UI flow: run.Status is now "blocked", so StartRun's own status guard refuses before ever
+	// reaching AutoCheckpoint. That's tested implicitly above (BuildPreflight reported the
+	// Blocker); confirming StartRun also refuses here would only re-test ErrBadState, not the
+	// checkpoint gate. Layer 2 (AutoCheckpoint's OWN refusal) exists specifically for the race
+	// this can't cover: a file dirtied AFTER a clean pre-flight, but before Start.
+	if err := e.StartRun(context.Background(), run.ID, "tok_1", "EXECUTE"); !errors.Is(err, ErrBadState) {
+		t.Fatalf("expected StartRun to refuse via ErrBadState (blocked pre-flight), got: %v", err)
+	}
+}
+
+// Layer 2: AutoCheckpoint's own refusal is what actually protects against a secret-shaped file
+// dirtied AFTER a clean pre-flight ran but BEFORE Start is pressed -- the race the pre-flight
+// Blocker (tested above) cannot cover, since it only reflects state as of whenever it last ran.
+func TestSecretLikeDirtyPathDirtiedAfterPreflightStillRefusesAtStart(t *testing.T) {
+	e := newEngine(t, &scriptedCaller{})
+	root := newRepo(t)
+
+	run, err := e.Store.CreateRun("proj", root, RunConfig{RepoID: "r1", Goal: "test", CommandAllowlist: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pf, err := e.BuildPreflight(run)
+	if err != nil {
+		t.Fatalf("BuildPreflight: %v", err)
+	}
+	if len(pf.Blockers) != 0 {
+		t.Fatalf("expected a clean, blocker-free pre-flight before the race, got: %v", pf.Blockers)
+	}
+
+	// The race: dirty a secret-shaped file AFTER pre-flight built its (now stale) clean picture.
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("API_KEY=secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.StartRun(context.Background(), run.ID, "tok_1", "EXECUTE"); !errors.Is(err, ErrCheckpointRefused) {
+		t.Fatalf("expected StartRun to fail with ErrCheckpointRefused despite the stale clean pre-flight, got: %v", err)
+	}
+	if out := strings.TrimSpace(gitRun(t, root, "status", "--porcelain", ".env")); out == "" {
+		t.Fatal(".env must remain uncommitted after a refused checkpoint")
+	}
+}
+
 // rawErrGit is a gitx.Client whose RevParseHead/StatusPorcelain return an error carrying raw
 // technical text (as a real git failure or a corrupted-repo condition might), to prove
 // checkGitReady never lets that text reach a Blocker string. Every other method panics: this test
@@ -186,7 +268,7 @@ func TestCheckGitReadyNeverLeaksRawErrorText(t *testing.T) {
 
 	t.Run("RevParseHead failure", func(t *testing.T) {
 		git := rawErrGit{revErr: errors.New("fatal: not a git repository (or any of the parent directories): .git\nexit status 128")}
-		blockers, notes := checkGitReady(git, t.TempDir(), "run-x")
+		blockers, notes := checkGitReady(git, t.TempDir(), "run-x", nil)
 		if len(notes) != 0 {
 			t.Fatalf("expected no notes on a hard git-repo failure, got: %v", notes)
 		}
@@ -202,7 +284,7 @@ func TestCheckGitReadyNeverLeaksRawErrorText(t *testing.T) {
 
 	t.Run("StatusPorcelain failure", func(t *testing.T) {
 		git := rawErrGit{statusErr: errors.New("fatal: index file corrupt\nexit status 128")}
-		blockers, notes := checkGitReady(git, t.TempDir(), "run-x")
+		blockers, notes := checkGitReady(git, t.TempDir(), "run-x", nil)
 		if len(notes) != 0 {
 			t.Fatalf("expected no notes on a hard git-status failure, got: %v", notes)
 		}
