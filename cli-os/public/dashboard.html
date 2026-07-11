@@ -921,11 +921,16 @@
   function finishRegister(data, btn, note, label){
     const mem=(data&&data.memory)||{};
     if(!mem.present_count){
-      // Registered fine, but be honest that there's no memory to inject yet. The repo is already
-      // stored server-side, so refresh the list/picker NOW — any way the user dismisses this
-      // modal (Done, Esc, backdrop, Cancel) must leave the UI consistent.
+      // Registered fine, but be honest that there's no memory to inject yet. Prefer the backend's
+      // OWN note (e.g. ".l00prite scaffolding failed: <reason>") over a generic fallback -- the
+      // server computes the real cause (read-only filesystem, permissions, ...) and a hardcoded
+      // "will be injected as soon as the folder exists" message would otherwise silently contradict
+      // it. The repo is already stored server-side, so refresh the list/picker NOW — any way the
+      // user dismisses this modal (Done, Esc, backdrop, Cancel) must leave the UI consistent.
       unbusy(btn,label);
-      note.innerHTML=`<div class="note warn"><b>Registered.</b> No <span class="mono">.l00prite</span> memory found in that folder yet — requests work, and memory is injected as soon as the folder exists.</div>`;
+      const detail = (data&&data.note) ? esc(data.note)
+        : `No <span class="mono">.l00prite</span> memory found in that folder yet — requests work, and memory is injected as soon as the folder exists.`;
+      note.innerHTML=`<div class="note warn"><b>Registered.</b> ${detail}</div>`;
       btn.textContent="Done"; btn.onclick=()=>closeModal();
       refresh();
       return;
