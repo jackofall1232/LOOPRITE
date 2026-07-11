@@ -917,6 +917,27 @@ func CommitUnit(git gitx.Client, root, message string) (string, error) {
 	return git.Commit(root, message)
 }
 
+// AutoCheckpoint commits ALL dirty paths — the user's own uncommitted work and .l00prite/ alike —
+// as a WIP checkpoint before the run branch is created. Including .l00prite/ matters: the gogit
+// backend's checkout goes through go-git's whole-tree, non-scopable dirty check (see
+// EnsureRunBranch's doc comment), so leaving any tracked .l00prite/ file dirty (e.g. right after
+// StartRun's own AcquireLock call rewrites lock.json) still trips it. This is deliberately a
+// commit, never a stash: a stash is invisible and easy to orphan for a non-technical user, while a
+// commit is durable, shows up in the project's normal history, and is exactly what the run's own
+// ledger entry can point to. Returns ("", nil) on an already-clean tree (both gitx backends' Commit
+// treats "nothing to commit" as success, and CommitUnit passes that through here).
+func AutoCheckpoint(git gitx.Client, root, runID string) (string, error) {
+	git = gitOrDetect(git)
+	out, err := git.StatusPorcelain(root)
+	if err != nil {
+		return "", fmt.Errorf("could not inspect the project's current state: %w", err)
+	}
+	if strings.TrimSpace(out) == "" {
+		return "", nil
+	}
+	return CommitUnit(git, root, "WIP: auto-checkpoint before run-"+runID)
+}
+
 // CurrentDiff returns a diff of the worktree against HEAD, capped at maxBytes (used by the
 // reviewer role). Under the go-git fallback this may be a file-status summary rather than a
 // hunk-level unified diff — see gitx.Client.DiffHead's doc comment.
