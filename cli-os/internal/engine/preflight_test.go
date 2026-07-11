@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -73,5 +76,66 @@ func TestBuildPreflightRecoversOwnUnexpiredLease(t *testing.T) {
 	}
 	if active := dig(snap.State, "execution_active"); active != false {
 		t.Fatalf("recovery should have cleared execution_active, got %v", active)
+	}
+}
+
+// Bug 2 fix: a dirty worktree at pre-flight time must surface as a Note, not a Blocker (a Blocker
+// disables the dashboard's Start button entirely, per dashboard.html's hasBlockers gate — making
+// StartRun's auto-checkpoint unreachable for exactly the users it exists for). StartRun must then
+// actually auto-checkpoint the dirty file rather than failing or leaving it for the user to handle.
+func TestDirtyWorktreeIsANoteNotABlockerAndAutoCheckpoints(t *testing.T) {
+	e := newEngine(t, &scriptedCaller{})
+	root := newRepo(t)
+
+	// Dirty a file OUTSIDE .l00prite/ -- the user's own unsaved work.
+	if err := os.WriteFile(filepath.Join(root, "draft.txt"), []byte("work in progress\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := e.Store.CreateRun("proj", root, RunConfig{RepoID: "r1", Goal: "test", CommandAllowlist: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pf, err := e.BuildPreflight(run)
+	if err != nil {
+		t.Fatalf("BuildPreflight: %v", err)
+	}
+	for _, b := range pf.Blockers {
+		if strings.Contains(b, "uncommitted") || strings.Contains(b, "draft.txt") {
+			t.Fatalf("a dirty worktree must not block Start (it should auto-checkpoint instead), got blocker: %q", b)
+		}
+	}
+	foundNote := false
+	for _, n := range pf.Notes {
+		if strings.Contains(n, "draft.txt") && strings.Contains(n, "checkpoint") {
+			foundNote = true
+		}
+	}
+	if !foundNote {
+		t.Fatalf("expected a Note about the pending auto-checkpoint mentioning draft.txt, got notes: %v", pf.Notes)
+	}
+	if run.Status != StatusReady {
+		t.Fatalf("a dirty-but-checkpointable worktree should leave the run ready to Start, got status %q", run.Status)
+	}
+
+	if err := e.StartRun(context.Background(), run.ID, "tok_1", "EXECUTE"); err != nil {
+		t.Fatalf("StartRun should auto-checkpoint the dirty file and proceed, got: %v", err)
+	}
+
+	// draft.txt must now be committed (checkpointed), not lost and not left dirty.
+	if out := strings.TrimSpace(gitRun(t, root, "status", "--porcelain", "draft.txt")); out != "" {
+		t.Fatalf("expected draft.txt to be checkpointed (clean), got status: %q", out)
+	}
+	log := gitRun(t, root, "log", "--oneline", "--all")
+	if !strings.Contains(log, "WIP: auto-checkpoint before run-"+run.ID) {
+		t.Fatalf("expected a WIP auto-checkpoint commit in history, got log: %s", log)
+	}
+
+	ledgerBytes, err := os.ReadFile(filepath.Join(root, ".l00prite", "ledger.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ledgerBytes), "auto-checkpoint before run "+run.ID) {
+		t.Fatalf("expected the checkpoint to be logged in ledger.md, got:\n%s", string(ledgerBytes))
 	}
 }
