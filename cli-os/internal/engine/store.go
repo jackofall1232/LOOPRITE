@@ -27,6 +27,10 @@ var (
 	// ErrAlreadyDecided is returned by the approval compare-and-set when the row was already
 	// decided by another actor; the caller receives the pre-existing decision unchanged.
 	ErrAlreadyDecided = errors.New("engine: approval already decided")
+	// ErrCheckpointFailed is returned by StartRun when the pre-run auto-checkpoint commit (the
+	// run's only unprompted state mutation) fails. Start must not proceed to checkout when this
+	// happens — nothing about the repository or the lock is left armed.
+	ErrCheckpointFailed = errors.New("engine: pre-run auto-checkpoint failed")
 )
 
 // Store persists runs, run events, and approvals over the shared state DB.
