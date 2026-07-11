@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,6 +171,71 @@ func TestRunsAPICreateStartComplete(t *testing.T) {
 	if evs, _ := eb["events"].([]any); len(evs) == 0 {
 		t.Fatal("event feed should not be empty")
 	}
+}
+
+// Bug 2 fix, defense-in-depth: whatever StartRun fails for, the client-facing error message must
+// be plain English -- never a raw technical string (a Go error prefix like "engine:", the literal
+// confirm-token wording, or, per this diagnosis run's root cause, raw git/go-git text such as
+// "worktree contains unstaged changes"). The full technical detail still goes to the audit log
+// (asserted separately would require direct DB access; here we assert the HTTP-facing message is
+// clean, which is what a non-technical user actually sees).
+func TestRunsAPIStartErrorsAreHumanized(t *testing.T) {
+	srv, token, _ := runEngineServer(t)
+
+	resp, body := doJSON(t, "POST", srv.URL+"/v1/runs", token, map[string]any{
+		"repo": "r1", "goal": "create out.txt", "command_allowlist": []string{"true"}, "max_iterations": 5,
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("create must be 200, got %d (%v)", resp.StatusCode, body)
+	}
+	runID := body["run"].(map[string]any)["id"].(string)
+
+	// Wrong confirm token: StartRun's bare "start requires confirm:..." error is not a typed
+	// sentinel, so it must fall through humanizeStartError's generic case -- never echo the raw
+	// error text (which would otherwise leak the exact expected confirm string).
+	resp2, body2 := doJSON(t, "POST", srv.URL+"/v1/runs/start", token, map[string]any{"id": runID, "confirm": "not-execute"})
+	if resp2.StatusCode == 200 {
+		t.Fatal("start without confirm=EXECUTE must not succeed")
+	}
+	msg := errMessage(t, body2)
+	for _, raw := range []string{"EXECUTE", "start requires confirm", "engine:"} {
+		if strings.Contains(msg, raw) {
+			t.Fatalf("start-rejected message leaked raw internal text %q: %q", raw, msg)
+		}
+	}
+	if msg != "Something went wrong preparing the project for this run. Nothing was started. Details were logged for support." {
+		t.Fatalf("unexpected humanized message: %q", msg)
+	}
+
+	// Successfully start the run, then try to start it again: run.Status is no longer "ready", so
+	// StartRun returns the ErrBadState-wrapped "run is ... rebuild the pre-flight" error -- this
+	// must also come through humanized, not as the raw wrapped Go error text.
+	if resp, b := doJSON(t, "POST", srv.URL+"/v1/runs/start", token, map[string]any{"id": runID, "confirm": "EXECUTE"}); resp.StatusCode != 200 {
+		t.Fatalf("start must be 200, got %d (%v)", resp.StatusCode, b)
+	}
+	resp3, body3 := doJSON(t, "POST", srv.URL+"/v1/runs/start", token, map[string]any{"id": runID, "confirm": "EXECUTE"})
+	if resp3.StatusCode != 409 {
+		t.Fatalf("re-starting an already-started run must be 409, got %d (%v)", resp3.StatusCode, body3)
+	}
+	msg3 := errMessage(t, body3)
+	for _, raw := range []string{"engine:", "rebuild the pre-flight (it must be ready", "run is \""} {
+		if strings.Contains(msg3, raw) {
+			t.Fatalf("run_not_ready message leaked raw internal text %q: %q", raw, msg3)
+		}
+	}
+	if !strings.Contains(msg3, "Rebuild pre-flight") {
+		t.Fatalf("expected the humanized run_not_ready message to point the user at Rebuild pre-flight, got: %q", msg3)
+	}
+}
+
+func errMessage(t *testing.T, body map[string]any) string {
+	t.Helper()
+	e, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected an error object in response body: %v", body)
+	}
+	msg, _ := e["message"].(string)
+	return msg
 }
 
 // A run in another project is invisible (404, no cross-project leak).
