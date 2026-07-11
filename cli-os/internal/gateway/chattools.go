@@ -12,6 +12,7 @@ package gateway
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -33,6 +34,13 @@ const (
 	chatMaxToolRounds   = 6 // bounds the tool-call loop in runChatTools (loop.go)
 	chatMaxToolCallsRun = 24
 )
+
+// chatSearchMaxFilesWalked bounds the total number of file entries searchFiles's WalkDir visits,
+// independent of how many actually match -- without this, a rare or non-matching query against a
+// very large repo walks and opens every eligible file with no bound at all, tying up the request
+// goroutine for as long as the tree takes to traverse. A var, not a const, so tests can lower it
+// instead of needing to create tens of thousands of fixture files on disk.
+var chatSearchMaxFilesWalked = 20000
 
 // chatSecretDeny is a fixed set of filename/path patterns that read_file and search_files refuse
 // to return content for, regardless of the repo owner's own .gitignore. This is a conservative
@@ -250,7 +258,15 @@ func (c chatToolbox) readFile(args map[string]any) string {
 	if isChatSecretPath(filepath.ToSlash(resolvedRel)) {
 		return "DENIED: this path looks like a credential or key file; it is never readable from chat"
 	}
-	data, err := os.ReadFile(resolvedAbs)
+	// Bounded read: a file far larger than the cap (a multi-GB log, a binary blob) must not be
+	// loaded into memory in full just to be truncated afterward — os.Open + io.LimitReader stops
+	// reading at the cap instead, mirroring internal/engine/tools.go's Toolbox.readFile.
+	f, err := os.Open(resolvedAbs)
+	if err != nil {
+		return "ERROR: " + err.Error()
+	}
+	data, err := io.ReadAll(io.LimitReader(f, chatReadCapBytes+1))
+	f.Close()
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -374,7 +390,7 @@ func (c chatToolbox) searchFiles(args map[string]any) string {
 	}
 
 	var b strings.Builder
-	count, truncated := 0, false
+	count, truncated, filesWalked := 0, false, 0
 
 	_ = filepath.WalkDir(c.Root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -385,6 +401,11 @@ func (c chatToolbox) searchFiles(args map[string]any) string {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		filesWalked++
+		if filesWalked > chatSearchMaxFilesWalked {
+			truncated = true
+			return filepath.SkipAll
 		}
 		// A symlinked file is reported as a non-dir entry; os.ReadFile follows it like a normal
 		// open(), so without this check search_files could read arbitrary host files that
@@ -441,6 +462,9 @@ func (c chatToolbox) searchFiles(args map[string]any) string {
 	})
 
 	if b.Len() == 0 {
+		if truncated {
+			return "(no matches found before the search was truncated: too many files to search)"
+		}
 		return "(no matches)"
 	}
 	out := b.String()
