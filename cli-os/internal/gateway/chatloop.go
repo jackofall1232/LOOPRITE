@@ -108,7 +108,14 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 	}
 
 	for round := 0; round < chatMaxToolRounds; round++ {
-		forcedFinal := toolCallsUsed >= chatMaxToolCallsRun
+		// Forcing the LAST round final (not just a call-cap round) matters: without it, a model that
+		// keeps calling chat tools right up to the round cap gets its tool calls executed locally
+		// (results appended to nextMessages) but the loop then exits WITHOUT ever sending those
+		// results back to the model for a real answer -- `last` would be that final round's raw
+		// response, which still carries unresolved tool_calls naming chat tools the CLIENT doesn't
+		// own and was never asked to execute, and whose results were silently dropped. Stripping the
+		// chat tools here forces the model to answer with content instead.
+		forcedFinal := toolCallsUsed >= chatMaxToolCallsRun || round == chatMaxToolRounds-1
 		turnReq := convo
 		if forcedFinal {
 			turnReq = stripChatTools(convo, activeNames)
@@ -179,6 +186,11 @@ func RunChatTools(app *App, requestID, project, repoID, repoRoot string, openaiR
 // from a request's tools array, leaving any client-supplied tools -- including one that happens to
 // share a chat-tool name and was therefore never active -- untouched. Used for the forced-final
 // round so the model cannot keep calling chat tools once the per-turn budget is spent.
+//
+// tool_choice mirrors stripBridgeTool's handling (bridge.go): a request that pins tool_choice to
+// one of the now-removed chat tools (e.g. {"type":"function","function":{"name":"read_file"}})
+// would otherwise still be forced to call a tool that no longer appears in the request's tools
+// array, which most upstream providers reject as invalid input rather than silently ignoring.
 func stripChatTools(req map[string]any, activeNames map[string]bool) map[string]any {
 	out := copyMap(req)
 	var tools []any
@@ -191,6 +203,9 @@ func stripChatTools(req map[string]any, activeNames map[string]bool) map[string]
 		out["tools"] = tools
 	} else {
 		delete(out, "tools")
+	}
+	if tc := asMap(out["tool_choice"]); tc != nil && activeNames[asStr(asMap(tc["function"])["name"])] {
+		delete(out, "tool_choice")
 	}
 	return out
 }
