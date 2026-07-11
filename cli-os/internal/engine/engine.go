@@ -7,6 +7,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -98,14 +99,27 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 		return fmt.Errorf("could not acquire .l00prite lease to arm the run: %w", err)
 	}
 
+	// Read the Denylist fresh (not from a possibly-stale pre-flight) so AutoCheckpoint's refusal
+	// gate below is race-proof against a file dirtied after BuildPreflight last ran.
+	denylistSnap, dlerr := f.ReadSnapshot()
+	if dlerr != nil {
+		_ = f.ReleaseLock(run.ID)
+		return fmt.Errorf("could not read .l00prite memory to check the auto-checkpoint against your Denylist: %w", dlerr)
+	}
+	denylist := ParseDenylist(denylistSnap.Constraints)
+
 	// Auto-checkpoint: commit EVERYTHING dirty, including .l00prite/ (the AcquireLock call just
 	// above rewrote lock.json, and the gogit backend's checkout dirty-check is whole-tree with no
 	// path exemption — see AutoCheckpoint's doc comment), so the run branch is created from a
 	// clean tree. This is the run's only unprompted state mutation, and it is deliberately a
-	// commit, never a stash.
-	checkpointHash, cerr := AutoCheckpoint(e.Git, run.RepoRoot, run.ID)
+	// commit, never a stash. AutoCheckpoint itself refuses (ErrCheckpointRefused) rather than
+	// committing a Denylisted or credential-shaped dirty path.
+	checkpointHash, cerr := AutoCheckpoint(e.Git, run.RepoRoot, run.ID, denylist)
 	if cerr != nil {
 		_ = f.ReleaseLock(run.ID)
+		if errors.Is(cerr, ErrCheckpointRefused) {
+			return cerr // preserve the more specific sentinel for humanizeStartError
+		}
 		return fmt.Errorf("%w: %v", ErrCheckpointFailed, cerr)
 	}
 	if checkpointHash != "" {
