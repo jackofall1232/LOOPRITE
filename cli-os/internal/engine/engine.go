@@ -98,6 +98,38 @@ func (e *Engine) StartRun(ctx context.Context, runID, confirmedBy, confirm strin
 		return fmt.Errorf("could not acquire .l00prite lease to arm the run: %w", err)
 	}
 
+	// Auto-checkpoint: commit EVERYTHING dirty, including .l00prite/ (the AcquireLock call just
+	// above rewrote lock.json, and the gogit backend's checkout dirty-check is whole-tree with no
+	// path exemption — see AutoCheckpoint's doc comment), so the run branch is created from a
+	// clean tree. This is the run's only unprompted state mutation, and it is deliberately a
+	// commit, never a stash.
+	checkpointHash, cerr := AutoCheckpoint(e.Git, run.RepoRoot, run.ID)
+	if cerr != nil {
+		_ = f.ReleaseLock(run.ID)
+		return fmt.Errorf("%w: %v", ErrCheckpointFailed, cerr)
+	}
+	if checkpointHash != "" {
+		if lederr := f.AppendLedger(LedgerEntry{
+			Timestamp: now, RunID: run.ID,
+			Goal:            "auto-checkpoint before run " + run.ID,
+			TriggeringEvent: "none",
+			Decision:        "auto-commit dirty worktree before creating the run branch",
+			CompletedWork:   "WIP checkpoint commit " + checkpointHash,
+			ChangedFiles:    "all uncommitted changes at Start time (including .l00prite/)",
+			EventStatus:     "not applicable",
+			Confidence:      "high — mechanical checkpoint; user work preserved in commit " + checkpointHash,
+			NextAction:      "run branch created on top of this checkpoint",
+			LockNote:        "checkpointed under the run's own lease",
+		}); lederr != nil {
+			// A ledger write failure here must not abort an already-successful checkpoint (the
+			// user's work is safely committed either way) — record it as a run event instead,
+			// mirroring BuildPreflight's tolerance for a failed recovery-note write.
+			_, _ = e.Store.AppendEvent(run.ID, EvStatus, map[string]any{
+				"warning": "failed to record the auto-checkpoint in ledger.md: " + lederr.Error(),
+			})
+		}
+	}
+
 	branch := runBranch(run.ID)
 	if err := EnsureRunBranch(e.Git, run.RepoRoot, branch); err != nil {
 		_ = f.ReleaseLock(run.ID)
