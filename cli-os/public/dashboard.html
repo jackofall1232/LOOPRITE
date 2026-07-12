@@ -936,8 +936,9 @@
     return presetsPromise;
   }
   function findProvider(name){ return ((S.summary&&S.summary.providers)||[]).find(p=>p.name===name); }
-  // Bumped by every open/close so a stale async modal builder (add()) can detect the modal was
-  // closed or reopened while it was awaiting something, and bail before overwriting the DOM.
+  // Bumped by every open/close, and by add() itself (to reserve a generation before awaiting
+  // loadPresets()), so a stale async modal builder can detect the modal was closed or reopened
+  // while it was awaiting something, and bail before overwriting the DOM.
   let modalGen = 0;
   function openModal(html){ modalGen++; $("modal-body").innerHTML=html; $("modal").classList.remove("hidden"); }
   function openWideModal(html){ openModal(html); $("modal").classList.add("wide"); }
