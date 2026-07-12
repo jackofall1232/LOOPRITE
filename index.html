@@ -619,7 +619,9 @@
         <ul>
           <li><b>Pre-flight gate</b> — goal, budget, boundaries and scope shown before you confirm</li>
           <li><b>Nine run boundaries</b> — from <code>iteration_limit_reached</code> to <code>destructive_operation_required</code>, every exit is resumable</li>
-          <li><b>Per-action approval</b> — push, merge, deploy, and credentials each need a fresh yes</li>
+          <li><b>Per-action approval</b> — merge, deploy, and credential changes always need a fresh
+            yes; push and pull-request creation do too by default, unless a project opts into the
+            Auto-PR toggle to pre-approve just those two</li>
           <li><b>Self-modification guard</b> — the loop can never raise its own limits</li>
         </ul>
       </div>

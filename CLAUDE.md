@@ -228,12 +228,12 @@ channel for the L00prite OS Android app — the shipped APK must never trail mer
   the Android section's download button + `#sha-val`). Verify with `apksigner verify` (v2+v3
   true) and `aapt dump badging` (confirms `versionName`) before shipping — never claim a build
   succeeded without checking its actual output.
-- **Versioning is `MAJOR.MINOR.PATCH-beta`.** Bump `PATCH` (+0.0.1) for a minor change (a bug
-  fix, a small UI tweak, docs). Bump `MINOR` (+0.1.0, reset `PATCH` to 0) for a major change
+- **Versioning is `MAJOR.MINOR.PATCH-beta`.** Bump `PATCH` (+0.0.1) for a small change (a bug
+  fix, a small UI tweak, docs). Bump `MINOR` (+0.1.0, reset `PATCH` to 0) for a bigger change
   (a new feature, a security fix, a schema/API change, anything a user would notice as new
   capability rather than a polish pass). **Never reach `1.0.0` until an explicit
   production-release decision is made** — betas stay `0.x.y-beta` indefinitely until then.
-- `internal/gateway/dashboard.go`'s `Version` var, the APK's `--version-name` (set from the
+- `cli-os/internal/gateway/dashboard.go`'s `Version` var, the APK's `--version-name` (set from the
   same string passed to `build-apk.sh`), `CHANGELOG.md`'s newest heading, and `index.html`'s
   displayed filename/SHA-256 must all move together as one atomic set — never independently,
   never left to drift.
