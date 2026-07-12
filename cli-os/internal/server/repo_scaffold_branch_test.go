@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jackofall1232/l00prite/cli-os/internal/engine"
 )
 
 // ---- git test helpers (this package has no existing one; internal/engine's and internal/gitx's
@@ -136,5 +138,75 @@ func TestRepoScaffoldBranchWritesFullProtocolOnANewBranch(t *testing.T) {
 	branchList := gitRunSrv(t, repoDir, "branch", "--list", "l00prite/add-protocol-*")
 	if strings.Count(branchList, "l00prite/add-protocol-") != 1 {
 		t.Fatalf("expected exactly one add-protocol branch (no pointless second branch), got: %q", branchList)
+	}
+}
+
+// TestRepoScaffoldBranchCommitsGitignoredProtocolFiles (Codex review finding on PR #10):
+// CommitUnit stages via `git add -A`, which respects the target repo's own .gitignore. A repo
+// that gitignores `.l00prite/` (a realistic choice for a repo that treats it as local state) must
+// still get those files force-added into the commit — otherwise the response reports them as
+// created while the pushed branch is silently missing the "full protocol" it claims to carry.
+func TestRepoScaffoldBranchCommitsGitignoredProtocolFiles(t *testing.T) {
+	srv, _, _, _, token := configured(t)
+	base := srv.URL
+
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".gitignore"), []byte(".l00prite/\nGEMINI.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepoWithCommit(t, repoDir)
+
+	if resp, body := doJSON(t, "POST", base+"/v1/repos", token, map[string]any{"id": "gitignored", "root": repoDir, "project": "ops"}); resp.StatusCode != 200 {
+		t.Fatalf("register must be 200, got %d (%v)", resp.StatusCode, body)
+	}
+	resp, body := doJSON(t, "POST", base+"/v1/repos/scaffold-branch", token, map[string]any{"id": "gitignored"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("scaffold-branch must be 200, got %d (%v)", resp.StatusCode, body)
+	}
+	commit, _ := body["commit"].(string)
+	if commit == "" {
+		t.Fatalf("expected a real commit hash, got %v", body)
+	}
+
+	// The gitignored paths must actually be IN the commit, not just written to disk.
+	show := gitRunSrv(t, repoDir, "show", "--stat", commit)
+	for _, want := range []string{".l00prite/blueprint.md", "GEMINI.md"} {
+		if !strings.Contains(show, want) {
+			t.Fatalf("gitignored path %q missing from the commit despite being reported as created; git show --stat: %q", want, show)
+		}
+	}
+	status := gitRunSrv(t, repoDir, "status", "--porcelain", "--ignored")
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("working tree should be clean (gitignored paths committed, not left dangling): %q", status)
+	}
+}
+
+// TestRepoScaffoldBranchForeignLockRefusesWithoutCreatingABranch: when another session genuinely
+// holds this repo's lock, the request must 409 WITHOUT ever creating a branch — the read-only
+// peek happens before EnsureRunBranch specifically so a blocked request doesn't leave a pointless
+// branch behind (see HandleRepoScaffoldBranch's comment on why the real acquire moved after the
+// checkout instead).
+func TestRepoScaffoldBranchForeignLockRefusesWithoutCreatingABranch(t *testing.T) {
+	srv, _, _, _, token := configured(t)
+	base := srv.URL
+
+	repoDir := t.TempDir()
+	initGitRepoWithCommit(t, repoDir)
+	if resp, body := doJSON(t, "POST", base+"/v1/repos", token, map[string]any{"id": "lockedrepo", "root": repoDir, "project": "ops"}); resp.StatusCode != 200 {
+		t.Fatalf("register must be 200, got %d (%v)", resp.StatusCode, body)
+	}
+
+	files := engine.Files{Root: repoDir}
+	if _, _, err := files.AcquireLock("some-other-active-run", "simulated concurrent run", 300); err != nil {
+		t.Fatalf("test setup: could not acquire the foreign lock: %v", err)
+	}
+
+	resp, body := doJSON(t, "POST", base+"/v1/repos/scaffold-branch", token, map[string]any{"id": "lockedrepo"})
+	if resp.StatusCode != 409 {
+		t.Fatalf("expected 409 while a foreign lock is held, got %d (%v)", resp.StatusCode, body)
+	}
+	branches := gitRunSrv(t, repoDir, "branch", "--list", "l00prite/add-protocol-*")
+	if strings.TrimSpace(branches) != "" {
+		t.Fatalf("a refused request must not create a branch, but found: %q", branches)
 	}
 }

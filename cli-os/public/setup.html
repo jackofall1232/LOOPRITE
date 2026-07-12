@@ -321,7 +321,8 @@
       <select id="adapter">${presets.map(p =>
         `<option value="${esc(p.key)}">${esc(p.display_name)}</option>`).join("")}</select>
       <div class="row">
-        <div><label>Provider name</label><input type="text" id="pname" class="mono-in" placeholder="anthropic"></div>
+        <div><label>Provider name</label><input type="text" id="pname" class="mono-in" placeholder="anthropic">
+          <div id="pnamewarn" style="font-size:11.5px;color:var(--text-3);margin-top:4px"></div></div>
         <div id="modelwrap"><label>Model to test <span class="opt" id="modelhint">— optional</span></label><input type="text" id="pmodel" class="mono-in" placeholder="auto (first known model)"></div>
       </div>
       <div id="keywrap"><label>API key</label><input type="password" id="pkey" class="mono-in" placeholder="sk-…" autocomplete="off"></div>
@@ -356,6 +357,21 @@
         mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-4o"
       };
     }
+    // Codex review finding (PR #10): renaming a manifest-backed preset away from its key means
+    // adapters.ModelsFor(newName) finds no catalog under that name, so this provider won't be
+    // found by bare-model/auto/default routing or listed in /v1/models — only explicit
+    // "name/model" pins still work. There's no server-side fix for this yet (it would mean
+    // persisting the originating preset key separately from the display name); until then, warn
+    // rather than silently let the key validate into a partially-broken state.
+    function syncNameWarning(){
+      const p=byKey[adapterSel.value];
+      const warn=document.getElementById("pnamewarn");
+      if(p && p.key!=="custom" && nameIn.value.trim() && nameIn.value.trim()!==p.key){
+        warn.innerHTML=`⚠ Renamed from the default "<span class="mono">${esc(p.key)}</span>" — this provider will only be reachable by pinning "${esc(nameIn.value.trim())}/&lt;model&gt;" explicitly, not by automatic or default model routing.`;
+      } else {
+        warn.innerHTML="";
+      }
+    }
     function syncAdapter(){
       const d=presetDefaults(byKey[adapterSel.value]);
       if(!nameIn.dataset.touched) nameIn.value=d.name;
@@ -363,10 +379,11 @@
       baseIn.value=d.base; baseHint.textContent=d.baseHint;
       document.getElementById("modelhint").textContent=d.mHint;
       document.getElementById("pmodel").placeholder=d.mPh;
+      syncNameWarning();
       resetValidation();
     }
     function resetValidation(){ epoch++; validated=false; addBtn.disabled = !skip.checked; if(!skip.checked) note.innerHTML=""; }
-    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; resetValidation(); };
+    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; syncNameWarning(); resetValidation(); };
     [baseIn,document.getElementById("pkey"),document.getElementById("pmodel")].forEach(el=>el.oninput=resetValidation);
     adapterSel.onchange=syncAdapter;
     skip.onchange=()=>{ if(skip.checked){ addBtn.disabled=false; note.innerHTML=`<div class="note warn">Skipping validation — the provider is stored as-is; a bad key will only fail on the first real request.</div>`; } else { resetValidation(); note.innerHTML=""; } };

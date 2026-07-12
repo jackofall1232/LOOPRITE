@@ -259,6 +259,9 @@ func (rawErrGit) Raw(ctx context.Context, repo string, args ...string) (string, 
 func (rawErrGit) CurrentBranch(repo string) (string, error) {
 	panic("not used by checkGitReady")
 }
+func (rawErrGit) AddPaths(repo string, paths []string) error {
+	panic("not used by checkGitReady")
+}
 
 var _ gitx.Client = rawErrGit{}
 

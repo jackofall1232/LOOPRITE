@@ -766,6 +766,45 @@ func TestFullProtocolGapsOnEmptyDir(t *testing.T) {
 	}
 }
 
+// TestFullProtocolGapsCatchesMissingBaselineFiles: a repo carrying ONLY ScaffoldFull's own
+// additions (AGENTS.md, prompts, adapters, CLAUDE.md) but missing the baseline Scaffold() memory
+// files (e.g. because the auto-scaffold on register/clone was skipped by a foreign lock, or
+// failed on a read-only filesystem) must NOT be reported as gap-free — otherwise the "Add
+// l00prite" repair action would see already_complete and never call ScaffoldFull to fill in
+// blueprint.md/state.json/etc.
+func TestFullProtocolGapsCatchesMissingBaselineFiles(t *testing.T) {
+	dir := t.TempDir()
+	f := Files{Root: dir}
+	// Write ONLY the full-protocol extras "by hand", simulating a leftover/manual copy —
+	// deliberately not via ScaffoldFull, so the baseline is genuinely absent.
+	writeFile(t, filepath.Join(dir, "AGENTS.md"), "leftover AGENTS.md")
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "leftover CLAUDE.md")
+	for _, rel := range fullProtocolTargets() {
+		if rel == "AGENTS.md" {
+			continue
+		}
+		writeFile(t, filepath.Join(dir, filepath.FromSlash(rel)), "leftover")
+	}
+	missing, claudeMissing := f.FullProtocolGaps()
+	if claudeMissing {
+		t.Error("CLAUDE.md exists, claudeMissing should be false")
+	}
+	if len(missing) == 0 {
+		t.Fatal("expected the missing baseline files to still be reported as gaps")
+	}
+	for _, want := range []string{".l00prite/blueprint.md", ".l00prite/state.json"} {
+		found := false
+		for _, m := range missing {
+			if m == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected %q in missing, got %v", want, missing)
+		}
+	}
+}
+
 func TestScaffoldFullWritesEverythingThenIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	f := Files{Root: dir}

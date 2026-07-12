@@ -82,22 +82,43 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 	// is the safe, already-precedented choice here.
 	originalBranch, _ := git.CurrentBranch(root)
 
-	if _, _, aerr := files.AcquireLock(scaffoldBranchSession, "full protocol scaffold branch", 120); aerr != nil {
-		oaiError(w, 409, "Could not scaffold: another agent currently holds this repo's lock ("+aerr.Error()+"). Try again once its run finishes.", "invalid_request_error", "lock_held")
+	// Peek (read-only) before creating a branch at all: a genuinely foreign, unexpired lock should
+	// 409 without ever touching git — same "reduce, not eliminate" race this codebase's other lock
+	// checks accept (repos.go's registerScaffoldSession comment). The real acquire (a write) happens
+	// AFTER the checkout below, never before it — see that comment for why.
+	curLock, lerr := files.ReadLock()
+	if lerr != nil {
+		oaiError(w, 500, "Could not read this repo's lock state: "+lerr.Error(), "configuration_error", "")
 		return
 	}
-	// No `defer` release: releasing writes lock.json, and a write that lands AFTER CommitUnit
-	// leaves the new branch's working tree dirty the moment this handler returns (the same class
-	// of bug this codebase's own PR #6/#7 review rounds fixed for the ledger append and the lease
-	// write — see CLAUDE.md's Run Ledger). Every path below releases explicitly BEFORE the commit,
-	// so the released lock.json state is part of that single commit, not stranded after it.
+	if engine.LockAvailability(curLock, scaffoldBranchSession) == "foreign" {
+		oaiError(w, 409, "Could not scaffold: another agent currently holds this repo's lock. Try again once its run finishes.", "invalid_request_error", "lock_held")
+		return
+	}
+
+	// Branch checkout happens BEFORE the lock acquire (a write to .l00prite/lock.json), not
+	// after — reproduced via a real gogit repo: go-git's CheckoutNewBranch (unlike real git's
+	// `checkout -B`) errors on ANY dirty TRACKED file, even one that's already committed on this
+	// exact commit and would be byte-identical either way. Once lock.json has been committed once
+	// (every repo this action has already run on), acquiring the lock first would dirty a tracked
+	// file and break every subsequent call on the gogit/Android backend — the same class of
+	// ordering bug this codebase's PR #6/#7 rounds already fixed for the ledger append and the run
+	// engine's lease write (see engine.go's StartRun: checkout, THEN acquire, THEN scaffold).
 	branch := "l00prite/add-protocol-" + strings.TrimPrefix(util.RID("x"), "x_")
 	if err := engine.EnsureRunBranch(git, root, branch); err != nil {
-		_ = files.ReleaseLock(scaffoldBranchSession)
 		oaiError(w, 400, "Could not create a branch: "+err.Error()+". Commit or stash any other uncommitted changes first — files already in .l00prite/ don't block this.", "invalid_request_error", "branch_failed")
 		return
 	}
 
+	if _, _, aerr := files.AcquireLock(scaffoldBranchSession, "full protocol scaffold branch", 120); aerr != nil {
+		oaiError(w, 409, "Created branch \""+branch+"\" but could not acquire the lock: "+aerr.Error()+". Another agent must have started a run between the check above and now — try again.", "invalid_request_error", "lock_held")
+		return
+	}
+	// No `defer` release: releasing writes lock.json, and a write that lands AFTER CommitUnit
+	// leaves the new branch's working tree dirty the moment this handler returns (the same class
+	// of bug referenced above, just for the release write instead of the branch-vs-acquire order).
+	// Every path below releases explicitly BEFORE the commit, so the released lock.json state is
+	// part of that single commit, not stranded after it.
 	created, claudeSkipped, serr := files.ScaffoldFull(filepath.Base(root), "")
 	if serr != nil {
 		_ = files.ReleaseLock(scaffoldBranchSession)
@@ -107,6 +128,21 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 
 	if rerr := files.ReleaseLock(scaffoldBranchSession); rerr != nil {
 		oaiError(w, 500, "Wrote the protocol files on branch \""+branch+"\" but failed to release the lock: "+rerr.Error(), "configuration_error", "")
+		return
+	}
+
+	// Force-add EVERY canonical protocol path (not just `created`) BEFORE the general AddAll
+	// below: CommitUnit stages via `git add -A`, which respects the target repo's own
+	// .gitignore, so a repo that ignores `.l00prite/` (or any scaffolded path) would otherwise
+	// silently drop those files from the commit while this response still reports them as
+	// created. Using the full canonical set — not just what THIS call wrote — matters because a
+	// file can already exist uncommitted from an earlier partial scaffold (the baseline
+	// auto-scaffold on register runs before ScaffoldFull ever does) and be just as gitignored;
+	// force-adding an already-clean or already-staged path is a harmless no-op either way.
+	// AddAll (inside CommitUnit) still picks up anything else dirty, e.g. the lock-release write
+	// above.
+	if aerr := git.AddPaths(root, files.FullProtocolPaths()); aerr != nil {
+		oaiError(w, 500, "Wrote the protocol files on branch \""+branch+"\" but failed to stage them: "+aerr.Error(), "configuration_error", "")
 		return
 	}
 

@@ -122,6 +122,19 @@ func (c execClient) AddAll(repo string) error {
 	return err
 }
 
+// AddPaths force-stages specific repo-relative paths, bypassing .gitignore (`git add -f`) — for
+// callers that must guarantee particular generated files land in the next commit regardless of
+// the target repo's own ignore rules (e.g. scaffolding `.l00prite/` into a repo that gitignores
+// it). A no-op for an empty paths slice, not an error.
+func (c execClient) AddPaths(repo string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	args := append([]string{"add", "-f", "--"}, paths...)
+	_, err := c.runTimed(repo, args...)
+	return err
+}
+
 // commitIdentityMissing are the git stderr substrings emitted when no user.name/user.email is
 // configured anywhere (system/global/local) — exactly the failure a first-boot Android host hits
 // with no gitconfig at all.

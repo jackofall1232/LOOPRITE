@@ -957,7 +957,8 @@
       <div class="field"><label>Provider</label>
         <select id="m-adapter">${presets.map(p =>
           `<option value="${esc(p.key)}">${esc(p.display_name)}</option>`).join("")}</select></div>
-      <div class="field"><label>Provider name</label><input type="text" id="m-name" placeholder="anthropic"></div>
+      <div class="field"><label>Provider name</label><input type="text" id="m-name" placeholder="anthropic">
+        <div id="m-namewarn" style="font-size:11.5px;color:var(--text-3);margin-top:4px"></div></div>
       <div class="field" id="m-modelwrap"><label>Model to test <span class="opt" id="m-modelhint">— optional</span></label><input type="text" id="m-model" placeholder="auto (first known model)"></div>
       <div class="field" id="m-keywrap"><label>API key</label><input type="password" id="m-key" placeholder="sk-…" autocomplete="off"></div>
       <div class="field" id="m-basewrap"><label>Base URL <span class="opt" id="m-basehint"></span></label><input type="text" id="m-base"></div>
@@ -990,19 +991,35 @@
       };
     }
     function resetV(){ epoch++; const gate=!skip.checked; addBtn.disabled=gate; if(gate) note.innerHTML=""; }
+    // Codex review finding (PR #10): renaming a manifest-backed preset away from its key means
+    // adapters.ModelsFor(newName) finds no catalog under that name, so this provider won't be
+    // found by bare-model/auto/default routing or listed in /v1/models — only explicit
+    // "name/model" pins still work. There's no server-side fix for this yet (it would mean
+    // persisting the originating preset key separately from the display name); until then, warn
+    // rather than silently let the key validate into a partially-broken state.
+    function syncNameWarning(){
+      const p=byKey[adapterSel.value];
+      const warn=g("m-namewarn");
+      if(p && p.key!=="custom" && nameIn.value.trim() && nameIn.value.trim()!==p.key){
+        warn.innerHTML=`⚠ Renamed from the default "<span class="mono">${esc(p.key)}</span>" — this provider will only be reachable by pinning "${esc(nameIn.value.trim())}/&lt;model&gt;" explicitly, not by automatic or default model routing.`;
+      } else {
+        warn.innerHTML="";
+      }
+    }
     function sync(){
       const d=presetDefaults(byKey[adapterSel.value]);
       if(!nameIn.dataset.touched) nameIn.value=d.name;
       nameIn.placeholder=d.namePh;
       baseIn.value=d.base; baseHint.textContent=d.hint;
       g("m-modelhint").textContent=d.mHint; g("m-model").placeholder=d.mPh;
+      syncNameWarning();
       resetV();
     }
     // Fall back to the preset's own sample model when the field is left blank: the server would
     // otherwise auto-pick by looking up the POSTED provider NAME in the manifest, which misses if
     // the user renamed the provider away from the preset key (e.g. "gemini" -> "my-gemini-key").
     function body(){ const p=byKey[adapterSel.value]||CUSTOM_PRESET; const model=g("m-model").value.trim()||p.sample_model||""; return {name:nameIn.value.trim(), adapter:p.adapter, base_url:baseIn.value.trim(), api_key:g("m-key").value, model}; }
-    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; resetV(); };
+    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; syncNameWarning(); resetV(); };
     [baseIn,g("m-key"),g("m-model")].forEach(el=>el.oninput=resetV);
     adapterSel.onchange=sync;
     skip.onchange=()=>{ if(skip.checked){ addBtn.disabled=false; note.innerHTML=`<div class="note warn">Skipping validation — a bad key will only fail on the first real request.</div>`; } else resetV(); };

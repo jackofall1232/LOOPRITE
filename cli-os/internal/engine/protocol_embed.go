@@ -74,11 +74,34 @@ func fullProtocolTargets() []string {
 	return out
 }
 
-// FullProtocolGaps reports, without writing anything, which of ScaffoldFull's files are missing
-// and whether CLAUDE.md itself is absent. Callers use this to decide whether a scaffold action
-// has anything to do before creating a branch for it — a repo that already has the full
-// protocol should never get a pointless empty branch.
+// baselineScaffoldPaths mirrors Scaffold()'s own file list in l00pfiles.go (kept in sync by
+// hand — the same "separate copy, documented" discipline this file's own protocol/ template
+// mirror already uses). Used only to detect whether the baseline memory scaffold ever actually
+// ran, never to write anything itself — Scaffold()'s own createIfMissing calls remain the only
+// place these files get written.
+var baselineScaffoldPaths = []string{
+	".l00prite/blueprint.md", ".l00prite/ledger.md", ".l00prite/memory.md", ".l00prite/todos.md",
+	".l00prite/failures.md", ".l00prite/constraints.md", ".l00prite/heartbeat.json",
+	".l00prite/state.json", ".l00prite/lock.json", ".l00prite/LOCKING.md", ".l00prite/README.md",
+	".l00prite/events/pending/README.md", ".l00prite/events/processing/README.md",
+	".l00prite/events/completed/README.md",
+}
+
+// FullProtocolGaps reports, without writing anything, which of Scaffold()'s AND ScaffoldFull's
+// files are missing, and whether CLAUDE.md itself is absent. Callers use this to decide whether
+// a scaffold action has anything to do before creating a branch for it — a repo that already has
+// everything should never get a pointless empty branch. Checking the baseline files too (not
+// just ScaffoldFull's own additions) matters because the baseline auto-scaffold on register/clone
+// can legitimately be skipped (e.g. a foreign lock held at that moment — see repos.go) or fail
+// (a read-only filesystem); without this, a repo missing blueprint.md/state.json/etc. but
+// otherwise carrying leftover AGENTS.md/prompts would be misreported as already_complete and
+// ScaffoldFull would never run to repair it.
 func (f Files) FullProtocolGaps() (missing []string, claudeMissing bool) {
+	for _, rel := range baselineScaffoldPaths {
+		if _, err := os.Stat(filepath.Join(f.Root, filepath.FromSlash(rel))); os.IsNotExist(err) {
+			missing = append(missing, rel)
+		}
+	}
 	for _, rel := range fullProtocolTargets() {
 		if _, err := os.Stat(filepath.Join(f.Root, filepath.FromSlash(rel))); os.IsNotExist(err) {
 			missing = append(missing, rel)
@@ -88,6 +111,21 @@ func (f Files) FullProtocolGaps() (missing []string, claudeMissing bool) {
 		claudeMissing = true
 	}
 	return missing, claudeMissing
+}
+
+// FullProtocolPaths returns every repo-relative path the full-protocol scaffold owns: the
+// baseline Scaffold() files, ScaffoldFull's own additions, and CLAUDE.md. Callers use this —
+// not ScaffoldFull's own "created" return value — to decide what to force-add before committing:
+// "created" only lists what THIS call actually wrote, so a file that already existed uncommitted
+// from an earlier partial scaffold (e.g. the baseline auto-scaffold on register, which runs
+// before ScaffoldFull ever does) would be silently skipped if the target repo gitignores it,
+// even though it's just as much "the protocol" as anything freshly written this call.
+func (f Files) FullProtocolPaths() []string {
+	out := make([]string, 0, len(baselineScaffoldPaths)+len(fullProtocolCopies)+2)
+	out = append(out, baselineScaffoldPaths...)
+	out = append(out, fullProtocolTargets()...)
+	out = append(out, "CLAUDE.md")
+	return out
 }
 
 // ScaffoldFull writes the full l00prite protocol surface: it first runs the same baseline
