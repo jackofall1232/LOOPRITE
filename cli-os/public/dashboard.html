@@ -222,13 +222,18 @@
   .field input[type=text],.field input[type=password],.field select,.field textarea{width:100%;padding:10px 12px;border-radius:var(--r-md);background:var(--input-bg);border:1px solid var(--stroke);color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none;}
   .field input:focus,.field select:focus,.field textarea:focus{border-color:rgba(79,140,255,.6);}
   .field.check{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text-2);cursor:pointer;}
-  .field.check input{width:16px;height:16px;accent-color:var(--accent);}
+  /* Explicit background/border so the UNCHECKED box is never left to native appearance:auto theming —
+     under color-scheme:dark a browser's own dark checkbox widget can render with a near-black fill and
+     no visible edge against a dark card (accent-color alone only paints the CHECKED state). Modern
+     browsers honor author background/border on appearance:auto checkboxes, so this doesn't require
+     appearance:none or a custom-drawn widget. */
+  .field.check input{width:16px;height:16px;accent-color:var(--accent);background:var(--input-bg-solid);border:1px solid var(--stroke-2);border-radius:4px;}
   .modal-actions{display:flex;gap:10px;margin-top:20px;align-items:center;}
   .modal-actions .spacer{flex:1;}
   .modelgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;max-height:290px;overflow-y:auto;}
   .modelrow{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--stroke);border-radius:var(--r-sm);font-family:var(--font-mono);font-size:12px;cursor:pointer;}
   .modelrow input{accent-color:var(--accent);flex:0 0 auto;}
-  .modelrow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .modelrow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
   @media (max-width:560px){ .modelgrid{grid-template-columns:1fr;} .modal .box{max-width:none;} }
 
   /* playground — prompt the models straight from the dashboard */
@@ -455,6 +460,7 @@
         <div class="sec-head"><h2>Runs</h2>
           <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
             <span class="meta" id="runs-meta"></span>
+            <button class="btn sm" id="autopr-btn" style="display:none"><svg class="ico" style="width:15px;height:15px"><use href="#i-key"/></svg> PR automation</button>
             <button class="btn sm primary" id="new-run-btn" style="display:none"><svg class="ico" style="width:15px;height:15px"><use href="#i-run"/></svg> New run</button>
           </div>
         </div>
@@ -574,6 +580,7 @@
     $("add-provider-btn").style.display="";
     $("add-repo-btn").style.display="";
     $("new-run-btn").style.display="";
+    $("autopr-btn").style.display="";
     $("budget-btn").style.display="";
     // header
     const providersOnline=(d.system&&d.system.providers_healthy)||0, providersTotal=(d.system&&d.system.providers_total)||0;
@@ -790,6 +797,57 @@
     };
   }
 
+  // ---- Auto-PR (Runs → PR automation) ----
+  // Line-for-line the same shape as openBudgetModal above: GET to prefill, radio pair, a warn
+  // note that appears only for the riskier choice, POST to save, afterMutation() on success.
+  // Scope is deliberately narrow and stated in the copy every time -- push + gh pr create only,
+  // merge is never affected by this toggle anywhere in the stack (see engine.GateClassAutoApprovable).
+  async function openAutoPRModal(){
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Runs</div>
+      <h3>Automatic push &amp; pull-request approval</h3>
+      <div class="sub" id="ap-sub">Loading…</div>
+      <div class="field">
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+          <label class="field check" style="align-items:flex-start"><input type="radio" name="ap-mode" value="off" checked style="margin-top:2px">
+            <span><b>Ask me every time</b><div style="color:var(--text-3);font-size:11.5px;margin-top:2px">Every git push and every <span class="mono">gh pr create</span> inside a run waits for your per-action approval. The default.</div></span></label>
+          <label class="field check" style="align-items:flex-start"><input type="radio" name="ap-mode" value="on" style="margin-top:2px">
+            <span><b>Auto-approve push &amp; PR-create</b><div style="color:var(--text-3);font-size:11.5px;margin-top:2px">Runs for this project may push their run branch and open a pull request without waiting for you. Scope is exactly those two actions: merging is <b>never</b> automatic, and destructive commands, deploys, credential changes and anything outside the repo still stop and ask you, exactly as before.</div></span></label>
+        </div>
+      </div>
+      <div id="ap-warn"></div>
+      <div id="ap-note"></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="ap-save" disabled>Save</button>
+      </div>`);
+    const warn=$("ap-warn"), note=$("ap-note"), saveBtn=$("ap-save");
+    const modeRadios=()=>[...document.querySelectorAll('input[name="ap-mode"]')];
+    function curMode(){ const r=modeRadios().find(x=>x.checked); return r?r.value:"off"; }
+    function syncMode(){
+      warn.innerHTML = curMode()==="on"
+        ? `<div class="note warn"><b>You will still see it all:</b> every run's pre-flight lists these gates before you type EXECUTE, and each auto-approved push or PR appears in the run's live feed the moment it happens. Nothing is ever merged without you.</div>`
+        : "";
+    }
+    modeRadios().forEach(r=>r.onchange=syncMode);
+    syncMode();
+    const project=(S.summary&&S.summary.principal&&S.summary.principal.project)||"default";
+    $("ap-sub").innerHTML = `Applies to project <span class="mono">${esc(project)}</span>. Affects only autonomous Runs — the Add-l00prite-to-repo flow keeps its own per-click consent.`;
+    saveBtn.disabled=true;
+    const {res,data}=await api("GET","/v1/auto-pr");
+    if(!res.ok || !data){ note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not load the current Auto-PR setting."))}</div>`; saveBtn.disabled=false; return; }
+    saveBtn.disabled=false;
+    modeRadios().forEach(r=>{ r.checked = r.value===(data.enabled?"on":"off"); });
+    syncMode();
+    saveBtn.onclick=async()=>{
+      busy(saveBtn,"Saving…");
+      const {res,data:resp}=await api("POST","/v1/auto-pr",{enabled: curMode()==="on"});
+      if(!res.ok){ unbusy(saveBtn,"Save"); note.innerHTML=`<div class="note err">${esc(mErr(resp,"Could not save the Auto-PR setting."))}</div>`; return; }
+      afterMutation();
+    };
+  }
+
   function renderRepos(d){
     const repos=d.repos||[]; $("repos-meta").textContent = repos.length? repos.length+" registered":"";
     if(!repos.length){ $("repos-body").innerHTML=`<div class="empty"><b>No repositories registered.</b> Connect one so the model can read its files and its <code>.l00prite</code> memory is injected into requests — a memory folder is set up automatically.<div style="margin-top:12px"><button class="btn primary sm" data-action="repo-add">Register a repository</button></div></div>`; return; }
@@ -987,8 +1045,8 @@
         hint: p.base_url ? "— default shown; edit if self-hosting"
                          : "— required, e.g. https://api.openai.com/v1",
         mHint: p.sample_model ? "— optional; a known model is picked"
-                              : "— usually required (no built-in catalog), e.g. gpt-4o",
-        mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-4o"
+                              : "— usually required (no built-in catalog), e.g. gpt-5",
+        mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-5"
       };
     }
     function resetV(){ epoch++; const gate=!skip.checked; addBtn.disabled=gate; if(gate) note.innerHTML=""; }
@@ -1148,16 +1206,43 @@
   // so the two entry points can never render this differently.
   function scaffoldResultNote(sdata){
     if(sdata.already_complete){
-      return `<div class="note ok">This repo already has the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor adapters) — nothing to add.</div>`;
+      // Prefer the SERVER's own note: it may now carry pending-branch state ("a previous attempt
+      // created branch X, push it with…") or the out-of-band-cleared sentence. The hardcoded string
+      // is only a fallback for an older server that sent no note — never let it hide a real pending
+      // push the operator still needs to make (scaffoldRepo() can send open_pr:false).
+      return `<div class="note ok">${esc(sdata.note || "This repo already has the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor adapters) — nothing to add.")}</div>`;
     }
     const n=(sdata.files_created||[]).length;
+    // On a retry nothing new was necessarily committed (the branch already existed), so the "N files
+    // committed" clause would be factually false — include it only when files really were created.
+    const committedLine=n>0?`(${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""})`:``;
+    // A retry reuses an EXISTING branch rather than creating a new one; say so honestly instead of
+    // the fresh-scaffold "added on a new branch" headline.
+    const added=sdata.retry?`<b>Retried</b> for existing branch`:`<b>l00prite added</b> on a new branch`;
+    // sdata.pr_url / sdata.capability_gap only ever appear when the request asked for open_pr —
+    // mutually exclusive by construction on the server (repo_scaffold.go), never both set.
+    if(sdata.pr_url){
+      return `<div class="note ok">${added} <span class="mono">${esc(sdata.branch)}</span> ${committedLine}, pushed to origin, and
+          a pull request was opened: <a href="${esc(sdata.pr_url)}" target="_blank" rel="noopener">${esc(sdata.pr_url)}</a>.</div>
+        <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing merges automatically —
+          a human still needs to review and merge (or close) this pull request.</div>`;
+    }
     const pushCmd=sdata.push_instructions||"";
-    return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span>
-        (${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""}).</div>
-      <div class="mono" style="background:var(--bg-2,rgba(127,127,127,.08));border-radius:8px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:10px;overflow-x:auto">
-        <span style="flex:1;white-space:nowrap">${esc(pushCmd)}</span>
-        <button class="btn tiny" data-copy="${esc(pushCmd)}">Copy</button>
-      </div>
+    const copyBlock=(label,cmd)=>`<div class="mono" style="background:var(--bg-2,rgba(127,127,127,.08));border-radius:8px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:10px;overflow-x:auto">
+        <span style="flex:1;white-space:nowrap">${esc(cmd)}</span>
+        <button class="btn tiny" data-copy="${esc(cmd)}">Copy</button>
+      </div>`;
+    if(sdata.capability_gap){
+      // A gap here means push+PR was requested but couldn't be attempted (or the push landed and
+      // only `gh pr create` failed, in which case sdata.pr_command carries the follow-up command)
+      // — the branch and commit ALWAYS still happened locally, so the manual push instructions
+      // remain the honest fallback either way.
+      return `<div class="note ok">${added} <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
+        <div class="note warn" style="margin-top:8px">${esc(sdata.capability_gap)}</div>
+        ${copyBlock("push", sdata.pr_command||pushCmd)}`;
+    }
+    return `<div class="note ok">${added} <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
+      ${copyBlock("push", pushCmd)}
       <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing was pushed automatically — push
         this branch and open a pull request against your default branch to bring the full l00prite methodology in.</div>`;
   }
@@ -1165,7 +1250,11 @@
     const mem=(data&&data.memory)||{};
     if(scaffoldFull && repoId){
       busy(btn,"Adding l00prite…");
-      api("POST","/v1/repos/scaffold-branch",{id:repoId}).then(({res,data:sdata})=>{
+      // scaffoldFull IS this action's per-action permission (the checkbox is now explicitly
+      // labeled "Create a branch, push it, and open a pull request" — see addRepo()), so it also
+      // supplies open_pr: a headless caller of this same endpoint that never rendered that label
+      // gets the server's own default of false (see repo_scaffold.go's repoScaffoldBranchReq).
+      api("POST","/v1/repos/scaffold-branch",{id:repoId, open_pr:true}).then(({res,data:sdata})=>{
         unbusy(btn,"Done"); btn.onclick=()=>{ closeModal(); refresh(); };
         note.innerHTML = res.ok
           ? scaffoldResultNote(sdata)
@@ -1219,10 +1308,12 @@
         <div class="field"><label>Project <span class="opt">— only same-project tokens can use a repo; this token's project is <span class="mono">${esc(project)}</span></span></label>
           <input type="text" id="rp-project" value="${esc(project)}" autocomplete="off"></div>
       </div>
-      <label class="field check"><input type="checkbox" id="rp-scaffold" checked> Add l00prite to this repo
-        <span class="opt">— creates a branch with the full protocol (AGENTS.md, the loop prompts, and the
-        vendor adapter files) so any AI agent gets the full benefit, not just the memory folder. Nothing is
-        pushed automatically.</span></label>
+      <label class="field check"><input type="checkbox" id="rp-scaffold" checked> Create a branch, push it, and open a pull request
+        <span class="opt">— writes the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor
+        adapter files) on a new branch, pushes it using this gateway host's own git/GitHub CLI credentials,
+        and opens a pull request. l00prite never merges it — a human reviews and merges (or closes) the pull
+        request. If pushing or opening a PR isn't possible from this host, the branch and commit still happen
+        locally and you'll get copy-paste push instructions instead.</span></label>
       <div id="rp-note"></div>
       <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Clone &amp; register</button></div>`);
     const cloneGroup=document.getElementById("rp-clone-group"), pathGroup=document.getElementById("rp-path-group");
@@ -1268,21 +1359,29 @@
   }
   // scaffoldRepo is the standalone "Add l00prite" action for an already-registered repo (the
   // Register-repo modal's checkbox above covers the at-registration-time path; this covers a
-  // repo registered earlier, or one where the checkbox was left unchecked).
+  // repo registered earlier, or one where the checkbox was left unchecked). Unlike that modal,
+  // this one keeps "add the protocol" and "push it and open a PR" as two separately visible
+  // choices, since here they're genuinely two different asks in the same flow (a repo someone
+  // already registered may still just want the local branch).
   function scaffoldRepo(id){
     openModal(`
       <div class="eyebrow"><span class="tick"></span> Add l00prite</div>
       <h3>Add the full l00prite protocol to <span class="mono">${esc(id)}</span></h3>
       <div class="sub">Creates a local branch and commits AGENTS.md, the six loop prompts, and the vendor
         adapter files this repo doesn't already have — the parts today's automatic memory-folder
-        scaffold deliberately skips. Nothing is pushed automatically.</div>
+        scaffold deliberately skips.</div>
+      <label class="field check"><input type="checkbox" id="sc-open-pr" checked> Also push this branch and open a pull request
+        <span class="opt">— using this gateway host's own git/GitHub CLI credentials. l00prite never merges it —
+        a human reviews and merges (or closes) the pull request. If pushing or opening a PR isn't possible from
+        this host, the branch and commit still happen locally and you'll get copy-paste push instructions instead.</span></label>
       <div id="sc-note"></div>
       <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div>
         <button class="btn primary" id="sc-go">Add l00prite</button></div>`);
     const note=document.getElementById("sc-note"), btn=document.getElementById("sc-go");
     btn.onclick=async()=>{
+      const openPR=document.getElementById("sc-open-pr").checked;
       busy(btn,"Adding l00prite…");
-      const {res,data}=await api("POST","/v1/repos/scaffold-branch",{id});
+      const {res,data}=await api("POST","/v1/repos/scaffold-branch",{id, open_pr:openPR});
       unbusy(btn,"Done");
       if(!res.ok){ note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not add l00prite."))}</div>`; btn.onclick=()=>scaffoldRepo(id); return; }
       note.innerHTML=scaffoldResultNote(data);
@@ -1309,16 +1408,21 @@
   }
 
   // ---- run creation ----
-  const GATE_CLASSES=[["push","Push"],["merge","Merge"],["deploy","Deploy"],["credential_change","Credential change"],["destructive","Destructive"],["outside_repo","Outside repo"]];
+  const GATE_CLASSES=[["push","Push"],["pr_create","PR create"],["merge","Merge"],["deploy","Deploy"],["credential_change","Credential change"],["destructive","Destructive"],["outside_repo","Outside repo"]];
   // Shared id->label lookup so gate names read the same everywhere a non-engineer reviews or acts on
   // them: the create-run modal, the pre-flight gate pills, and the live approval cards.
   const GATE_LABELS=Object.fromEntries(GATE_CLASSES);
-  const GATE_ACTION_LABELS={require_approval:"Require approval", deny:"Deny"};
+  const GATE_ACTION_LABELS={require_approval:"Require approval", deny:"Deny", auto_approve:"Auto-approve"};
+  // Mirrors engine.GateClassAutoApprovable client-side -- kept as a small literal list (not
+  // fetched from the server) so the select itself structurally cannot offer auto_approve for an
+  // ineligible class even before a round trip; CreateRun still re-validates server-side regardless.
+  const GATE_AUTO_APPROVABLE=["push","pr_create"];
   function gateLabel(cls){ return GATE_LABELS[cls]||cls; }
   function gateActionLabel(action){ return GATE_ACTION_LABELS[action]||action; }
   function gateSelectField(cls,label){
+    const autoOpt = GATE_AUTO_APPROVABLE.includes(cls) ? `<option value="auto_approve">${esc(gateActionLabel("auto_approve"))}</option>` : "";
     return `<div><div style="font-size:11px;color:var(--text-3);margin-bottom:4px">${esc(label)}</div>
-      <select id="cr-gate-${esc(cls)}"><option value="require_approval" selected>${esc(gateActionLabel("require_approval"))}</option><option value="deny">${esc(gateActionLabel("deny"))}</option></select></div>`;
+      <select id="cr-gate-${esc(cls)}"><option value="require_approval" selected>${esc(gateActionLabel("require_approval"))}</option><option value="deny">${esc(gateActionLabel("deny"))}</option>${autoOpt}</select></div>`;
   }
   function createRunModal(){
     const repos=(S.summary&&S.summary.repos)||[];
@@ -1350,6 +1454,7 @@
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:6px">
             ${GATE_CLASSES.map(([cls,label])=>gateSelectField(cls,label)).join("")}
           </div>
+          <div id="cr-autopr-note"></div>
         </div>
       </details>
       <div id="cr-note"></div>
@@ -1362,6 +1467,40 @@
     repoSel.onchange=syncCloneFields; objSel.onchange=syncPrivacyNote;
     syncCloneFields(); syncPrivacyNote();
     repoSel.focus();
+    // Pre-fill push/pr_create to auto_approve when the project's Auto-PR setting is ON, so what
+    // the human sees in these selects before EXECUTE already reflects the project default (they
+    // can still tighten either one for just this run). A failed GET or an OFF project leaves the
+    // selects at their fail-closed default (require_approval) -- never silently loosened.
+    //
+    // gateTouched guards against a race (PR review, chatgpt-codex-connector): this GET is async,
+    // so a user who opens the modal and immediately tightens a select by hand -- before the
+    // network round trip resolves -- must never have that explicit choice silently overwritten
+    // back to auto_approve once it does. Once a select fires "change" (a real user edit; setting
+    // sel.value programmatically below does not fire it), the prefill skips that class for good.
+    const gateTouched = new Set();
+    GATE_AUTO_APPROVABLE.forEach(cls=>{
+      const sel=document.getElementById("cr-gate-"+cls);
+      if(sel) sel.addEventListener("change", ()=>gateTouched.add(cls));
+    });
+    // myModalGen guards against a second race (PR review, chatgpt-codex-connector), on top of
+    // gateTouched above: if this modal is closed and a NEW create-run modal opened before this
+    // GET resolves, both instances render the same "cr-gate-*" element ids into the shared
+    // #modal-body -- so the OLD instance's callback, once it does resolve, would otherwise reach
+    // through document.getElementById and silently overwrite the NEW instance's selects (and its
+    // own, empty-at-capture-time gateTouched would never have caught it). Mirrors the existing
+    // modalGen/myGen pattern already used for this exact class of stale-async-callback race
+    // elsewhere (see editModels above).
+    const myModalGen = modalGen;
+    api("GET","/v1/auto-pr").then(({res,data})=>{
+      if(myModalGen !== modalGen) return;
+      if(!res.ok || !data || !data.enabled) return;
+      GATE_AUTO_APPROVABLE.forEach(cls=>{
+        if(gateTouched.has(cls)) return;
+        const sel=document.getElementById("cr-gate-"+cls); if(sel) sel.value="auto_approve";
+      });
+      const noteEl=document.getElementById("cr-autopr-note");
+      if(noteEl) noteEl.innerHTML=`<div class="note" style="margin-top:8px">Auto-PR is ON for this project — push and PR-create are pre-set to auto-approve. You can still tighten either for this run.</div>`;
+    });
     submitBtn.onclick=async()=>{
       const goal=document.getElementById("cr-goal").value.trim();
       if(!goal){ note.innerHTML=`<div class="note err">Describe the goal for this run.</div>`; return; }
@@ -1434,7 +1573,11 @@
     const unitsHtml = units.length ? `<ul style="margin:6px 0 0;padding-left:18px">${units.map(u=>`<li>${esc(u.text)}</li>`).join("")}</ul>` : `<div style="color:var(--text-3)">—</div>`;
     const allowHtml = (pf.command_allowlist||[]).length ? `<ul class="mono" style="margin:6px 0 0;padding-left:18px;font-size:12px">${pf.command_allowlist.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>` : `<div style="color:var(--text-3)">—</div>`;
     const gatesEntries=Object.entries(pf.gates||{});
-    const gatesHtml = gatesEntries.length ? gatesEntries.map(([k,v])=>`<span class="pill idle" style="margin:2px 6px 2px 0"><span class="d"></span>${esc(gateLabel(k))}: ${esc(gateActionLabel(v))}</span>`).join("") : `<div style="color:var(--text-3)">—</div>`;
+    // auto_approve gets the amber "warn" pill (same palette as the Auto-PR modal's warn note) so
+    // it visually jumps out during pre-flight review -- a human deciding whether to type EXECUTE
+    // must be able to tell at a glance which classes will run unattended, not have to read every
+    // value. require_approval/deny stay the neutral "idle" pill, unchanged from before this toggle.
+    const gatesHtml = gatesEntries.length ? gatesEntries.map(([k,v])=>`<span class="pill ${v==="auto_approve"?"warn":"idle"}" style="margin:2px 6px 2px 0"><span class="d"></span>${esc(gateLabel(k))}: ${esc(gateActionLabel(v))}</span>`).join("") : `<div style="color:var(--text-3)">—</div>`;
     const pathsHtml = (pf.likely_changed_paths||[]).length ? `<div class="mono" style="font-size:12px;color:var(--text-2)">${pf.likely_changed_paths.map(p=>esc(p)).join(", ")}</div>` : `<div style="color:var(--text-3)">—</div>`;
     const permHtml = (pf.per_action_permission||[]).length ? pf.per_action_permission.map(c=>`<span class="pill idle" style="margin:2px 6px 2px 0">${esc(c)}</span>`).join("") : `<div style="color:var(--text-3)">—</div>`;
     const denyHtml = (pf.denylist||[]).length ? `<div class="mono" style="font-size:11.5px;color:var(--text-2);line-height:1.7">${pf.denylist.map(g=>esc(g)).join("<br>")}</div>` : `<div style="color:var(--text-3)">—</div>`;
@@ -1546,6 +1689,10 @@
       }
       case "approval_requested": return `<div class="msg assistant">approval requested: ${esc(p.class||"")} — ${esc(p.action||"")}</div>`;
       case "approval_decided": return `<div class="msg assistant">approval ${esc(p.decision||"")}: ${esc(p.action||"")}</div>`;
+      // Engine emits EvAutoApproved (never EvApprovalDone) for a project-Auto-PR auto-approval, so
+      // it must have its own case here too -- otherwise it would silently fall through to the
+      // generic "default" branch below and render as a raw, unexplained event kind in the feed.
+      case "approval_auto_approved": return `<div class="msg assistant"><b>Auto-approved:</b> ${esc(p.action||p.class||"")}</div>`;
       case "boundary": return `<div class="note warn" style="margin:8px 0"><b>${esc(String(p.boundary||"").replace(/_/g," "))}</b><div style="margin-top:4px">${esc(p.summary||"")}</div></div>`;
       case "status": return `<div class="msg assistant mono">${Object.entries(p).map(([k,v])=>esc(k)+": "+esc(typeof v==="object"?JSON.stringify(v):v)).join(" · ")}</div>`;
       case "error": return `<div class="msg err">${esc(p.message||JSON.stringify(p))}</div>`;
@@ -1849,6 +1996,7 @@
   $("play-scope-warn").addEventListener("click",e=>{ const b=e.target.closest("[data-action='register-scope']");
     if(b) addRepo(b.dataset.repo); });
   $("new-run-btn").onclick=()=>createRunModal();
+  $("autopr-btn").onclick=()=>openAutoPRModal();
   $("runs-body").addEventListener("click",e=>{
     const b=e.target.closest("[data-action]");
     if(b && b.dataset.action==="run-add"){ createRunModal(); return; }

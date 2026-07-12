@@ -45,8 +45,15 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 	if app.Engine != nil { // propose_run needs the run engine; same repoRoot gate as the read tools below
 		activeNames[chatRunToolName] = true
 	}
+	// clientToolNames records every tool name the CLIENT's own request defines, independent of
+	// whether it collides with a gateway-active name. Used below (unownedToolResult) so a client
+	// tool that happens to be named e.g. "git_command" is still deferred to the client -- never
+	// hijacked into a capability-gap answer the client never asked for.
+	clientToolNames := map[string]bool{}
 	for _, t := range asArr(openaiReq["tools"]) {
-		delete(activeNames, asStr(asMap(asMap(t)["function"])["name"]))
+		name := asStr(asMap(asMap(t)["function"])["name"])
+		clientToolNames[name] = true
+		delete(activeNames, name)
 	}
 
 	if repoRoot == "" || len(activeNames) == 0 {
@@ -161,15 +168,31 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 		msg := messageOf(turn.Response)
 		toolCalls := asArr(msg["tool_calls"])
 		chatCalls := 0
+		hasCapabilityGapCall := false // see below: the realistic single-call round this exists for
 		for _, tcRaw := range toolCalls {
-			if activeNames[asStr(asMap(asMap(tcRaw)["function"])["name"])] {
+			name := asStr(asMap(asMap(tcRaw)["function"])["name"])
+			if activeNames[name] {
 				chatCalls++
+				continue
+			}
+			// A model most often proposes ONE tool call per round, not a mix -- so "the model asked
+			// for git/gh/shell and nothing else this round" is the common case, not an edge case. If
+			// this loop only kept going when chatCalls > 0 (i.e. some OTHER, gateway-active tool was
+			// ALSO called the same round), a solo execution-shaped call nobody owns would fall
+			// straight into the early-return below with its tool_call left completely unresolved and
+			// unanswered -- never even reaching unownedToolResult -- which is the exact dead end this
+			// file exists to close. clientToolNames still wins first: a client-owned name here does
+			// NOT set this flag, so the default "let the client handle its own tools" behavior below
+			// is unchanged.
+			if !clientToolNames[name] && executionShapedTool(name) {
+				hasCapabilityGapCall = true
 			}
 		}
-		if forcedFinal || chatCalls == 0 {
-			// No chat-tool call this round: return the response as-is (with accumulated cost/usage
-			// folded in). Any client tool_calls the model proposed pass through untouched -- the
-			// client executes those itself exactly as it always has, no behavior change for that case.
+		if forcedFinal || (chatCalls == 0 && !hasCapabilityGapCall) {
+			// No chat-tool call this round and nothing needs a capability-gap answer either: return
+			// the response as-is (with accumulated cost/usage folded in). Any client tool_calls the
+			// model proposed pass through untouched -- the client executes those itself exactly as it
+			// always has, no behavior change for that case.
 			return finalize(turn), nil
 		}
 
@@ -180,7 +203,11 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 			id := asStr(tc["id"])
 			name := asStr(asMap(tc["function"])["name"])
 			if !activeNames[name] {
-				nextMessages = append(nextMessages, toolResult(id, deferredClientTool(tc)))
+				// Nobody in this session owns this call: the client if it defined the name itself
+				// (unchanged deferral), otherwise -- for an execution-shaped name like git_command --
+				// a fixed capability-gap answer instead of the misleading "RE-EMIT this" instruction,
+				// which has no client waiting to run it on a path like the dashboard Playground.
+				nextMessages = append(nextMessages, toolResult(id, unownedToolResult(tc, clientToolNames[name], activeNames[chatRunToolName])))
 				continue
 			}
 			if toolCallsUsed >= chatMaxToolCallsRun {

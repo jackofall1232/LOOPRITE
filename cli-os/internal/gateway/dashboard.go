@@ -27,7 +27,7 @@ import (
 //	-ldflags "-X 'github.com/jackofall1232/l00prite/cli-os/internal/gateway.Version=<version>'"
 //
 // A plain `go build` / `go test` keeps this in-source default.
-var Version = "1.0.0"
+var Version = "0.4.1-beta"
 
 // provAgg is one provider's real, ledger-derived activity for the current UTC day.
 type provAgg struct {

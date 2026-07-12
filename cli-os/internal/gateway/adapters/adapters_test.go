@@ -84,6 +84,44 @@ func TestAnthropicSSEFold(t *testing.T) {
 	}
 }
 
+// TestOpenAICompatReasoningModelsUseMaxCompletionTokens pins the fix for the real upstream error
+// "Unsupported parameter: 'max_tokens' is not supported with this model. Use
+// 'max_completion_tokens' instead." — both gateway.TestProviderKey's validation ping and every
+// real inference call build their request through this one BuildRequest, so this single rename
+// point fixes both paths at once.
+func TestOpenAICompatReasoningModelsUseMaxCompletionTokens(t *testing.T) {
+	oc := openaiCompatAdapter{}
+	for _, model := range []string{"o1-preview", "o1-mini", "o3-mini", "o4-mini", "gpt-5", "gpt-5-mini", "GPT-5-Turbo"} {
+		body := oc.BuildRequest(model, map[string]any{
+			"messages": []any{map[string]any{"role": "user", "content": "ping"}}, "max_tokens": float64(1),
+		}, false)
+		if _, ok := body["max_tokens"]; ok {
+			t.Fatalf("%s: max_tokens must be renamed away, got %v", model, body["max_tokens"])
+		}
+		if numToInt(body["max_completion_tokens"]) != 1 {
+			t.Fatalf("%s: max_completion_tokens want 1 got %v", model, body["max_completion_tokens"])
+		}
+	}
+}
+
+// TestOpenAICompatNonReasoningModelsKeepMaxTokens guards against an over-broad rename: a
+// pre-reasoning-family OpenAI id (and every non-OpenAI openai-compat upstream, e.g. Zhipu/xAI/
+// Venice ids) must keep sending `max_tokens` unchanged.
+func TestOpenAICompatNonReasoningModelsKeepMaxTokens(t *testing.T) {
+	oc := openaiCompatAdapter{}
+	for _, model := range []string{"gpt-4-turbo", "gpt-3.5-turbo", "glm-5.2", "grok-4.5"} {
+		body := oc.BuildRequest(model, map[string]any{
+			"messages": []any{map[string]any{"role": "user", "content": "ping"}}, "max_tokens": float64(1),
+		}, false)
+		if _, ok := body["max_completion_tokens"]; ok {
+			t.Fatalf("%s: must not gain max_completion_tokens, got %v", model, body["max_completion_tokens"])
+		}
+		if numToInt(body["max_tokens"]) != 1 {
+			t.Fatalf("%s: max_tokens want 1 got %v", model, body["max_tokens"])
+		}
+	}
+}
+
 func TestOpenAICompatDropsStreamOptions(t *testing.T) {
 	oc := openaiCompatAdapter{}
 	body := oc.BuildRequest("gpt-x", map[string]any{
@@ -179,36 +217,37 @@ func TestGeminiManifest(t *testing.T) {
 		t.Fatalf("gemini adapter want openai-compat got %q", got)
 	}
 	models := ModelsFor("gemini")
-	if len(models) != 5 {
-		t.Fatalf("gemini ModelsFor want 5 models got %d: %v", len(models), models)
+	if len(models) != 3 {
+		t.Fatalf("gemini ModelsFor want 3 models got %d: %v", len(models), models)
 	}
-	// Pricing upgraded to first-party (2026-07-11): gemini-2.5-pro is now priced+confident.
-	p := PriceFor("gemini", "gemini-2.5-pro")
+	// gemini-2.5-pro/gemini-2.5-flash removed 2026-07-12 (no longer available); gemini-3.1-pro-preview
+	// is the current flagship and carries first-party pricing the same way 2.5-pro used to.
+	p := PriceFor("gemini", "gemini-3.1-pro-preview")
 	if p == nil || p.Input == nil || p.Output == nil {
-		t.Fatalf("gemini/gemini-2.5-pro must have a resolved price, got %+v", p)
+		t.Fatalf("gemini/gemini-3.1-pro-preview must have a resolved price, got %+v", p)
 	}
-	if *p.Input != 1.25 || *p.Output != 10.00 {
-		t.Fatalf("gemini/gemini-2.5-pro price want 1.25/10.00 got %v/%v", *p.Input, *p.Output)
+	if *p.Input != 2.00 || *p.Output != 12.00 {
+		t.Fatalf("gemini/gemini-3.1-pro-preview price want 2.00/12.00 got %v/%v", *p.Input, *p.Output)
 	}
 	if !p.Confident {
-		t.Fatalf("gemini/gemini-2.5-pro price must be first-party confident (price_confidence high)")
+		t.Fatalf("gemini/gemini-3.1-pro-preview price must be first-party confident (price_confidence high)")
 	}
-	if tier := PriceTierFor("gemini", "gemini-2.5-pro"); tier != 0 {
-		t.Fatalf("gemini/gemini-2.5-pro price tier want 0 (priced+confirmed) got %d", tier)
+	if tier := PriceTierFor("gemini", "gemini-3.1-pro-preview"); tier != 0 {
+		t.Fatalf("gemini/gemini-3.1-pro-preview price tier want 0 (priced+confirmed) got %d", tier)
 	}
 	if tier := PriceTierFor("gemini", "gemini-3.5-flash"); tier != 0 {
 		t.Fatalf("gemini/gemini-3.5-flash price tier want 0 (priced+confirmed) got %d", tier)
 	}
 	// context/max_output stay omitted (fail-closed): the 1M/65K figures are secondary-source-only.
-	if got := ContextFor("gemini", "gemini-2.5-pro"); got != nil {
-		t.Fatalf("gemini/gemini-2.5-pro context must be unverified (nil), got %v", *got)
+	if got := ContextFor("gemini", "gemini-3.1-pro-preview"); got != nil {
+		t.Fatalf("gemini/gemini-3.1-pro-preview context must be unverified (nil), got %v", *got)
 	}
-	caps := CapabilitiesFor("gemini", "gemini-2.5-pro")
+	caps := CapabilitiesFor("gemini", "gemini-3.1-pro-preview")
 	if b, _ := caps["tools"].(bool); !b {
-		t.Fatalf("gemini/gemini-2.5-pro must declare tools:true, got %v", caps)
+		t.Fatalf("gemini/gemini-3.1-pro-preview must declare tools:true, got %v", caps)
 	}
 	if b, _ := caps["vision"].(bool); !b {
-		t.Fatalf("gemini/gemini-2.5-pro must declare vision:true, got %v", caps)
+		t.Fatalf("gemini/gemini-3.1-pro-preview must declare vision:true, got %v", caps)
 	}
 }
 

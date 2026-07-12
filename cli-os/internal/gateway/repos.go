@@ -212,6 +212,10 @@ func (app *App) HandleRepoRemove(w http.ResponseWriter, r *http.Request) {
 		oaiError(w, 500, "Failed to remove repo: "+err.Error(), "configuration_error", "")
 		return
 	}
+	// Drop any pending "Add l00prite" retry state for this id: a re-registered id may later point at
+	// a DIFFERENT root, and a stale branch name from a months-old attempt on the old root must never
+	// survive removal to be reused against the new one. Best-effort — the repo row is already gone.
+	app.clearScaffoldAttempt(id)
 	app.auditAs(principal, "repo.remove", id)
 	sendJSON(w, 200, map[string]any{"removed": true, "id": id, "tokens_scoped": scopedTokens})
 }

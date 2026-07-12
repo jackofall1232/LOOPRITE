@@ -56,6 +56,7 @@ var RunBoundaries = []string{
 // Gate classes: the per-action-permission surface of execute-loop.md, as configurable gates.
 const (
 	GatePush             = "push"
+	GatePRCreate         = "pr_create" // gh pr create via run_command; never merge -- see GateClassAutoApprovable
 	GateMerge            = "merge"
 	GateDeploy           = "deploy"
 	GateCredentialChange = "credential_change"
@@ -64,15 +65,25 @@ const (
 )
 
 // GateClasses in display order.
-var GateClasses = []string{GatePush, GateMerge, GateDeploy, GateCredentialChange, GateDestructive, GateOutsideRepo}
+var GateClasses = []string{GatePush, GatePRCreate, GateMerge, GateDeploy, GateCredentialChange, GateDestructive, GateOutsideRepo}
 
-// Gate policies. There is deliberately NO "auto_allow": the strongest available grant is a
-// per-action human approval. Fail-closed: an unknown/absent policy reads as require_approval,
-// and an approval that times out is a deny.
+// Gate policies. auto_approve exists for exactly two classes — push and pr_create — and only via
+// a gates map the human reviewed at pre-flight before typing EXECUTE (typically filled in from
+// the per-project Auto-PR setting). Every other class fail-closes to require_approval; merge can
+// never be auto-approved. An auto_approve on any other class is rejected at CreateRun and ignored
+// (treated as require_approval) at runtime.
 const (
 	PolicyRequireApproval = "require_approval"
 	PolicyDeny            = "deny"
+	PolicyAutoApprove     = "auto_approve" // eligible ONLY for GatePush and GatePRCreate; see GateClassAutoApprovable
 )
+
+// GateClassAutoApprovable reports whether a gate class may ever carry PolicyAutoApprove.
+// Push and PR-create only — merge, destructive, deploy, credential_change and outside_repo
+// are structurally ineligible, everywhere, forever. This is the single source of truth consulted
+// by store.CreateRun (validation at creation), exec.awaitApproval (runtime re-check, defense in
+// depth against a hand-edited row), and the gateway's applyAutoPRGates (what the toggle may fill).
+func GateClassAutoApprovable(class string) bool { return class == GatePush || class == GatePRCreate }
 
 // Approval statuses.
 const (
@@ -191,6 +202,9 @@ const (
 	EvPersisted    = "persisted"
 	EvApprovalReq  = "approval_requested"
 	EvApprovalDone = "approval_decided"
+	// EvAutoApproved is distinct from EvApprovalDone so an audit query for human decisions is
+	// never polluted by project-Auto-PR auto-approvals -- see exec.go's awaitApproval.
+	EvAutoApproved = "approval_auto_approved"
 	EvBoundary     = "boundary"
 	EvStatus       = "status"
 	EvError        = "error"

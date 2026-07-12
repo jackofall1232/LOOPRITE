@@ -312,9 +312,11 @@ func RunBridge(app *App, requestID, project, repoID, repoRoot string, openaiReq 
 	providers := ListProviders(app.DB)
 
 	var clientTools []any
+	clientToolNames := map[string]bool{} // used below (unownedToolResult) so a client-owned name is never hijacked
 	for _, t := range asArr(openaiReq["tools"]) {
 		if asStr(asMap(asMap(t)["function"])["name"]) != BridgeToolName {
 			clientTools = append(clientTools, t)
+			clientToolNames[asStr(asMap(asMap(t)["function"])["name"])] = true
 		}
 	}
 	convo := copyMap(openaiReq)
@@ -362,12 +364,23 @@ func RunBridge(app *App, requestID, project, repoID, repoRoot string, openaiReq 
 		msg := messageOf(turn.Response)
 		toolCalls := asArr(msg["tool_calls"])
 		bridgeCalls := 0
+		hasCapabilityGapCall := false // see chatloop.go's identical guard for why this exists
 		for _, tc := range toolCalls {
-			if isBridgeCall(asMap(tc)) {
+			tcm := asMap(tc)
+			if isBridgeCall(tcm) {
 				bridgeCalls++
+				continue
+			}
+			// A model most often proposes ONE tool call per round -- "the model asked for git/gh/
+			// shell and nothing else this round" is the common case, not a rare mix with a bridge
+			// call. Without this, that solo call would hit the early return below with its tool_call
+			// left completely unresolved, never reaching unownedToolResult at all.
+			name := asStr(asMap(tcm["function"])["name"])
+			if !clientToolNames[name] && executionShapedTool(name) {
+				hasCapabilityGapCall = true
 			}
 		}
-		if forcedFinal || bridgeCalls == 0 {
+		if forcedFinal || (bridgeCalls == 0 && !hasCapabilityGapCall) {
 			return BridgeResult{Response: turn.Response, SubCalls: subCalls, TotalCostUsd: totalCost, TotalUsage: totalUsage, Hops: hops, Unconfirmed: unconfirmed}, nil
 		}
 
@@ -377,7 +390,11 @@ func RunBridge(app *App, requestID, project, repoID, repoRoot string, openaiReq 
 			tc := asMap(tcRaw)
 			id := asStr(tc["id"])
 			if !isBridgeCall(tc) {
-				nextMessages = append(nextMessages, toolResult(id, deferredClientTool(tc)))
+				// Nobody in this session owns this call: the client if it defined the name itself
+				// (unchanged deferral), otherwise -- for an execution-shaped name like git_command --
+				// a fixed capability-gap answer instead of the misleading "RE-EMIT this" instruction.
+				// RunBridge has no propose_run concept, so proposeRunAvailable is always false here.
+				nextMessages = append(nextMessages, toolResult(id, unownedToolResult(tc, clientToolNames[asStr(asMap(tc["function"])["name"])], false)))
 				continue
 			}
 			if subCalls >= maxHops {

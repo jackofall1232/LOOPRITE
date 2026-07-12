@@ -114,8 +114,9 @@ func defaults() Config {
 				"venice/qwen3-coder-480b-a35b-instruct-turbo": 78,
 				"venice/deepseek-v4-pro":                      76,
 				"venice/openai-gpt-52":                        80,
-				"gemini/gemini-2.5-pro":                       84,
-				"gemini/gemini-2.5-flash":                     72,
+				"gemini/gemini-3.1-pro-preview":               84,
+				"gemini/gemini-3.5-flash":                     74,
+				"gemini/gemini-3.1-flash-lite":                68,
 			},
 			// roleRanks: seeded operator opinions (same nature as qualityRanks — opinions, not
 			// benchmarks) encoding the maintainer's role policy: Fable 5 architects/plans/reviews,

@@ -121,6 +121,27 @@ func mockHadChatToolCall(req map[string]any) bool {
 	return false
 }
 
+// mockHadCapabilityGapToolResult reports whether any tool-role message in the request carries the
+// gateway's fixed capability_gap marker (internal/gateway/capability.go). Distinct from
+// mockHadChatToolCall on purpose: a capability-gap tool result is produced for a tool call whose
+// NAME is deliberately NOT one of chatToolNamesForTest (that's the whole point -- it's a call
+// nobody in the session owns, e.g. "git_command"), so the existing name-based check can't see it.
+// Matching on the fixed marker string instead lets an end-to-end test drive a real HTTP round trip
+// and observe that the gateway's capability-gap note (not the old "RE-EMIT" deferral text) actually
+// reached the model's context in the next round.
+func mockHadCapabilityGapToolResult(req map[string]any) bool {
+	for _, mm := range asArr(req["messages"]) {
+		m := asMap(mm)
+		if asStr(m["role"]) != "tool" {
+			continue
+		}
+		if strings.Contains(asStr(m["content"]), `"status":"capability_gap"`) {
+			return true
+		}
+	}
+	return false
+}
+
 var chatToolDirectiveRE = regexp.MustCompile(`^/chattool\s+(\S+)\s+([\s\S]+)$`)
 
 type mockChatToolDirective struct{ name, argsJSON string }
@@ -207,8 +228,9 @@ func (mockAdapter) DirectFull(req map[string]any, model string) FullResult {
 	}
 
 	// Finalization turn after a chat-tool round trip: echo the tool result content back so a test
-	// can assert the real file/dir/search content made it into the model's context.
-	if mockHasToolResult(req) && mockHadChatToolCall(req) && !mockHadBridgeCall(req) {
+	// can assert the real file/dir/search content -- or, for a tool call nobody owned, the
+	// capability-gap note -- made it into the model's context.
+	if mockHasToolResult(req) && (mockHadChatToolCall(req) || mockHadCapabilityGapToolResult(req)) && !mockHadBridgeCall(req) {
 		var excerpt string
 		msgs := asArr(req["messages"])
 		for i := len(msgs) - 1; i >= 0; i-- {

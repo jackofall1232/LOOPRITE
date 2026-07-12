@@ -150,7 +150,7 @@
       "price_confidence": "high",
       "price_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
       "price_checked": "2026-07-05",
-      "notes": "Id collides with the gemini manifest's gemini ids only in family naming, not literally (gemini.json ships gemini-2.5-pro/gemini-2.5-flash, distinct ids) -- no Rule 3 collision for this one."
+      "notes": "Id collides with the gemini manifest's gemini ids only in family naming, not literally (gemini.json ships gemini-3.5-flash, dotted, a distinct literal id from this hyphenated gemini-3-5-flash) -- no Rule 3 collision for this one."
     }
   ]
 }

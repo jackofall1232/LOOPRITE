@@ -57,6 +57,23 @@ CREATE TABLE IF NOT EXISTS repos (
   created_at TEXT NOT NULL
 );
 
+-- Tracks, per registered repo, the one live "Add l00prite" branch that was created and committed
+-- locally but has not yet resulted in an opened pull request, so a later dashboard click can retry
+-- the push/PR instead of no-opping on repo_scaffold.go's already_complete check. Gateway-side state
+-- only: this is NOT the target repo's cooperative .l00prite/lock.json and never touches it. One row
+-- per repo (PRIMARY KEY repo_id) -- only the latest pending attempt matters; a fresh attempt
+-- supersedes the row in place, a confirmed-opened (or found-already-existing) PR deletes it, and
+-- HandleRepoRemove deletes it with the repo. CREATE TABLE IF NOT EXISTS runs unconditionally on
+-- every Open (same guarantee as project_settings), so a pre-existing DB gains it with no migration.
+CREATE TABLE IF NOT EXISTS repo_scaffold_attempts (
+  repo_id TEXT PRIMARY KEY,
+  branch TEXT NOT NULL,
+  commit_hash TEXT,
+  pushed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS caps (
   project TEXT NOT NULL,
   window TEXT NOT NULL,
@@ -64,6 +81,18 @@ CREATE TABLE IF NOT EXISTS caps (
   overage_pct REAL NOT NULL DEFAULT 0,
   unlimited INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, window)
+);
+
+-- Per-project settings that are neither budget (caps) nor a run's own config: today just the
+-- Auto-PR toggle (gateway/autopr.go). A dedicated table, not an ALTER onto caps, because caps is
+-- keyed (project, window) for the budget feature specifically and auto_pr has no "window" -- the
+-- wrong home. CREATE TABLE IF NOT EXISTS runs unconditionally on every Open (same guarantee as
+-- every other table here), so a pre-existing DB gains this table with no separate migration step.
+-- A missing row reads as auto_pr=0 (OFF) -- see autoPREnabled -- so every existing and new project
+-- defaults to OFF with no backfill needed.
+CREATE TABLE IF NOT EXISTS project_settings (
+  project TEXT PRIMARY KEY,
+  auto_pr INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS spend (
