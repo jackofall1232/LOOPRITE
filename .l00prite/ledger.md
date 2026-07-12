@@ -1994,11 +1994,14 @@ Append one entry per agent run. Do not overwrite prior runs.
   failing test first, a real fix confirmed to flip it green) rather than pattern-matched from the
   bot's prose; Finding 1's severity (bare/default routing broken, explicit pins unaffected) was
   independently traced through router.go, not assumed from the review comment alone.
-- **Maintainer decision (2026-07-12T03:40Z):** ship the client-side warning as the permanent
+- **Maintainer decision (2026-07-12T03:40Z):** ship the client-side warning as the immediate
   mitigation for Finding 1; the deeper schema change (persisting the preset key separately from
-  the editable display name) is explicitly NOT queued as follow-up work — the warning already
-  shipped in the commit above is the final answer here, not an interim one.
+  the editable display name) is NOT done inline in this PR, but IS queued as real follow-up work
+  (maintainer request, 2026-07-12T03:55Z — see `.l00prite/todos.md` "Next": persist a provider's
+  originating manifest key separately from its display name, threaded through
+  `storeProvider`/`ModelsFor`/`router.go`/the model picker) rather than dropped.
 - **Next action:** continuing to watch PR #10 for further activity and CI results, with a
-  standing ~1-hour self check-in armed.
+  standing ~1-hour self check-in armed; the queued manifest-key follow-up above waits on its own
+  future session.
 - **Do-not-retry notes:** none.
 - **Lock:** none held.

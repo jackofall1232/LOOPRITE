@@ -201,6 +201,21 @@ fresh from the new `main` (squash-merge, so no commits were orphaned) for the ne
 - [ ] Playwright end-to-end of the Runs UI against the real binary once the view exists.
 
 ## Next
+- [ ] **Persist a provider's originating manifest key separately from its editable display name**
+      (deeper fix for a Codex review finding on PR #10, 2026-07-12): renaming a manifest-backed
+      "Add provider" preset (e.g. `gemini` → `my-gemini-key`) breaks bare/default-model routing —
+      `adapters.ModelsFor(p.Name)` (used by `router.go`'s Rules 3-4 and `/v1/models`) finds no
+      catalog under the edited name, so the renamed provider is unreachable except via an explicit
+      `name/model` pin and never appears in the model picker. Root cause: an earlier fix in the
+      same PR (falling back to the preset's `sample_model` when validating a renamed provider)
+      removed the validation failure that used to accidentally guard against saving this exact
+      broken state. A real fix needs a schema change — store the preset key the provider was
+      added from (e.g. a `manifest_key` column) alongside its user-editable `name`, and have
+      `ModelsFor`/the router/the model picker resolve the catalog by that key instead of by name.
+      Judged architecturally significant, not a small confident fix, so NOT done inline; a
+      client-side warning (fires when a manifest-backed preset's name diverges from its key,
+      `setup.html`/`dashboard.html`) shipped instead as the interim mitigation, per maintainer
+      decision on the PR. Queued here as real follow-up work, not dropped.
 - [ ] **Extend validator byte-parity to the cli-os protocol embed** (small, standalone gated
       follow-up, 2026-07-12; NOT part of the v1.2 batch below — different scope, cli-os-specific):
       `cli-os/internal/engine/protocol/prompts/*.md` is now an 8th verbatim mirror of the six
