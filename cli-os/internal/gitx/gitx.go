@@ -31,6 +31,12 @@ type Client interface {
 	// (an "unborn" HEAD) or repo is not a git repository at all.
 	RevParseHead(repo string) (string, error)
 
+	// CurrentBranch returns the name of the currently checked-out branch, or "" (with a nil
+	// error) on a detached HEAD — never an error just because there's no branch name to report.
+	// Read-only; added for callers that need to report (not restore) which branch a new branch
+	// was created from.
+	CurrentBranch(repo string) (string, error)
+
 	// StatusPorcelain reports the working tree status. An empty string means a clean tree; callers
 	// in this codebase never rely on anything beyond that emptiness check and the per-line "XY
 	// path" shape (see gogit's doc comment on the caveats of its rendering).

@@ -59,6 +59,23 @@ func (c gogitClient) RevParseHead(repo string) (string, error) {
 	return head.Hash().String(), nil
 }
 
+// CurrentBranch returns the name of the currently checked-out branch, or "" (with a nil error)
+// on a detached HEAD — mirrors execClient.CurrentBranch's semantics.
+func (c gogitClient) CurrentBranch(repo string) (string, error) {
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		return "", err
+	}
+	head, err := r.Head()
+	if err != nil {
+		return "", err
+	}
+	if head.Name().IsBranch() {
+		return head.Name().Short(), nil
+	}
+	return "", nil
+}
+
 // StatusPorcelain renders worktree.Status() in a porcelain-LIKE format: "XY path" per changed
 // file, sorted for determinism. This is NOT guaranteed byte-identical to `git status
 // --porcelain`'s exact status-code semantics (go-git's StatusCode set is a close but not perfect

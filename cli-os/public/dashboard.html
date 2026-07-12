@@ -813,7 +813,8 @@
         <span style="margin-left:auto">${statusPill}</span></div>
       <div class="r-sub" style="margin-top:10px">${esc(r.root)}</div>
       <div class="r-mem">${badges}</div>
-      <div class="p-actions"><button class="btn tiny danger" style="margin-left:auto" data-action="repo-remove" data-repo="${esc(r.id)}">Remove</button></div>
+      <div class="p-actions"><button class="btn tiny" data-action="repo-scaffold" data-repo="${esc(r.id)}">Add l00prite</button>
+        <button class="btn tiny danger" style="margin-left:auto" data-action="repo-remove" data-repo="${esc(r.id)}">Remove</button></div>
     </article>`;
   }
 
@@ -1124,8 +1125,37 @@
   // Registering a repo points the gateway at a path on ITS OWN filesystem, or clones one from a
   // URL into a managed workspace dir; the server verifies before storing anything, so a typo
   // fails right here in the modal. finishRegister() is the shared success path for both.
-  function finishRegister(data, btn, note, label){
+  // scaffoldResultNote renders a POST /v1/repos/scaffold-branch response as a note block —
+  // shared by finishRegister's post-register checkbox and the standalone scaffoldRepo() action
+  // so the two entry points can never render this differently.
+  function scaffoldResultNote(sdata){
+    if(sdata.already_complete){
+      return `<div class="note ok">This repo already has the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor adapters) — nothing to add.</div>`;
+    }
+    const n=(sdata.files_created||[]).length;
+    const pushCmd=sdata.push_instructions||"";
+    return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span>
+        (${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""}).</div>
+      <div class="mono" style="background:var(--bg-2,rgba(127,127,127,.08));border-radius:8px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:10px;overflow-x:auto">
+        <span style="flex:1;white-space:nowrap">${esc(pushCmd)}</span>
+        <button class="btn tiny" data-copy="${esc(pushCmd)}">Copy</button>
+      </div>
+      <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing was pushed automatically — push
+        this branch and open a pull request against your default branch to bring the full l00prite methodology in.</div>`;
+  }
+  function finishRegister(data, btn, note, label, repoId, scaffoldFull){
     const mem=(data&&data.memory)||{};
+    if(scaffoldFull && repoId){
+      busy(btn,"Adding l00prite…");
+      api("POST","/v1/repos/scaffold-branch",{id:repoId}).then(({res,data:sdata})=>{
+        unbusy(btn,"Done"); btn.onclick=()=>{ closeModal(); refresh(); };
+        note.innerHTML = res.ok
+          ? scaffoldResultNote(sdata)
+          : `<div class="note warn"><b>Registered.</b> Could not add l00prite: ${esc(mErr(sdata,"the scaffold action failed"))}</div>`;
+        refresh();
+      });
+      return;
+    }
     if(!mem.present_count){
       // Registered fine, but be honest that there's no memory to inject yet. Prefer the backend's
       // OWN note (e.g. ".l00prite scaffolding failed: <reason>") over a generic fallback -- the
@@ -1171,6 +1201,10 @@
         <div class="field"><label>Project <span class="opt">— only same-project tokens can use a repo; this token's project is <span class="mono">${esc(project)}</span></span></label>
           <input type="text" id="rp-project" value="${esc(project)}" autocomplete="off"></div>
       </div>
+      <label class="field check"><input type="checkbox" id="rp-scaffold" checked> Add l00prite to this repo
+        <span class="opt">— creates a branch with the full protocol (AGENTS.md, the loop prompts, and the
+        vendor adapter files) so any AI agent gets the full benefit, not just the memory folder. Nothing is
+        pushed automatically.</span></label>
       <div id="rp-note"></div>
       <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Clone &amp; register</button></div>`);
     const cloneGroup=document.getElementById("rp-clone-group"), pathGroup=document.getElementById("rp-path-group");
@@ -1194,6 +1228,7 @@
     }
     document.getElementById("rp-clone-id").focus();
     btn.onclick=async()=>{
+      const scaffoldFull=document.getElementById("rp-scaffold").checked;
       if(mode==="clone"){
         const id=document.getElementById("rp-clone-id").value.trim(), url=document.getElementById("rp-clone-url").value.trim();
         if(!id){ note.innerHTML=`<div class="note err">Give the repo a short id.</div>`; return; }
@@ -1201,7 +1236,7 @@
         busy(btn,"Cloning…");
         const {res,data}=await api("POST","/v1/repos/clone",{id, url});
         if(!res.ok){ unbusy(btn,"Clone & register"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not clone the repo."))}</div>`; return; }
-        finishRegister(data, btn, note, "Clone & register");
+        finishRegister(data, btn, note, "Clone & register", id, scaffoldFull);
         return;
       }
       const id=document.getElementById("rp-id").value.trim(), root=document.getElementById("rp-root").value.trim(), project=document.getElementById("rp-project").value.trim();
@@ -1210,7 +1245,30 @@
       busy(btn,"Registering…");
       const {res,data}=await api("POST","/v1/repos",{id, root, project});
       if(!res.ok){ unbusy(btn,"Register"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not register the repo."))}</div>`; return; }
-      finishRegister(data, btn, note, "Register");
+      finishRegister(data, btn, note, "Register", id, scaffoldFull);
+    };
+  }
+  // scaffoldRepo is the standalone "Add l00prite" action for an already-registered repo (the
+  // Register-repo modal's checkbox above covers the at-registration-time path; this covers a
+  // repo registered earlier, or one where the checkbox was left unchecked).
+  function scaffoldRepo(id){
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Add l00prite</div>
+      <h3>Add the full l00prite protocol to <span class="mono">${esc(id)}</span></h3>
+      <div class="sub">Creates a local branch and commits AGENTS.md, the six loop prompts, and the vendor
+        adapter files this repo doesn't already have — the parts today's automatic memory-folder
+        scaffold deliberately skips. Nothing is pushed automatically.</div>
+      <div id="sc-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div>
+        <button class="btn primary" id="sc-go">Add l00prite</button></div>`);
+    const note=document.getElementById("sc-note"), btn=document.getElementById("sc-go");
+    btn.onclick=async()=>{
+      busy(btn,"Adding l00prite…");
+      const {res,data}=await api("POST","/v1/repos/scaffold-branch",{id});
+      unbusy(btn,"Done");
+      if(!res.ok){ note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not add l00prite."))}</div>`; btn.onclick=()=>scaffoldRepo(id); return; }
+      note.innerHTML=scaffoldResultNote(data);
+      btn.textContent="Done"; btn.onclick=()=>{ closeModal(); refresh(); };
     };
   }
   function removeRepo(id){
@@ -1744,7 +1802,12 @@
   $("providers-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(b){ handleProviderAction(b.dataset.action, b.dataset.provider); } });
   $("repos-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(!b) return;
     if(b.dataset.action==="repo-add") addRepo();
-    if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo); });
+    if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo);
+    if(b.dataset.action==="repo-scaffold") scaffoldRepo(b.dataset.repo); });
+  // Delegated on #modal-body (not a per-render listener) since scaffoldResultNote's copy button is
+  // injected into whichever modal happens to be open (the register flow or the standalone action).
+  $("modal-body").addEventListener("click",e=>{ const b=e.target.closest("[data-copy]"); if(!b) return;
+    navigator.clipboard.writeText(b.dataset.copy).then(()=>{ const old=b.textContent; b.textContent="Copied!"; setTimeout(()=>{ b.textContent=old; },1500); }); });
   $("play-scope-warn").addEventListener("click",e=>{ const b=e.target.closest("[data-action='register-scope']");
     if(b) addRepo(b.dataset.repo); });
   $("new-run-btn").onclick=()=>createRunModal();

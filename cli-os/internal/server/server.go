@@ -159,6 +159,11 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleRepoRemove(w, r)
 		case r.Method == http.MethodPost && p == "/v1/repos/clone":
 			app.HandleRepoClone(w, r)
+		// Consent-gated "add l00prite" action — branch + commit the full protocol (AGENTS.md,
+		// loop prompts, vendor adapters), reused by both the Register-repo checkbox and a
+		// standalone per-repo dashboard action.
+		case r.Method == http.MethodPost && p == "/v1/repos/scaffold-branch":
+			app.HandleRepoScaffoldBranch(w, r)
 		// L00prite OS run engine — the "enter a prompt, press Start" autonomous surface.
 		case r.Method == http.MethodPost && p == "/v1/runs":
 			app.HandleRunCreate(w, r)

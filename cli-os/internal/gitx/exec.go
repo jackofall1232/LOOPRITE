@@ -83,6 +83,21 @@ func (c execClient) RevParseHead(repo string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// CurrentBranch returns the name of the currently checked-out branch, or "" (with a nil error)
+// on a detached HEAD — "rev-parse --abbrev-ref HEAD" prints the literal string "HEAD" in that
+// case, which is not a branch name.
+func (c execClient) CurrentBranch(repo string) (string, error) {
+	out, err := c.runTimed(repo, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(out)
+	if name == "HEAD" {
+		return "", nil
+	}
+	return name, nil
+}
+
 // --untracked-files=all matters: real git's default ("normal") mode collapses an ENTIRELY
 // untracked directory to one "?? dirname/" line instead of listing the files inside it (verified:
 // `git status --porcelain` on a repo with a brand-new `config/` containing `prod.pem` reports only
