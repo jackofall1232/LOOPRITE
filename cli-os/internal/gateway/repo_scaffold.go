@@ -47,11 +47,14 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 		oaiError(w, 400, "Invalid JSON body", "invalid_request_error", "")
 		return
 	}
-	root, ok := app.repoRootForToken(w, principal, body.ID)
+	// Trim once, up front, and use the trimmed id consistently for lookup + audit — matching
+	// repos.go's HandleRepoRegister, rather than relying on the reader to know
+	// repoRootForToken trims internally too.
+	id := strings.TrimSpace(body.ID)
+	root, ok := app.repoRootForToken(w, principal, id)
 	if !ok {
 		return
 	}
-	id := strings.TrimSpace(body.ID)
 
 	files := engine.Files{Root: root}
 	// Check what's missing BEFORE touching git: a repo that already has the full protocol (e.g.

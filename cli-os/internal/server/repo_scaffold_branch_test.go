@@ -24,8 +24,16 @@ func gitRunSrv(t *testing.T, dir string, args ...string) string {
 
 // initGitRepoWithCommit creates a real git repo with one commit — HandleRepoScaffoldBranch
 // requires a repository with at least one commit (a fresh unborn HEAD cannot be branched).
+// Skips (not fails) when no git binary is on PATH, matching every other git-dependent test in
+// this codebase (internal/engine/tools_test.go, internal/gitx/gitx_test.go, runs_api_test.go,
+// chatrun_api_test.go) — the gateway itself falls back to the pure-Go gogit client without a
+// git binary (Android ships neither git nor ssh), but these tests shell out to the real binary
+// directly to build fixtures, so a git-less CI/dev environment must not see them as failures.
 func initGitRepoWithCommit(t *testing.T, dir string) {
 	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
 	gitRunSrv(t, dir, "init", "-b", "main")
 	gitRunSrv(t, dir, "config", "user.email", "test@example.com")
 	gitRunSrv(t, dir, "config", "user.name", "l00prite test")

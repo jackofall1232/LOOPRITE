@@ -1804,10 +1804,30 @@
     if(b.dataset.action==="repo-add") addRepo();
     if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo);
     if(b.dataset.action==="repo-scaffold") scaffoldRepo(b.dataset.repo); });
+  // copyText tries the async Clipboard API first, falling back to the legacy execCommand path —
+  // navigator.clipboard is undefined entirely in non-secure contexts (e.g. this gateway bound to a
+  // non-loopback host without TLS, a supported deployment mode elsewhere in this file) and in some
+  // older WebViews, and even where it exists, writeText() can still reject on a denied permission.
+  function copyText(text){
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      return navigator.clipboard.writeText(text).then(()=>true).catch(()=>legacyCopy(text));
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+  function legacyCopy(text){
+    try{
+      const ta=document.createElement("textarea");
+      ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    }catch(e){ return false; }
+  }
   // Delegated on #modal-body (not a per-render listener) since scaffoldResultNote's copy button is
   // injected into whichever modal happens to be open (the register flow or the standalone action).
   $("modal-body").addEventListener("click",e=>{ const b=e.target.closest("[data-copy]"); if(!b) return;
-    navigator.clipboard.writeText(b.dataset.copy).then(()=>{ const old=b.textContent; b.textContent="Copied!"; setTimeout(()=>{ b.textContent=old; },1500); }); });
+    copyText(b.dataset.copy).then(ok=>{ const old=b.textContent; b.textContent=ok?"Copied!":"Copy failed — select and copy manually"; setTimeout(()=>{ b.textContent=old; },1500); }); });
   $("play-scope-warn").addEventListener("click",e=>{ const b=e.target.closest("[data-action='register-scope']");
     if(b) addRepo(b.dataset.repo); });
   $("new-run-btn").onclick=()=>createRunModal();
