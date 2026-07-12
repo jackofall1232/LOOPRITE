@@ -1462,9 +1462,21 @@
     // the human sees in these selects before EXECUTE already reflects the project default (they
     // can still tighten either one for just this run). A failed GET or an OFF project leaves the
     // selects at their fail-closed default (require_approval) -- never silently loosened.
+    //
+    // gateTouched guards against a race (PR review, chatgpt-codex-connector): this GET is async,
+    // so a user who opens the modal and immediately tightens a select by hand -- before the
+    // network round trip resolves -- must never have that explicit choice silently overwritten
+    // back to auto_approve once it does. Once a select fires "change" (a real user edit; setting
+    // sel.value programmatically below does not fire it), the prefill skips that class for good.
+    const gateTouched = new Set();
+    GATE_AUTO_APPROVABLE.forEach(cls=>{
+      const sel=document.getElementById("cr-gate-"+cls);
+      if(sel) sel.addEventListener("change", ()=>gateTouched.add(cls));
+    });
     api("GET","/v1/auto-pr").then(({res,data})=>{
       if(!res.ok || !data || !data.enabled) return;
       GATE_AUTO_APPROVABLE.forEach(cls=>{
+        if(gateTouched.has(cls)) return;
         const sel=document.getElementById("cr-gate-"+cls); if(sel) sel.value="auto_approve";
       });
       const noteEl=document.getElementById("cr-autopr-note");

@@ -585,7 +585,7 @@ func (tb *Toolbox) runCommand(ctx context.Context, args map[string]any, approved
 		return ToolOutcome{
 			Result: fmt.Sprintf("GATE: %q is not on the command allowlist; human approval required before it runs", command),
 			Gate: &GateRequest{
-				Class:  classifyCommand(command),
+				Class:  classifyCommand(command, tb.Branch),
 				Action: fmt.Sprintf("run_command %q", command),
 				Args:   args,
 			},
@@ -648,8 +648,11 @@ func (tb *Toolbox) commandAllowed(command string) bool {
 	return false
 }
 
-// classifyCommand assigns a gate class to a non-allowlisted command.
-func classifyCommand(command string) string {
+// classifyCommand assigns a gate class to a non-allowlisted command. branch is the run's own
+// branch (tb.Branch; may be "" for a Toolbox built without one, e.g. most existing unit tests --
+// see pushTargetsRunBranch's doc comment for why an empty branch skips its check rather than
+// failing every push closed).
+func classifyCommand(command, branch string) string {
 	c := strings.TrimSpace(command)
 	switch {
 	case hasCmdPrefix(c, "git push --force"), hasCmdPrefix(c, "git push -f"):
@@ -662,6 +665,24 @@ func classifyCommand(command string) string {
 		// caught), which would have made a force-push auto-approvable. containsForcePushToken
 		// closes that regardless of flag position.
 		if containsForcePushToken(c) {
+			return GateDestructive
+		}
+		// PR review (chatgpt-codex-connector): this case runs via `sh -c` (runCommand), same as
+		// the gh-pr-create case below -- without this check, "git push origin HEAD; rm -rf
+		// .l00prite" would classify as GatePush (auto-approvable) even though the shell would
+		// execute the chained rm too. Must mirror the gh-pr-create case's guard exactly.
+		if shellChainChars.MatchString(c) {
+			return GateDestructive
+		}
+		// PR review (chatgpt-codex-connector): GatePush previously covered ANY non-force push --
+		// "git push origin main" or "git push origin HEAD:main" would auto-approve just as
+		// readily as a push of the run's own branch, letting an auto-approved run write directly
+		// to an unrelated (possibly default/protected) branch instead of only ever pushing its
+		// own branch for a human to open/review a PR against. Only a push that resolves to
+		// exactly the run's own branch stays GatePush; anything else (including an unparseable or
+		// multi-ref push) fails closed to GateDestructive.
+		fields := strings.Fields(c)
+		if !pushTargetsRunBranch(fields[2:], branch) { // fields[0]="git" fields[1]="push", guaranteed by hasCmdPrefix above
 			return GateDestructive
 		}
 		return GatePush
@@ -679,8 +700,15 @@ func classifyCommand(command string) string {
 		// substitution inside a --body -- forces it back to GateDestructive: PolicyAutoApprove
 		// can therefore only ever reach a single, plain "gh pr create ..." invocation with flags
 		// in any order (--title/--body/--head/--base/--draft); a multiline --body needs
-		// --body-file or human approval, the safe direction.
+		// --body-file or human approval, the safe direction (enforced explicitly just below, not
+		// just implied by this comment -- PR review, chatgpt-codex-connector: -F/--body-file and
+		// -T/--template read an ARBITRARY LOCAL FILE on the gateway host, not necessarily inside
+		// the repo, and paste its contents into a PUBLIC pull request; that must never be
+		// reachable without a human looking at the command first).
 		if shellChainChars.MatchString(c) {
+			return GateDestructive
+		}
+		if containsFileReadingPRFlag(c) {
 			return GateDestructive
 		}
 		return GatePRCreate
@@ -728,6 +756,88 @@ func containsForcePushToken(c string) bool {
 	for _, tok := range strings.Fields(c) {
 		if isForcePushToken(tok) {
 			return true
+		}
+	}
+	return false
+}
+
+// pushTargetsRunBranch reports whether a "git push" (args is everything after the "push"
+// subcommand itself -- flags and positional args both) can be confidently determined, from the
+// command text alone, to write ONLY to the run's own branch on "origin" -- the sole remote/
+// destination every push this codebase itself generates ever uses (EnsureRunBranch,
+// scaffold_pr.go's openScaffoldPR). GatePush is the one class the project Auto-PR toggle may
+// auto-approve with zero human review, so this must fail closed (false, meaning "gate it, don't
+// auto-approve") on anything it cannot confidently parse -- a bare "git push" with no explicit
+// destination, an unrecognized remote, a multi-ref push, or a refspec targeting any branch other
+// than this run's own. branch=="" (a Toolbox built without one, e.g. most pre-existing unit
+// tests, or a code path that genuinely has no run branch to compare against) skips this check
+// entirely and returns true, preserving the exact pre-existing behavior for those callers rather
+// than failing every push closed for them (PR review, chatgpt-codex-connector).
+func pushTargetsRunBranch(args []string, branch string) bool {
+	if branch == "" {
+		return true
+	}
+	var positional []string
+	for _, tok := range args {
+		if strings.HasPrefix(tok, "-") {
+			continue // flags never name a destination; force/delete/mirror/prune are already
+			// rejected by the caller before this runs, so anything left here is inert for our
+			// purposes (e.g. -u/--set-upstream/-q/--verbose).
+		}
+		positional = append(positional, tok)
+	}
+	if len(positional) != 2 {
+		// 0 or 1: no explicit destination visible in the text to confirm against. 3+: more than
+		// one ref/refspec in a single push, so at least one of them could target a different
+		// branch. Both fail closed.
+		return false
+	}
+	remote, ref := positional[0], positional[1]
+	if remote != "origin" {
+		return false
+	}
+	dst := ref
+	if i := strings.IndexByte(ref, ':'); i >= 0 {
+		// An explicit refspec "src:dst" -- what matters is the DESTINATION actually written on
+		// the remote; src just says what local content feeds it, which is no more of an
+		// escalation than the run's own already-ungated commits to its own branch. An empty dst
+		// (e.g. "somebranch:", a remote-ref delete) is rejected by the branch-name comparison
+		// below, since "" can never equal a real branch name.
+		dst = ref[i+1:]
+	} else if ref == "HEAD" {
+		// "git push origin HEAD" pushes the CURRENTLY CHECKED-OUT commit to a remote branch of
+		// the SAME NAME -- git's own special-cased convention for this bare source. Safe here
+		// because switching the checked-out branch mid-run is itself not on the ungated
+		// status/diff/log/add/commit/show/branch(list) allowlist (see gitCommand's switch above)
+		// -- it already requires its own separate human approval, so by the time an auto-approved
+		// push runs, the checked-out branch is still whatever EnsureRunBranch set it to: branch.
+		return true
+	}
+	return strings.TrimPrefix(dst, "refs/heads/") == branch
+}
+
+// fileReadingPRFlagTokens/-Prefixes: gh pr create flags that read an arbitrary LOCAL file (not
+// necessarily inside the repo -- gh reads it directly off the gateway host's filesystem) and use
+// its content as PR text. -F/--body-file and -T/--template both do this per the gh CLI manual;
+// gh accepts either "-F file" (a separate token, still caught below since containsFileReadingPRFlag
+// only needs to see the flag token itself) or "-F=file"/"--body-file=file" (one token, caught by
+// the prefix list). Never auto-approvable: this is how a run could exfiltrate an SSH key or any
+// other host file the gateway process can read into a PUBLIC pull request (PR review finding,
+// chatgpt-codex-connector).
+var fileReadingPRFlagTokens = map[string]bool{"-F": true, "--body-file": true, "-T": true, "--template": true}
+var fileReadingPRFlagPrefixes = []string{"-F=", "--body-file=", "-T=", "--template="}
+
+// containsFileReadingPRFlag reports whether any whitespace-separated token of c is a gh pr create
+// flag that reads a local file, in either its bare (separate-argument) or "=<value>" form.
+func containsFileReadingPRFlag(c string) bool {
+	for _, tok := range strings.Fields(c) {
+		if fileReadingPRFlagTokens[tok] {
+			return true
+		}
+		for _, p := range fileReadingPRFlagPrefixes {
+			if strings.HasPrefix(tok, p) {
+				return true
+			}
 		}
 	}
 	return false
@@ -782,7 +892,7 @@ func (tb *Toolbox) gitCommand(ctx context.Context, args map[string]any, approved
 			return ToolOutcome{
 				Result: fmt.Sprintf("GATE: git %s requires human approval", sub),
 				Gate: &GateRequest{
-					Class:  classifyGitSub(sub, list[1:]),
+					Class:  classifyGitSub(sub, list[1:], tb.Branch),
 					Action: fmt.Sprintf("git_command %v", list),
 					Args:   args,
 				},
@@ -925,13 +1035,23 @@ func gitBranchArgsAreSafe(rest []string) bool {
 // is caught here exactly as classifyCommand's containsForcePushToken catches it for the
 // run_command/sh path: GatePush is the one class the project Auto-PR toggle may set to
 // auto_approve, so this must never read GatePush for a push that can rewrite or delete history.
-func classifyGitSub(sub string, rest []string) string {
+// branch is the run's own branch (tb.Branch at the call site; see pushTargetsRunBranch). No
+// shell-metacharacter check is needed here (unlike classifyCommand's git-push case): git_command
+// execs git directly with an argument vector, never a shell, so a token like ";" or "$(...)" is
+// just an inert literal argument, not something a shell could interpret.
+func classifyGitSub(sub string, rest []string, branch string) string {
 	switch sub {
 	case "push":
 		for _, tok := range rest {
 			if isForcePushToken(tok) {
 				return GateDestructive
 			}
+		}
+		// PR review (chatgpt-codex-connector): same "restrict to the run's own branch" fix as
+		// classifyCommand's git-push case -- git_command ["push","origin","main"] previously
+		// auto-approved just as readily as pushing the run's own branch.
+		if !pushTargetsRunBranch(rest, branch) {
+			return GateDestructive
 		}
 		return GatePush
 	case "merge":

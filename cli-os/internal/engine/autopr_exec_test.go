@@ -26,7 +26,13 @@ func TestAutoApprovePushSkipsApprovalAndExecutes(t *testing.T) {
 		},
 		coder: [][]step{
 			{
-				{name: "run_command", args: map[string]any{"command": "git push origin main"}},
+				// "HEAD" (not a literal branch name): the run's own branch (run.Branch) is only
+				// assigned inside startRun below, after this scriptedCaller is already built, so
+				// the command can't name it directly -- "git push origin HEAD" is the branch-name-
+				// agnostic safe form pushTargetsRunBranch recognizes (git's own convention: push
+				// the currently checked-out commit to a same-named remote branch), and exercises
+				// that path for real here rather than only in the unit-level classify tests.
+				{name: "run_command", args: map[string]any{"command": "git push origin HEAD"}},
 				{name: "unit_done", args: map[string]any{"summary": "attempted push", "files_changed": []string{}}},
 			},
 		},
@@ -68,7 +74,7 @@ func TestAutoApprovePushSkipsApprovalAndExecutes(t *testing.T) {
 				t.Fatalf("EvAutoApproved payload missing/wrong class: %+v", ev.Payload)
 			}
 			action, _ := ev.Payload["action"].(string)
-			if !strings.Contains(action, "git push origin main") {
+			if !strings.Contains(action, "git push origin HEAD") {
 				t.Fatalf("EvAutoApproved payload missing the gated action: %+v", ev.Payload)
 			}
 		case EvApprovalReq:
