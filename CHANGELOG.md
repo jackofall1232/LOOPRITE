@@ -4,6 +4,34 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.6.0-beta — 2026-07-12
+
+**Connect GitHub — the app can now push real code and open pull requests from the phone.**
+A new "Connect GitHub" card in the dashboard takes a fine-grained personal access token,
+verifies it live, and seals it in the same encrypted vault as your provider keys (it is never
+shown again and never leaves the gateway). Once connected, autonomous Runs can push their
+branch with a new `push_branch` tool, and the "Add l00prite" flow can push + open a pull
+request — both over pure-Go HTTPS, so they work on a bare Android device with no `git` binary
+and no GitHub CLI installed. Every push still goes through the same human approval (or the
+project's Auto-PR setting); l00prite never merges. The token is host-scoped to `github.com`:
+it is only ever attached to an HTTPS github.com remote — never sent to an ssh remote, a
+different host, or a non-GitHub origin (it silently falls back to your ambient credentials
+there), never placed in a command's arguments, never written to `.git/config`, and scrubbed
+from any error message.
+
+**Autonomous Runs can act again.** The default run objectives ("balanced"/"quality") were
+silently running the coder in a delegation mode that advertised its file/git tools but never
+executed them — so a Run would stop at a review gate reporting it had "no tool to run git."
+The coder now always runs in the mode where its tools actually execute, so it can write files
+and push. (The "only tool is l00prite_bridge / cannot git push" failure.)
+
+**Dark-mode app screens are readable again.** On the Android app, the Add-provider and
+Register-repo dialogs rendered as unreadable dark-on-dark (and, in light mode, dark-on-dark
+the other way). The app now tells its own screen which theme the device is in and turns off
+the WebView's conflicting auto-darkening, so every dialog follows the device's light/dark
+setting correctly. Desktop-browser dashboards are unchanged, except that light-mode dialogs —
+which had the same low-contrast bug — are now readable there too.
+
 ## v0.5.0-beta — 2026-07-12
 
 **Per-project Auto-PR toggle for autonomous Runs, off by default.** A run's `git push` and
