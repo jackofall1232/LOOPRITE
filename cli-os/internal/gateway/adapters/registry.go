@@ -34,10 +34,11 @@ type modelSpec struct {
 }
 
 type manifest struct {
-	Provider string      `json:"provider"`
-	BaseURL  string      `json:"base_url"`
-	Adapter  string      `json:"adapter"`
-	Models   []modelSpec `json:"models"`
+	Provider    string      `json:"provider"`
+	DisplayName string      `json:"display_name"`
+	BaseURL     string      `json:"base_url"`
+	Adapter     string      `json:"adapter"`
+	Models      []modelSpec `json:"models"`
 }
 
 // Price is a resolved per-model price map (USD per 1M tokens). Input/Output are nil when unpriced.
@@ -58,7 +59,7 @@ type Candidate struct {
 	PriceTier    int
 }
 
-var aliases = map[string]string{"glm": "zhipu", "z.ai": "zhipu", "ollama": "local", "local-models": "local", "google": "gemini"}
+var aliases = map[string]string{"glm": "zhipu", "z.ai": "zhipu", "ollama": "local", "local-models": "local", "google": "gemini", "grok": "xai"}
 
 var manifests = loadManifests()
 
@@ -219,6 +220,44 @@ func Catalog(providerNames []string) []Candidate {
 				PriceTier:    PriceTierFor(name, model),
 			})
 		}
+	}
+	return out
+}
+
+// Preset is a UI-ready provider preset derived from an embedded manifest: the static facts the
+// "Add provider" form needs to pre-fill sensible defaults. Distinct from Catalog, which enumerates
+// routable (provider, model) candidates for the auto-router.
+type Preset struct {
+	Key         string `json:"key"`          // manifest provider key; the form's default provider name
+	DisplayName string `json:"display_name"` // human label for the dropdown
+	Adapter     string `json:"adapter"`      // resolved wire adapter kind (openai-native -> openai-compat)
+	BaseURL     string `json:"base_url"`
+	SampleModel string `json:"sample_model,omitempty"` // first routable manifest model, "" when none is known
+}
+
+// presetOrder is the fixed dropdown order. A manifest absent from this list is NOT exposed as a
+// preset -- exposure in the Add-provider UI is an explicit product decision, so a future or
+// internal manifest can never silently appear. The mock adapter is deliberately not here
+// (internal/test-only, per .l00prite/todos.md).
+var presetOrder = []string{"anthropic", "openai", "gemini", "xai", "venice", "zhipu"}
+
+// Presets returns the Add-provider UI presets in fixed order, skipping unloaded manifests.
+func Presets() []Preset {
+	out := make([]Preset, 0, len(presetOrder))
+	for _, key := range presetOrder {
+		m := manifests[key]
+		if m == nil {
+			continue
+		}
+		display := m.DisplayName
+		if display == "" {
+			display = key
+		}
+		sample := ""
+		if models := ModelsFor(key); len(models) > 0 { // ModelsFor filters PENDING placeholders
+			sample = models[0]
+		}
+		out = append(out, Preset{Key: key, DisplayName: display, Adapter: DefaultAdapterKind(key), BaseURL: m.BaseURL, SampleModel: sample})
 	}
 	return out
 }

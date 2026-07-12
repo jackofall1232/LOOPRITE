@@ -38,3 +38,15 @@ build environment, same discipline as OpenAI/Zhipu above). Venice's catalog inte
 other labs' models under Venice-hosted ids (`claude-sonnet-5`, `openai-gpt-52-codex`, …); bare
 model ids that exist in more than one enabled provider's catalog resolve by provider order
 (router.go rule 3), so pin `provider/model` when the distinction matters.
+
+The 2026-07-11 provider-presets pass added `xai.json` (xAI Grok — OpenAI-compatible at
+`api.x.ai/v1`; model ids read verbatim from xAI's official SDK source; **all prices
+null/unconfirmed** — every first-party xAI domain was egress-blocked; the retired
+`grok-code-fast-1` is deliberately absent), upgraded `gemini.json` from null/unconfirmed to
+**first-party pricing** fetched directly from Google's own pricing page (with a recorded
+Vertex-vs-Developer-API channel caveat) plus the confirmed `gemini-3.5-flash`/`gemini-3.1-*`
+models, and re-verified `venice.json` against the first-party mirror (zero drift). Manifests now
+also drive the Add-provider UI: `Presets()` in `../registry.go` projects
+`provider`/`display_name`/`adapter`/`base_url`/first-model into `GET /v1/providers/catalog`
+(unauthenticated; static embedded facts only). A manifest appears in the UI only if listed in
+`presetOrder` — the mock adapter never does.

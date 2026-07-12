@@ -914,24 +914,48 @@
     }
     return fallback||"Something went wrong.";
   }
+  // ---- Add-provider presets (served by GET /v1/providers/catalog; static embedded manifest facts) ----
+  const CUSTOM_PRESET = {key:"custom", display_name:"Custom / other (OpenAI-compatible)",
+                         adapter:"openai-compat", base_url:"", sample_model:null};
+  // Degrade path = today's exact two-option behavior: anthropic native + a generic
+  // OpenAI-compatible entry (CUSTOM_PRESET, appended unconditionally below).
+  const FALLBACK_PRESETS = [{key:"anthropic", display_name:"Anthropic (Claude)",
+                             adapter:"native-messages", base_url:"https://api.anthropic.com",
+                             sample_model:"claude-fable-5"}];
+  let presetsPromise = null;
+  function loadPresets(){                       // cached across calls; a failure is NOT cached
+    if(!presetsPromise){
+      // Plain fetch — the catalog is unauthenticated, so it deliberately does NOT go through api().
+      presetsPromise = fetch("/v1/providers/catalog")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => (d && Array.isArray(d.presets) && d.presets.length) ? d.presets : null)
+        .catch(() => null)
+        .then(p => { if(!p) presetsPromise = null; return p || FALLBACK_PRESETS; });
+    }
+    return presetsPromise;
+  }
   function findProvider(name){ return ((S.summary&&S.summary.providers)||[]).find(p=>p.name===name); }
-  function openModal(html){ $("modal-body").innerHTML=html; $("modal").classList.remove("hidden"); }
+  // Bumped by every open/close so a stale async modal builder (add()) can detect the modal was
+  // closed or reopened while it was awaiting something, and bail before overwriting the DOM.
+  let modalGen = 0;
+  function openModal(html){ modalGen++; $("modal-body").innerHTML=html; $("modal").classList.remove("hidden"); }
   function openWideModal(html){ openModal(html); $("modal").classList.add("wide"); }
-  function closeModal(){ stopRunPoll(); $("modal").classList.add("hidden"); $("modal").classList.remove("wide"); $("modal-body").innerHTML=""; }
+  function closeModal(){ modalGen++; stopRunPoll(); $("modal").classList.add("hidden"); $("modal").classList.remove("wide"); $("modal-body").innerHTML=""; }
   async function afterMutation(){ closeModal(); await refresh(); }
   function busy(btn,label){ btn.dataset.old=btn.innerHTML; btn.disabled=true; btn.innerHTML=`<span class="spin"></span> ${esc(label)}`; }
   function unbusy(btn,label){ btn.disabled=false; btn.innerHTML=label||btn.dataset.old||""; }
 
-  function add(){
+  async function add(){
+    const myGen = ++modalGen; // reserve this generation; any other open/close bumps past it
+    const presets = (await loadPresets()).concat([CUSTOM_PRESET]);
+    if(myGen !== modalGen) return; // modal was closed or reopened while the catalog was loading
     openModal(`
       <div class="eyebrow"><span class="tick"></span> Add provider</div>
       <h3>Add a provider</h3>
       <div class="sub">The key is validated with a real call, stored encrypted in the vault, and marked <b>unverified</b> until its first successful request.</div>
-      <div class="field"><label>Adapter type</label>
-        <select id="m-adapter">
-          <option value="native-messages">Anthropic (native /v1/messages)</option>
-          <option value="openai-compat">OpenAI-compatible (OpenAI, GLM, DeepSeek, Groq, …)</option>
-        </select></div>
+      <div class="field"><label>Provider</label>
+        <select id="m-adapter">${presets.map(p =>
+          `<option value="${esc(p.key)}">${esc(p.display_name)}</option>`).join("")}</select></div>
       <div class="field"><label>Provider name</label><input type="text" id="m-name" placeholder="anthropic"></div>
       <div class="field" id="m-modelwrap"><label>Model to test <span class="opt" id="m-modelhint">— optional</span></label><input type="text" id="m-model" placeholder="auto (first known model)"></div>
       <div class="field" id="m-keywrap"><label>API key</label><input type="password" id="m-key" placeholder="sk-…" autocomplete="off"></div>
@@ -949,21 +973,34 @@
     const adapterSel=g("m-adapter"), nameIn=g("m-name"), baseIn=g("m-base"), baseHint=g("m-basehint");
     const validateBtn=g("m-validate"), addBtn=g("m-add"), skip=g("m-skip"), note=g("m-note");
     let epoch=0;
-    const D={"native-messages":{name:"anthropic",base:"https://api.anthropic.com",hint:"— default shown; edit if self-hosting",
-               mHint:"— optional; a known model is picked",mPh:"auto (first known model)"},
-             "openai-compat":{name:"openai",base:"",hint:"— required, e.g. https://api.openai.com/v1",
-               // OpenAI-compatible endpoints usually have no built-in catalog here, so validation
-               // needs a concrete model id — labeling it "optional" would dead-end the flow.
-               mHint:"— usually required (no built-in catalog), e.g. gpt-4o",mPh:"e.g. gpt-4o"}};
+    // The dropdown value is now a PRESET KEY (not the wire adapter). The POSTed `adapter` is resolved
+    // from the preset object in body(), decoupling "which provider" from "which adapter kind".
+    const byKey = Object.fromEntries(presets.map(p => [p.key, p]));
+    function presetDefaults(p){
+      return {
+        name: p.key === "custom" ? "" : p.key,
+        namePh: p.key === "custom" ? "my-provider" : p.key,
+        base: p.base_url || "",
+        hint: p.base_url ? "— default shown; edit if self-hosting"
+                         : "— required, e.g. https://api.openai.com/v1",
+        mHint: p.sample_model ? "— optional; a known model is picked"
+                              : "— usually required (no built-in catalog), e.g. gpt-4o",
+        mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-4o"
+      };
+    }
     function resetV(){ epoch++; const gate=!skip.checked; addBtn.disabled=gate; if(gate) note.innerHTML=""; }
     function sync(){
-      const d=D[adapterSel.value];
+      const d=presetDefaults(byKey[adapterSel.value]);
       if(!nameIn.dataset.touched) nameIn.value=d.name;
+      nameIn.placeholder=d.namePh;
       baseIn.value=d.base; baseHint.textContent=d.hint;
       g("m-modelhint").textContent=d.mHint; g("m-model").placeholder=d.mPh;
       resetV();
     }
-    function body(){ return {name:nameIn.value.trim(), adapter:adapterSel.value, base_url:baseIn.value.trim(), api_key:g("m-key").value, model:g("m-model").value.trim()}; }
+    // Fall back to the preset's own sample model when the field is left blank: the server would
+    // otherwise auto-pick by looking up the POSTED provider NAME in the manifest, which misses if
+    // the user renamed the provider away from the preset key (e.g. "gemini" -> "my-gemini-key").
+    function body(){ const p=byKey[adapterSel.value]||CUSTOM_PRESET; const model=g("m-model").value.trim()||p.sample_model||""; return {name:nameIn.value.trim(), adapter:p.adapter, base_url:baseIn.value.trim(), api_key:g("m-key").value, model}; }
     nameIn.oninput=()=>{ nameIn.dataset.touched="1"; resetV(); };
     [baseIn,g("m-key"),g("m-model")].forEach(el=>el.oninput=resetV);
     adapterSel.onchange=sync;

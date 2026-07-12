@@ -168,6 +168,8 @@
   const LABELS = {welcome:"Welcome",vault:"Vault",provider:"Provider",network:"Network",token:"Token",done:"Done"};
   const state = { status:null, provider:null, token:null };
   let current = "welcome";
+  let renderGen = 0; // bumped on every render() so a stale async step (renderProvider) can detect
+                      // the user navigated away while it was awaiting and bail before touching the DOM
 
   const card = document.getElementById("card");
   const stepperEl = document.getElementById("stepper");
@@ -186,6 +188,26 @@
     if(data && data.detail) return data.detail;
     if(data && data.error && typeof data.error==="string") return data.error;
     return fallback || "Something went wrong.";
+  }
+
+  // ---- Add-provider presets (served by GET /v1/providers/catalog; static embedded manifest facts) ----
+  const CUSTOM_PRESET = {key:"custom", display_name:"Custom / other (OpenAI-compatible)",
+                         adapter:"openai-compat", base_url:"", sample_model:null};
+  // Degrade path = today's exact two-option behavior: anthropic native + a generic
+  // OpenAI-compatible entry (CUSTOM_PRESET, appended unconditionally below).
+  const FALLBACK_PRESETS = [{key:"anthropic", display_name:"Anthropic (Claude)",
+                             adapter:"native-messages", base_url:"https://api.anthropic.com",
+                             sample_model:"claude-fable-5"}];
+  let presetsPromise = null;
+  function loadPresets(){                       // cached across calls; a failure is NOT cached
+    if(!presetsPromise){
+      presetsPromise = fetch("/v1/providers/catalog")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => (d && Array.isArray(d.presets) && d.presets.length) ? d.presets : null)
+        .catch(() => null)
+        .then(p => { if(!p) presetsPromise = null; return p || FALLBACK_PRESETS; });
+    }
+    return presetsPromise;
   }
 
   function renderStepper(){
@@ -210,6 +232,7 @@
   function goto(step){ current = step; render(); }
 
   function render(){
+    renderGen++;
     renderStepper();
     ({welcome:renderWelcome, vault:renderVault, provider:renderProvider, network:renderNetwork, token:renderToken, done:renderDone}[current])();
   }
@@ -285,17 +308,18 @@
     };
   }
 
-  function renderProvider(){
+  async function renderProvider(){
+    const myGen = renderGen;
+    const presets = (await loadPresets()).concat([CUSTOM_PRESET]);
+    if(myGen !== renderGen) return; // user navigated to a different step while the catalog was loading
     card.innerHTML = `
       <div class="eyebrow"><span class="tick"></span> Step 2 · Provider</div>
       <h1>Add your first provider</h1>
       <p>Pick an upstream and give it a key. We'll <b>validate the key with a real call</b> before saving
          it — a bad key fails here, not on your first request.</p>
-      <label>Adapter type</label>
-      <select id="adapter">
-        <option value="native-messages">Anthropic (native /v1/messages)</option>
-        <option value="openai-compat">OpenAI-compatible (OpenAI, GLM, DeepSeek, Groq, Gemini-compat, …)</option>
-      </select>
+      <label>Provider</label>
+      <select id="adapter">${presets.map(p =>
+        `<option value="${esc(p.key)}">${esc(p.display_name)}</option>`).join("")}</select>
       <div class="row">
         <div><label>Provider name</label><input type="text" id="pname" class="mono-in" placeholder="anthropic"></div>
         <div id="modelwrap"><label>Model to test <span class="opt" id="modelhint">— optional</span></label><input type="text" id="pmodel" class="mono-in" placeholder="auto (first known model)"></div>
@@ -317,15 +341,25 @@
     const note=document.getElementById("pnote");
     let validated=false, epoch=0;
 
-    const DEFAULTS={"native-messages":{name:"anthropic",base:"https://api.anthropic.com",baseHint:"— default shown; edit if self-hosting",
-                      mHint:"— optional; a known model is picked",mPh:"auto (first known model)"},
-                    "openai-compat":{name:"openai",base:"",baseHint:"— required, e.g. https://api.openai.com/v1",
-                      // OpenAI-compatible endpoints usually have no built-in catalog here, so
-                      // validation needs a concrete model id — "optional" would dead-end the flow.
-                      mHint:"— usually required (no built-in catalog), e.g. gpt-4o",mPh:"e.g. gpt-4o"}};
+    // The dropdown value is now a PRESET KEY (not the wire adapter). The POSTed `adapter` is resolved
+    // from the preset object in formBody(), decoupling "which provider" from "which adapter kind".
+    const byKey = Object.fromEntries(presets.map(p => [p.key, p]));
+    function presetDefaults(p){
+      return {
+        name: p.key === "custom" ? "" : p.key,
+        namePh: p.key === "custom" ? "my-provider" : p.key,
+        base: p.base_url || "",
+        baseHint: p.base_url ? "— default shown; edit if self-hosting"
+                             : "— required, e.g. https://api.openai.com/v1",
+        mHint: p.sample_model ? "— optional; a known model is picked"
+                              : "— usually required (no built-in catalog), e.g. gpt-4o",
+        mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-4o"
+      };
+    }
     function syncAdapter(){
-      const d=DEFAULTS[adapterSel.value];
+      const d=presetDefaults(byKey[adapterSel.value]);
       if(!nameIn.dataset.touched) nameIn.value=d.name;
+      nameIn.placeholder=d.namePh;
       baseIn.value=d.base; baseHint.textContent=d.baseHint;
       document.getElementById("modelhint").textContent=d.mHint;
       document.getElementById("pmodel").placeholder=d.mPh;
@@ -338,8 +372,13 @@
     skip.onchange=()=>{ if(skip.checked){ addBtn.disabled=false; note.innerHTML=`<div class="note warn">Skipping validation — the provider is stored as-is; a bad key will only fail on the first real request.</div>`; } else { resetValidation(); note.innerHTML=""; } };
 
     function formBody(){
-      return {name:nameIn.value.trim(), adapter:adapterSel.value, base_url:baseIn.value.trim(),
-              api_key:document.getElementById("pkey").value, model:document.getElementById("pmodel").value.trim()};
+      const p = byKey[adapterSel.value] || CUSTOM_PRESET;
+      // Fall back to the preset's own sample model when the field is left blank: the server would
+      // otherwise auto-pick by looking up the POSTED provider NAME in the manifest, which misses if
+      // the user renamed the provider away from the preset key (e.g. "gemini" -> "my-gemini-key").
+      const model = document.getElementById("pmodel").value.trim() || p.sample_model || "";
+      return {name:nameIn.value.trim(), adapter:p.adapter, base_url:baseIn.value.trim(),
+              api_key:document.getElementById("pkey").value, model};
     }
     validateBtn.onclick=async()=>{
       const b=formBody();

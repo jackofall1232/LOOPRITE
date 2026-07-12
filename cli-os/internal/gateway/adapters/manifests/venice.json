@@ -21,8 +21,8 @@
     "shape_source": "OpenAI-compatible API (api.venice.ai/api/v1); Bearer auth, standard chat/completions shape",
     "pricing": "high",
     "pricing_source": "https://docs.venice.ai/overview/pricing (via first-party docs mirror github.com/veniceai/api-docs)",
-    "pricing_checked": "2026-07-05",
-    "pricing_note": "Model ids and USD/1M-token input/output prices below were fetched verbatim from Venice's own docs mirror (github.com/veniceai/api-docs, overview/pricing.mdx) on 2026-07-05. Not backfilled from training-data memory.",
+    "pricing_checked": "2026-07-11",
+    "pricing_note": "Model ids and USD/1M-token input/output prices below were fetched verbatim from Venice's own docs mirror (github.com/veniceai/api-docs, overview/pricing.mdx) on 2026-07-05. Not backfilled from training-data memory. Re-verified 2026-07-11 against the same mirror (sync commit of 2026-07-10): all 15 tracked ids present, zero price changes.",
     "capabilities": "low/training-knowledge",
     "capabilities_note": "tools:true is set only on models where function-calling is well-established on Venice per training knowledge; it is NOT first-party confirmed (the dynamic models endpoint that would confirm capability flags is unreachable from this environment). context/max_output are omitted outright rather than guessed."
   },

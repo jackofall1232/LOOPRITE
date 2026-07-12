@@ -121,6 +121,10 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleDashboardSummary(w, r)
 		case r.Method == http.MethodGet && p == "/v1/setup/status":
 			app.HandleSetupStatus(w, r)
+		// Unauthenticated read-only provider presets for the Add-provider UI (static embedded
+		// manifest facts only -- same non-secret class as /v1/setup/status).
+		case r.Method == http.MethodGet && p == "/v1/providers/catalog":
+			app.HandleProviderPresets(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/vault":
 			app.HandleSetupVault(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/provider/test":

@@ -171,7 +171,7 @@ func TestVeniceToolsCapabilitySubset(t *testing.T) {
 	}
 }
 
-func TestGeminiManifestLoadsAndUnpriced(t *testing.T) {
+func TestGeminiManifest(t *testing.T) {
 	if got := DefaultBaseURL("gemini"); got != "https://generativelanguage.googleapis.com/v1beta/openai" {
 		t.Fatalf("gemini base_url want the openai-compat endpoint got %q", got)
 	}
@@ -179,14 +179,29 @@ func TestGeminiManifestLoadsAndUnpriced(t *testing.T) {
 		t.Fatalf("gemini adapter want openai-compat got %q", got)
 	}
 	models := ModelsFor("gemini")
-	if len(models) != 2 {
-		t.Fatalf("gemini ModelsFor want 2 models got %d: %v", len(models), models)
+	if len(models) != 5 {
+		t.Fatalf("gemini ModelsFor want 5 models got %d: %v", len(models), models)
 	}
-	if tier := PriceTierFor("gemini", "gemini-2.5-pro"); tier != 2 {
-		t.Fatalf("gemini/gemini-2.5-pro must be unpriced (tier 2) got %d", tier)
+	// Pricing upgraded to first-party (2026-07-11): gemini-2.5-pro is now priced+confident.
+	p := PriceFor("gemini", "gemini-2.5-pro")
+	if p == nil || p.Input == nil || p.Output == nil {
+		t.Fatalf("gemini/gemini-2.5-pro must have a resolved price, got %+v", p)
 	}
-	if tier := PriceTierFor("gemini", "gemini-2.5-flash"); tier != 2 {
-		t.Fatalf("gemini/gemini-2.5-flash must be unpriced (tier 2) got %d", tier)
+	if *p.Input != 1.25 || *p.Output != 10.00 {
+		t.Fatalf("gemini/gemini-2.5-pro price want 1.25/10.00 got %v/%v", *p.Input, *p.Output)
+	}
+	if !p.Confident {
+		t.Fatalf("gemini/gemini-2.5-pro price must be first-party confident (price_confidence high)")
+	}
+	if tier := PriceTierFor("gemini", "gemini-2.5-pro"); tier != 0 {
+		t.Fatalf("gemini/gemini-2.5-pro price tier want 0 (priced+confirmed) got %d", tier)
+	}
+	if tier := PriceTierFor("gemini", "gemini-3.5-flash"); tier != 0 {
+		t.Fatalf("gemini/gemini-3.5-flash price tier want 0 (priced+confirmed) got %d", tier)
+	}
+	// context/max_output stay omitted (fail-closed): the 1M/65K figures are secondary-source-only.
+	if got := ContextFor("gemini", "gemini-2.5-pro"); got != nil {
+		t.Fatalf("gemini/gemini-2.5-pro context must be unverified (nil), got %v", *got)
 	}
 	caps := CapabilitiesFor("gemini", "gemini-2.5-pro")
 	if b, _ := caps["tools"].(bool); !b {
@@ -203,5 +218,76 @@ func TestGoogleAliasResolvesToGemini(t *testing.T) {
 	}
 	if got := ModelsFor("google"); len(got) != len(ModelsFor("gemini")) {
 		t.Fatalf(`alias "google" ModelsFor must match gemini's catalog, got %v`, got)
+	}
+}
+
+// ---- xai (Grok) manifest ----
+
+func TestXaiManifest(t *testing.T) {
+	if got := DefaultBaseURL("xai"); got != "https://api.x.ai/v1" {
+		t.Fatalf("xai base_url want https://api.x.ai/v1 got %q", got)
+	}
+	if got := DefaultAdapterKind("xai"); got != "openai-compat" {
+		t.Fatalf("xai adapter want openai-compat got %q", got)
+	}
+	models := ModelsFor("xai")
+	if len(models) == 0 || models[0] != "grok-4.3" {
+		// models[0] is the validation probe (pickValidationModel); grok-4.3 is the safest id (SDK-verbatim).
+		t.Fatalf("xai ModelsFor[0] want grok-4.3 (validation-probe ordering) got %v", models)
+	}
+	for _, m := range models {
+		if tier := PriceTierFor("xai", m); tier != 2 {
+			t.Fatalf("xai/%s must be unpriced (tier 2 — all xai prices null/unconfirmed), got %d", m, tier)
+		}
+	}
+	for _, m := range models {
+		if m == "grok-code-fast-1" {
+			t.Fatalf("grok-code-fast-1 was retired 2026-05-15 and must never be listed (silent redirect billing)")
+		}
+	}
+}
+
+func TestGrokAliasResolvesToXai(t *testing.T) {
+	if got := DefaultBaseURL("grok"); got != DefaultBaseURL("xai") {
+		t.Fatalf(`alias "grok" must resolve to the xai manifest, got base_url %q vs xai %q`, got, DefaultBaseURL("xai"))
+	}
+	if got := ModelsFor("grok"); len(got) != len(ModelsFor("xai")) {
+		t.Fatalf(`alias "grok" ModelsFor must match xai's catalog, got %v`, got)
+	}
+}
+
+// ---- Add-provider UI presets ----
+
+func TestPresets(t *testing.T) {
+	for _, key := range presetOrder {
+		if key == "mock" {
+			t.Fatalf("the mock adapter must never be exposed as a preset: %v", presetOrder)
+		}
+	}
+	presets := Presets()
+	wantKeys := []string{"anthropic", "openai", "gemini", "xai", "venice", "zhipu"}
+	if len(presets) != len(wantKeys) {
+		t.Fatalf("Presets want %d entries got %d: %+v", len(wantKeys), len(presets), presets)
+	}
+	byKey := map[string]Preset{}
+	for i, p := range presets {
+		if p.Key != wantKeys[i] {
+			t.Fatalf("Presets order mismatch at %d: want %q got %q", i, wantKeys[i], p.Key)
+		}
+		if p.BaseURL == "" {
+			t.Fatalf("preset %q must carry a non-empty base_url", p.Key)
+		}
+		if p.DisplayName == "" {
+			t.Fatalf("preset %q must carry a non-empty display_name", p.Key)
+		}
+		byKey[p.Key] = p
+	}
+	// anthropic: native adapter, sample model is its first routable id.
+	if a := byKey["anthropic"]; a.Adapter != "native-messages" || a.SampleModel != "claude-fable-5" {
+		t.Fatalf("anthropic preset want native-messages/claude-fable-5, got %q/%q", a.Adapter, a.SampleModel)
+	}
+	// openai: native->compat mapping, and its only model is a PENDING placeholder (filtered) -> no sample.
+	if o := byKey["openai"]; o.Adapter != "openai-compat" || o.SampleModel != "" {
+		t.Fatalf("openai preset want openai-compat/empty-sample (PENDING filtered), got %q/%q", o.Adapter, o.SampleModel)
 	}
 }
