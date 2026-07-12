@@ -152,6 +152,32 @@ func pushLedgerUpdate(ctx context.Context, git gitx.Client, root, branch string)
 	return err
 }
 
+// lookupExistingPR asks gh whether a NON-CLOSED pull request already exists for branch and returns
+// its URL, or "" if none is found OR anything goes wrong. It is read-only (`gh pr view`, never a
+// create/merge) and is called ONLY on the pure-retry path, after the capability probe has already
+// passed — never on a fresh attempt. Its whole purpose is to prevent a double-PR when an operator
+// opened the PR by hand (via the fallback command) between attempts: finding the existing PR lets
+// the handler report success with the real URL instead of pushing again and running `gh pr create`
+// (which would just fail with "a pull request for branch ... already exists").
+//
+// It fails OPEN to "" on any error: a genuinely missing PR and a transient gh failure both mean the
+// same safe thing — "proceed to the normal push+create, which then reports its own honest gap".
+// CLOSED PRs are deliberately excluded (the --jq filter drops them) so a closed-without-merge PR
+// gets a genuinely new one rather than being resurfaced as if still open. The raw gh output never
+// reaches a client: only the parsed URL (or "") is returned, and every caller sends the URL, not
+// gh's stderr.
+func lookupExistingPR(ctx context.Context, root, branch string) string {
+	viewCtx, cancel := context.WithTimeout(ctx, ghExecTimeout)
+	defer cancel()
+	// Arg vector, never a shell (branch is internally generated util.RID, but this is the discipline
+	// regardless — see the package comment). No --merge/--auto: this is a pure read.
+	out, err := runGH(viewCtx, root, "pr", "view", branch, "--json", "url,state", "--jq", `select(.state != "CLOSED") | .url`)
+	if err != nil {
+		return "" // fail open: no PR, or a transient failure — both mean "attempt the normal push+create".
+	}
+	return parsePRURL(out)
+}
+
 // runGH execs `gh <args...>` with cwd=dir, credential prompts disabled, and the process-wide
 // secrets scrubbed from its environment — the same discipline gitx.execClient's own run() already
 // applies to every git child process this codebase execs on a model's or user's behalf (see

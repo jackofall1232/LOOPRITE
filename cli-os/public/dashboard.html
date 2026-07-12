@@ -1206,14 +1206,23 @@
   // so the two entry points can never render this differently.
   function scaffoldResultNote(sdata){
     if(sdata.already_complete){
-      return `<div class="note ok">This repo already has the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor adapters) — nothing to add.</div>`;
+      // Prefer the SERVER's own note: it may now carry pending-branch state ("a previous attempt
+      // created branch X, push it with…") or the out-of-band-cleared sentence. The hardcoded string
+      // is only a fallback for an older server that sent no note — never let it hide a real pending
+      // push the operator still needs to make (scaffoldRepo() can send open_pr:false).
+      return `<div class="note ok">${esc(sdata.note || "This repo already has the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor adapters) — nothing to add.")}</div>`;
     }
     const n=(sdata.files_created||[]).length;
-    const committedLine=`(${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""})`;
+    // On a retry nothing new was necessarily committed (the branch already existed), so the "N files
+    // committed" clause would be factually false — include it only when files really were created.
+    const committedLine=n>0?`(${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""})`:``;
+    // A retry reuses an EXISTING branch rather than creating a new one; say so honestly instead of
+    // the fresh-scaffold "added on a new branch" headline.
+    const added=sdata.retry?`<b>Retried</b> for existing branch`:`<b>l00prite added</b> on a new branch`;
     // sdata.pr_url / sdata.capability_gap only ever appear when the request asked for open_pr —
     // mutually exclusive by construction on the server (repo_scaffold.go), never both set.
     if(sdata.pr_url){
-      return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span> ${committedLine}, pushed to origin, and
+      return `<div class="note ok">${added} <span class="mono">${esc(sdata.branch)}</span> ${committedLine}, pushed to origin, and
           a pull request was opened: <a href="${esc(sdata.pr_url)}" target="_blank" rel="noopener">${esc(sdata.pr_url)}</a>.</div>
         <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing merges automatically —
           a human still needs to review and merge (or close) this pull request.</div>`;
@@ -1228,11 +1237,11 @@
       // only `gh pr create` failed, in which case sdata.pr_command carries the follow-up command)
       // — the branch and commit ALWAYS still happened locally, so the manual push instructions
       // remain the honest fallback either way.
-      return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
+      return `<div class="note ok">${added} <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
         <div class="note warn" style="margin-top:8px">${esc(sdata.capability_gap)}</div>
         ${copyBlock("push", sdata.pr_command||pushCmd)}`;
     }
-    return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
+    return `<div class="note ok">${added} <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
       ${copyBlock("push", pushCmd)}
       <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing was pushed automatically — push
         this branch and open a pull request against your default branch to bring the full l00prite methodology in.</div>`;

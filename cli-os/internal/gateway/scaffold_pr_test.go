@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -99,5 +101,52 @@ func TestGHPRCreateCommandNeverAutoMerges(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "gh pr create") {
 		t.Fatalf("expected a real gh pr create command, got %q", cmd)
+	}
+}
+
+// TestLookupExistingPRFailsOpenToEmpty pins lookupExistingPR's fail-open contract: with no gh on
+// PATH it returns "" (never panics, never a stray non-URL string), so a retry proceeds to the normal
+// push+create path (which then reports its own honest gap) rather than treating a transient gh
+// failure as "a PR exists".
+func TestLookupExistingPRFailsOpenToEmpty(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // a directory with no gh in it
+	if url := lookupExistingPR(context.Background(), t.TempDir(), "l00prite/add-protocol-test"); url != "" {
+		t.Fatalf("expected \"\" when gh is unavailable (fail open), got %q", url)
+	}
+}
+
+// TestLookupExistingPRIsReadOnlyAndNeverMerges records lookupExistingPR's actual argv via a stub gh
+// and asserts it is a pure read (`pr view`) that never carries a merge-shaped flag — the same
+// never-auto-merge invariant TestGHPRCreateCommandNeverAutoMerges pins for the copy-paste command,
+// extended to the one new gh invocation this feature adds.
+func TestLookupExistingPRIsReadOnlyAndNeverMerges(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "argv.txt")
+	// The stub records its full argument vector, then prints a URL and exits 0.
+	script := "#!/bin/sh\n" +
+		"echo \"$@\" >> " + argsFile + "\n" +
+		"echo https://github.com/example/repo/pull/1\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub gh: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	url := lookupExistingPR(context.Background(), t.TempDir(), "l00prite/add-protocol-test")
+	if url != "https://github.com/example/repo/pull/1" {
+		t.Fatalf("expected the stub's URL to be parsed back, got %q", url)
+	}
+	argv, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("stub gh was never invoked: %v", err)
+	}
+	got := string(argv)
+	if !strings.Contains(got, "pr view") {
+		t.Fatalf("lookupExistingPR must call `gh pr view` (a read), got argv: %q", got)
+	}
+	for _, bad := range []string{"--merge", "--auto", "create", "merge"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("lookupExistingPR argv must never contain %q, got: %q", bad, got)
+		}
 	}
 }
