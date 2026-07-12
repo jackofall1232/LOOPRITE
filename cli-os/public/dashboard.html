@@ -5,6 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>l00prite CLI-OS</title>
+<script>
+/* Device-authoritative theme. The Android wrapper loads this page with ?theme=dark|light taken
+   from the device's night-mode setting (MainActivity.onPollFinished); we stamp it onto <html> as
+   data-theme so the page's own palette — not the WebView's flaky prefers-color-scheme /
+   force-dark — decides light vs dark. Persisted in localStorage so the choice survives in-app
+   reloads and the setup -> dashboard hop. Desktop browsers get no ?theme= and never store the
+   key, so data-theme is never set and behavior is byte-identical to before. */
+(function(){
+  var m=/[?&]theme=(dark|light)\b/.exec(location.search);
+  var t=m?m[1]:null;
+  try{ if(t){localStorage.setItem('l00p_theme',t);} else {t=localStorage.getItem('l00p_theme');} }catch(e){}
+  if(t==='dark'||t==='light'){
+    document.documentElement.setAttribute('data-theme',t);
+    var mc=document.querySelector('meta[name=color-scheme]');
+    if(mc){ mc.content=(t==='dark'?'dark light':'light dark'); }
+  }
+})();
+</script>
 <style>
   :root{
     --bg:#0B0F14; --panel:rgba(255,255,255,.035); --panel-2:rgba(255,255,255,.06);
@@ -264,7 +282,40 @@
     body{background:radial-gradient(1200px 620px at 10% -12%, rgba(79,140,255,.12), transparent 60%), var(--bg);}
     .topbar{background:rgba(245,247,251,.8);}
     .btn{--btn-border:rgba(10,20,40,.18);--btn-bg:rgba(10,20,40,.045);--btn-hover-border:rgba(10,20,40,.3);--btn-hover-bg:rgba(10,20,40,.08);}
+    /* Modal/overlay scrim must follow the theme: it's a fixed dark color by default, and a
+       translucent-white .card over a dark scrim composites to a DARK card — fine in dark mode, but
+       dark-card-with-dark-text (unreadable) in light mode. A light scrim makes the same card
+       composite light, so light-mode modals are readable. */
+    .modal,.overlay{background:rgba(226,232,240,.82);}
   }
+  /* Explicit device-theme override (set by the head script from ?theme=/localStorage). Higher
+     specificity than the bare :root above and the @media :root, so it wins the cascade in BOTH
+     directions regardless of what the WebView reports for prefers-color-scheme — the actual fix
+     for the black-on-black Add-provider / Register-repo modals. Each block re-asserts the palette
+     vars AND every descendant rule the @media block above rewrites (body, .topbar, .btn). Keep in
+     sync with the :root + @media blocks above. */
+  :root[data-theme="dark"]{color-scheme:dark;
+    --bg:#0B0F14; --panel:rgba(255,255,255,.035); --panel-2:rgba(255,255,255,.06);
+    --stroke:rgba(255,255,255,.08); --stroke-2:rgba(255,255,255,.15);
+    --text:#E7EDF5; --text-2:#9AA7B8; --text-3:#5E6B7C;
+    --input-bg:rgba(0,0,0,.3); --input-bg-solid:#0A0E13;}
+  :root[data-theme="dark"] body{background:
+    radial-gradient(1200px 620px at 10% -12%, rgba(79,140,255,.1), transparent 60%),
+    radial-gradient(1000px 520px at 102% -4%, rgba(45,212,191,.05), transparent 55%),
+    var(--bg);}
+  :root[data-theme="dark"] .topbar{background:rgba(11,15,20,.72);}
+  :root[data-theme="dark"] .btn{--btn-border:rgba(255,255,255,.16);--btn-bg:rgba(255,255,255,.07);--btn-hover-border:rgba(255,255,255,.28);--btn-hover-bg:rgba(255,255,255,.11);}
+  /* Dark scrim twin — REQUIRED so a data-theme=dark page on a LIGHT-OS device (the exact
+     force-dark scenario) keeps the dark scrim instead of inheriting the @media light scrim above,
+     which would light-wash the modal card under dark (light) text. Mirrors the light twin's role. */
+  :root[data-theme="dark"] .modal,:root[data-theme="dark"] .overlay{background:rgba(6,9,13,.82);}
+  :root[data-theme="light"]{color-scheme:light;
+    --bg:#F5F7FB;--panel:rgba(10,20,40,.03);--panel-2:rgba(10,20,40,.05);--stroke:rgba(10,20,40,.11);--stroke-2:rgba(10,20,40,.2);--text:#0E1726;--text-2:#465064;--text-3:#7A8698;
+    --input-bg:#fff;--input-bg-solid:#fff;}
+  :root[data-theme="light"] body{background:radial-gradient(1200px 620px at 10% -12%, rgba(79,140,255,.12), transparent 60%), var(--bg);}
+  :root[data-theme="light"] .topbar{background:rgba(245,247,251,.8);}
+  :root[data-theme="light"] .btn{--btn-border:rgba(10,20,40,.18);--btn-bg:rgba(10,20,40,.045);--btn-hover-border:rgba(10,20,40,.3);--btn-hover-bg:rgba(10,20,40,.08);}
+  :root[data-theme="light"] .modal,:root[data-theme="light"] .overlay{background:rgba(226,232,240,.82);}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
 
   /* help section */
@@ -504,6 +555,11 @@
             <div class="list" id="tokens-body"></div>
           </section>
 
+          <section class="card card-pad" id="sec-github">
+            <div class="sec-head"><div class="eyebrow"><span class="tick" style="background:var(--accent)"></span> GitHub</div><span class="meta" id="github-meta"></span></div>
+            <div id="github-body"><div class="empty" style="padding:18px">Loading…</div></div>
+          </section>
+
           <section class="card card-pad">
             <div class="sec-head"><div class="eyebrow"><span class="tick"></span> Audit log</div><span class="meta">operator events</span></div>
             <div class="list" id="audit-body"></div>
@@ -536,7 +592,7 @@
 (function(){
   const TOKEN_KEY="l00prite_token";
   const LOCK_KEY="l00prite_play_model_lock";
-  const S={ token:null, summary:null, timer:null, runs:null };
+  const S={ token:null, summary:null, timer:null, runs:null, github:null };
   const $ = id => document.getElementById(id);
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const num = n => (n==null?0:Number(n)).toLocaleString(undefined,{maximumFractionDigits:0});
@@ -572,6 +628,7 @@
     S.summary=r.data; render();
     loadModels();
     loadRuns();
+    loadGitHub();
   }
 
   function render(){
@@ -917,6 +974,58 @@
     $("audit-body").innerHTML = au.map(x=>`
       <div class="row"><div class="r-ic info"><svg class="ico" style="width:15px;height:15px"><use href="#i-logs"/></svg></div>
         <div class="r-main"><div class="r-t mono">${esc(x.action)}${x.detail?` <span style="color:var(--text-3)">${esc(String(x.detail).slice(0,40))}</span>`:""}</div><div class="r-meta">${esc(x.actor||"—")} · ${ago(x.ts)}</div></div></div>`).join("");
+  }
+
+  // ---- GitHub connection (github.go) ----
+  // Status/connect/disconnect live outside /v1/dashboard/summary, like loadRuns() — a separate
+  // fetch so a slow call never blocks the rest of the dashboard. The token is only ever SENT (to
+  // connect); the server never returns it, so it never appears here.
+  async function loadGitHub(){
+    const {res,data}=await api("GET","/v1/github/status");
+    if(!res.ok) return;
+    S.github=data||{};
+    renderGitHub(S.github);
+  }
+  function renderGitHub(g){
+    g=g||{};
+    const meta=$("github-meta"); if(meta) meta.textContent = g.connected?"connected":"not connected";
+    const body=$("github-body"); if(!body) return;
+    if(g.connected){
+      body.innerHTML = `<div class="row"><div class="r-ic ok"><svg class="ico" style="width:15px;height:15px"><use href="#i-branch"/></svg></div>
+        <div class="r-main"><div class="r-t">Connected as <b>${esc(g.login||"?")}</b></div><div class="r-meta">${esc(g.host||"github.com")}${g.created_at?" · "+ago(g.created_at):""}</div></div>
+        <div class="r-right"><button class="btn tiny danger" data-action="gh-disconnect">Disconnect</button></div></div>`;
+    } else {
+      body.innerHTML = `<div class="empty" style="padding:18px"><b>Not connected.</b> Connect a GitHub token so l00prite can push branches and open pull requests from this device — including the Android app, which has no git installed.
+        <div style="margin-top:12px"><button class="btn primary sm" data-action="gh-connect">Connect GitHub</button></div></div>`;
+    }
+  }
+  function githubConnectModal(){
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Connect GitHub</div>
+      <h3>Connect GitHub</h3>
+      <div class="sub">Paste a <b>fine-grained personal access token</b>. l00prite verifies it, seals it in the encrypted vault, and uses it to push branches and open pull requests. It is never shown again and never leaves this gateway.</div>
+      <div class="field"><label>Fine-grained personal access token</label>
+        <input type="password" id="gh-token" placeholder="github_pat_…" autocomplete="off"></div>
+      <div class="note">Give the token <b>Repository access</b> to the repos l00prite may touch, with <b>Contents: Read and write</b> and <b>Pull requests: Read and write</b>. Create one at
+        <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com → Settings → Developer settings → Fine-grained tokens</a>.
+        Pushing still always goes through a human approval (or the project's Auto-PR setting); l00prite never merges.</div>
+      <div id="gh-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="gh-connect-go">Connect</button></div>`);
+    const btn=document.getElementById("gh-connect-go"), note=document.getElementById("gh-note"), input=document.getElementById("gh-token");
+    input.focus();
+    btn.onclick=async()=>{
+      const token=(input.value||"").trim();
+      if(!token){ note.innerHTML=`<div class="note err">A token is required.</div>`; return; }
+      busy(btn,"Verifying…");
+      const {res,data}=await api("POST","/v1/github/connect",{token});
+      if(res.ok){ closeModal(); loadGitHub(); return; }
+      unbusy(btn,"Connect");
+      note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not connect to GitHub."))}</div>`;
+    };
+  }
+  async function githubDisconnect(){
+    await api("POST","/v1/github/disconnect");
+    loadGitHub();
   }
 
   // ---- runs (list) ----
@@ -1310,10 +1419,11 @@
       </div>
       <label class="field check"><input type="checkbox" id="rp-scaffold" checked> Create a branch, push it, and open a pull request
         <span class="opt">— writes the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor
-        adapter files) on a new branch, pushes it using this gateway host's own git/GitHub CLI credentials,
-        and opens a pull request. l00prite never merges it — a human reviews and merges (or closes) the pull
-        request. If pushing or opening a PR isn't possible from this host, the branch and commit still happen
-        locally and you'll get copy-paste push instructions instead.</span></label>
+        adapter files) on a new branch, pushes it using your dashboard's <b>GitHub connection</b> (or this
+        gateway host's own git/GitHub CLI credentials), and opens a pull request. l00prite never merges it —
+        a human reviews and merges (or closes) the pull request. If pushing or opening a PR isn't possible
+        (no GitHub connection and no host credentials), the branch and commit still happen locally and you'll
+        get copy-paste push instructions instead.</span></label>
       <div id="rp-note"></div>
       <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Clone &amp; register</button></div>`);
     const cloneGroup=document.getElementById("rp-clone-group"), pathGroup=document.getElementById("rp-path-group");
@@ -1969,6 +2079,9 @@
     if(b.dataset.action==="repo-add") addRepo();
     if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo);
     if(b.dataset.action==="repo-scaffold") scaffoldRepo(b.dataset.repo); });
+  $("github-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(!b) return;
+    if(b.dataset.action==="gh-connect") githubConnectModal();
+    if(b.dataset.action==="gh-disconnect") githubDisconnect(); });
   // copyText tries the async Clipboard API first, falling back to the legacy execCommand path —
   // navigator.clipboard is undefined entirely in non-secure contexts (e.g. this gateway bound to a
   // non-loopback host without TLS, a supported deployment mode elsewhere in this file) and in some
