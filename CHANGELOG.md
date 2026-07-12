@@ -4,7 +4,38 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
-## Unreleased (source only — no new APK build this pass)
+## v0.5.0-beta — 2026-07-12
+
+**Per-project Auto-PR toggle for autonomous Runs, off by default.** A run's `git push` and
+`gh pr create` actions can now be pre-approved at the project level instead of waiting on a
+human for every single push/PR — but never merge, deploy, credential changes, or anything
+destructive, which stay gated no matter what. A human still reviews the exact resolved gate
+table in the pre-flight display before ever typing `EXECUTE`, and an explicit per-run choice
+always wins over the project-level default.
+
+**Retry support for a capability-gapped "Add l00prite" push/PR.** If pushing the scaffold
+branch or opening its pull request failed the first time (no `git`/`gh`, `gh` not signed in,
+a bad remote), clicking "Add l00prite" again used to just no-op — the committed protocol
+files made the repo look already complete. A new gateway-side tracking table now remembers
+the pending branch so a later click retries the exact same push/PR instead of losing track
+of it; an out-of-band success (pushed or merged by hand) is detected and reported honestly,
+and a hand-opened pull request is found via a read-only lookup so a retry can never open a
+duplicate.
+
+**Several push/PR-create gate-classification hardenings, found across two independent
+automated review passes on this feature (gemini-code-assist, Copilot, Codex) and fixed one
+at a time, each confirmed against the real command text before and after the fix:** a
+force-push flag with an attached `=value` (`--force-with-lease=main`) no longer slips past
+the exact-match check; `git push`/`gh pr create` commands carrying shell metacharacters
+(`; rm -rf ...`) are never auto-approvable; an auto-approved push is now restricted to
+exactly the run's own branch (not any branch, and not a refspec-embedded delete/force
+form like `origin :branch` or `origin +HEAD:branch`); `gh pr create` flags that read an
+arbitrary local file into a public PR body (`-F`/`--body-file`, `-T`/`--template`, including
+pflag's attached-shorthand form) are rejected, as is `-R`/`--repo` (targeting a repository
+other than the run's own) and a missing `--head`; and — the most serious of the batch —
+`--receive-pack`/`--exec`, which let `git push` invoke an arbitrary program on the remote
+side of an SSH-transport push (the classic git-push-over-SSH command-execution vector), are
+now always treated as destructive and never auto-approvable.
 
 **"Add l00prite" can now push and open a pull request for you.** Previously, adding the
 full l00prite protocol to a repo from the dashboard always stopped after a local commit —
@@ -26,14 +57,14 @@ on-screen note used to describe it as "nothing was pushed" — factually wrong, 
 branch really had reached the remote. That case now says so correctly and gives you a
 copy-paste `gh pr create` command instead of a push command.
 
-*Not exercised against a real GitHub repository or a real `gh` CLI in this session (no
-`gh` binary or GitHub network access in this sandbox) — verified instead against a real
-local git remote with a stand-in `gh` script that mimics `gh`'s exit codes and output
-shape. No new Android APK was built or signed this pass (no Android build toolchain
-installed in this environment); this entry describes a source-level gateway/dashboard
-change that will ship in the next versioned build.*
+*The push/PR feature itself was not exercised against a real GitHub repository or a real
+`gh` CLI in the session that wrote it (no `gh` binary or GitHub network access in that
+sandbox) — verified instead against a real local git remote with a stand-in `gh` script
+that mimics `gh`'s exit codes and output shape. This build (v0.5.0-beta) is the first
+Android APK to ship it, along with the v0.4.1-beta fixes below (which also never got
+their own APK) and everything else described above.*
 
-## v0.4.1-beta — 2026-07-12
+## v0.4.1-beta — 2026-07-12 (source only — folded into v0.5.0-beta's APK, no separate build)
 
 **Dark-theme dashboard fixes: invisible checkboxes, and an audit of the Models modal.**
 The "Add provider" panel's two checkboxes ("Make this the default provider", "Add without
