@@ -81,13 +81,14 @@ When working on an open pull request:
 This section is specific to this monorepo (not part of the vendor-neutral protocol every
 scaffolded project inherits) — read it before touching `cli-os/` or `android/`.
 
-- Every push touching `cli-os/` (gateway, dashboard, adapters) or `android/` must rebuild the
-  Android APK via `cli-os/scripts/build-apk.sh <version>`, update `downloads/` + `downloads/SHA256SUMS`,
-  and update every version/filename/SHA-256 reference in `index.html`. Verify with
-  `apksigner verify` (v2+v3 true) and `aapt dump badging` before shipping.
-- Versioning is `MAJOR.MINOR.PATCH-beta`: `+0.0.1` for a minor change, `+0.1.0` for a major
-  one (new feature, security fix, schema/API change). Never reach `1.0.0` before an explicit
-  production-release decision.
-- `internal/gateway/dashboard.go`'s `Version`, the APK's `--version-name`, `CHANGELOG.md`'s
-  newest heading, and `index.html`'s displayed filename/SHA-256 must all move together.
+- Every push to `main` touching `cli-os/` (gateway, dashboard, adapters) or `android/` must
+  rebuild the Android APK via `cli-os/scripts/build-apk.sh <version>`, update `downloads/` +
+  `downloads/SHA256SUMS`, and update every version/filename/SHA-256 reference in `index.html`.
+  Verify with `apksigner verify` (v2+v3 true) and `aapt dump badging` before shipping.
+- Versioning is `MAJOR.MINOR.PATCH-beta`: bump `PATCH` (+0.0.1) for a small change (bug fix,
+  small UI tweak, docs), bump `MINOR` (+0.1.0) for a bigger change (new feature, security fix,
+  schema/API change). Never reach `1.0.0` before an explicit production-release decision.
+- `cli-os/internal/gateway/dashboard.go`'s `Version`, the APK's `--version-name`,
+  `CHANGELOG.md`'s newest heading, and `index.html`'s displayed filename/SHA-256 must all move
+  together.
 - See `CLAUDE.md` section 9 for the full policy this section summarizes.
