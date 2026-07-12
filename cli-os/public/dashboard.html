@@ -1156,13 +1156,31 @@
       return `<div class="note ok">This repo already has the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor adapters) — nothing to add.</div>`;
     }
     const n=(sdata.files_created||[]).length;
+    const committedLine=`(${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""})`;
+    // sdata.pr_url / sdata.capability_gap only ever appear when the request asked for open_pr —
+    // mutually exclusive by construction on the server (repo_scaffold.go), never both set.
+    if(sdata.pr_url){
+      return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span> ${committedLine}, pushed to origin, and
+          a pull request was opened: <a href="${esc(sdata.pr_url)}" target="_blank" rel="noopener">${esc(sdata.pr_url)}</a>.</div>
+        <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing merges automatically —
+          a human still needs to review and merge (or close) this pull request.</div>`;
+    }
     const pushCmd=sdata.push_instructions||"";
-    return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span>
-        (${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""}).</div>
-      <div class="mono" style="background:var(--bg-2,rgba(127,127,127,.08));border-radius:8px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:10px;overflow-x:auto">
-        <span style="flex:1;white-space:nowrap">${esc(pushCmd)}</span>
-        <button class="btn tiny" data-copy="${esc(pushCmd)}">Copy</button>
-      </div>
+    const copyBlock=(label,cmd)=>`<div class="mono" style="background:var(--bg-2,rgba(127,127,127,.08));border-radius:8px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:10px;overflow-x:auto">
+        <span style="flex:1;white-space:nowrap">${esc(cmd)}</span>
+        <button class="btn tiny" data-copy="${esc(cmd)}">Copy</button>
+      </div>`;
+    if(sdata.capability_gap){
+      // A gap here means push+PR was requested but couldn't be attempted (or the push landed and
+      // only `gh pr create` failed, in which case sdata.pr_command carries the follow-up command)
+      // — the branch and commit ALWAYS still happened locally, so the manual push instructions
+      // remain the honest fallback either way.
+      return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
+        <div class="note warn" style="margin-top:8px">${esc(sdata.capability_gap)}</div>
+        ${copyBlock("push", sdata.pr_command||pushCmd)}`;
+    }
+    return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span> ${committedLine}.</div>
+      ${copyBlock("push", pushCmd)}
       <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing was pushed automatically — push
         this branch and open a pull request against your default branch to bring the full l00prite methodology in.</div>`;
   }
@@ -1170,7 +1188,11 @@
     const mem=(data&&data.memory)||{};
     if(scaffoldFull && repoId){
       busy(btn,"Adding l00prite…");
-      api("POST","/v1/repos/scaffold-branch",{id:repoId}).then(({res,data:sdata})=>{
+      // scaffoldFull IS this action's per-action permission (the checkbox is now explicitly
+      // labeled "Create a branch, push it, and open a pull request" — see addRepo()), so it also
+      // supplies open_pr: a headless caller of this same endpoint that never rendered that label
+      // gets the server's own default of false (see repo_scaffold.go's repoScaffoldBranchReq).
+      api("POST","/v1/repos/scaffold-branch",{id:repoId, open_pr:true}).then(({res,data:sdata})=>{
         unbusy(btn,"Done"); btn.onclick=()=>{ closeModal(); refresh(); };
         note.innerHTML = res.ok
           ? scaffoldResultNote(sdata)
@@ -1224,10 +1246,12 @@
         <div class="field"><label>Project <span class="opt">— only same-project tokens can use a repo; this token's project is <span class="mono">${esc(project)}</span></span></label>
           <input type="text" id="rp-project" value="${esc(project)}" autocomplete="off"></div>
       </div>
-      <label class="field check"><input type="checkbox" id="rp-scaffold" checked> Add l00prite to this repo
-        <span class="opt">— creates a branch with the full protocol (AGENTS.md, the loop prompts, and the
-        vendor adapter files) so any AI agent gets the full benefit, not just the memory folder. Nothing is
-        pushed automatically.</span></label>
+      <label class="field check"><input type="checkbox" id="rp-scaffold" checked> Create a branch, push it, and open a pull request
+        <span class="opt">— writes the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor
+        adapter files) on a new branch, pushes it using this gateway host's own git/GitHub CLI credentials,
+        and opens a pull request. l00prite never merges it — a human reviews and merges (or closes) the pull
+        request. If pushing or opening a PR isn't possible from this host, the branch and commit still happen
+        locally and you'll get copy-paste push instructions instead.</span></label>
       <div id="rp-note"></div>
       <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Clone &amp; register</button></div>`);
     const cloneGroup=document.getElementById("rp-clone-group"), pathGroup=document.getElementById("rp-path-group");
@@ -1273,21 +1297,29 @@
   }
   // scaffoldRepo is the standalone "Add l00prite" action for an already-registered repo (the
   // Register-repo modal's checkbox above covers the at-registration-time path; this covers a
-  // repo registered earlier, or one where the checkbox was left unchecked).
+  // repo registered earlier, or one where the checkbox was left unchecked). Unlike that modal,
+  // this one keeps "add the protocol" and "push it and open a PR" as two separately visible
+  // choices, since here they're genuinely two different asks in the same flow (a repo someone
+  // already registered may still just want the local branch).
   function scaffoldRepo(id){
     openModal(`
       <div class="eyebrow"><span class="tick"></span> Add l00prite</div>
       <h3>Add the full l00prite protocol to <span class="mono">${esc(id)}</span></h3>
       <div class="sub">Creates a local branch and commits AGENTS.md, the six loop prompts, and the vendor
         adapter files this repo doesn't already have — the parts today's automatic memory-folder
-        scaffold deliberately skips. Nothing is pushed automatically.</div>
+        scaffold deliberately skips.</div>
+      <label class="field check"><input type="checkbox" id="sc-open-pr" checked> Also push this branch and open a pull request
+        <span class="opt">— using this gateway host's own git/GitHub CLI credentials. l00prite never merges it —
+        a human reviews and merges (or closes) the pull request. If pushing or opening a PR isn't possible from
+        this host, the branch and commit still happen locally and you'll get copy-paste push instructions instead.</span></label>
       <div id="sc-note"></div>
       <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div>
         <button class="btn primary" id="sc-go">Add l00prite</button></div>`);
     const note=document.getElementById("sc-note"), btn=document.getElementById("sc-go");
     btn.onclick=async()=>{
+      const openPR=document.getElementById("sc-open-pr").checked;
       busy(btn,"Adding l00prite…");
-      const {res,data}=await api("POST","/v1/repos/scaffold-branch",{id});
+      const {res,data}=await api("POST","/v1/repos/scaffold-branch",{id, open_pr:openPR});
       unbusy(btn,"Done");
       if(!res.ok){ note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not add l00prite."))}</div>`; btn.onclick=()=>scaffoldRepo(id); return; }
       note.innerHTML=scaffoldResultNote(data);

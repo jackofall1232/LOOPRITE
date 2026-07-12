@@ -7,11 +7,18 @@
 //
 // This is the opposite of that: an explicit, consent-gated action (a dashboard checkbox or
 // button — NEVER triggered automatically) that creates a LOCAL branch, writes the full protocol
-// (engine.Files.ScaffoldFull), and commits it. Nothing is ever pushed or PR'd automatically —
-// AGENTS.md.template's own hard rule ("never push... without explicit per-action permission")
-// applies just as much to l00prite's own automation as to a model acting inside a scaffolded
-// project — so the response instead carries copy-paste instructions for the user to do that
-// themselves.
+// (engine.Files.ScaffoldFull), and commits it.
+//
+// Pushing and opening a pull request are NOT automatic either, but they ARE now possible: when the
+// request carries open_pr=true, that is itself the explicit per-action permission
+// AGENTS.md.template's hard rule requires — the same shape as a human clicking "Allow" on a
+// pending git-push approval in the run engine (internal/engine/preflight.go's
+// perActionPermissions), just granted from this handler's dashboard control (labeled "Create a
+// branch, push it, and open a pull request") instead of the run engine's approvals inbox. See
+// scaffold_pr.go for the fail-closed capability probe and push/PR mechanics. Nothing in this
+// package ever merges a pull request — that stays a human decision, always. Absent that
+// permission (open_pr omitted/false, e.g. any pre-existing headless API caller), the response
+// still carries the copy-paste push instructions this handler always has.
 package gateway
 
 import (
@@ -31,6 +38,20 @@ const scaffoldBranchSession = "gateway-scaffold-full-branch"
 
 type repoScaffoldBranchReq struct {
 	ID string `json:"id"`
+	// OpenPR requests that l00prite push the new branch and open a pull request for it, using
+	// only ambient host git/gh credentials (the same trust model the model-facing
+	// git_command/run_command engine tools already rely on) — never a stored token, and never a
+	// merge. nil/false means today's local-only behavior: a branch and a commit on the gateway
+	// host, nothing touches the remote.
+	//
+	// This defaults to false at the API level even though the dashboard's own checkbox defaults
+	// to checked: a live click on a control explicitly labeled "Create a branch, push it, and
+	// open a pull request" IS this action's per-action permission (the same shape as clicking
+	// Allow on a pending git-push approval in the run engine — see AGENTS.md's per-action
+	// permission invariant and this handler's package comment). A headless API caller that never
+	// rendered that label has given no such permission, so pre-existing automation hitting this
+	// endpoint must not silently start pushing just because this field shipped.
+	OpenPR *bool `json:"open_pr"`
 }
 
 // HandleRepoScaffoldBranch is POST /v1/repos/scaffold-branch. Reused by both dashboard entry
@@ -157,21 +178,109 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 	}
 	app.auditAs(principal, "repo.scaffold_branch", id)
 
+	// open_pr=true is this action's per-action permission for pushing and opening a PR (see this
+	// file's package comment). Only attempted when a real commit was actually made this call —
+	// see this handler's earlier lock-release-before-commit comment for why "nothing new to
+	// push" must never trigger a git operation at all, matching engine.EnsureRunBranch/CommitUnit
+	// callers' convention of treating an empty diff as a no-op rather than a degenerate action.
+	openPR := body.OpenPR != nil && *body.OpenPR
+	attemptedPR := openPR && len(created) > 0
+	var pushed bool
+	var prURL, capabilityGap, prCommand string
+	if attemptedPR {
+		ctx := r.Context()
+		ok, gapMsg, rawErr := probePushPRCapability(ctx, git, root, branch)
+		if !ok {
+			capabilityGap = gapMsg
+			auditDetail := gapMsg
+			if rawErr != nil {
+				auditDetail = rawErr.Error() // raw text: audit log only, never the client — see probePushPRCapability's doc comment.
+			}
+			app.auditAs(principal, "repo.scaffold_branch.pr_gap", auditDetail)
+		} else {
+			var perr error
+			pushed, prURL, perr = openScaffoldPR(ctx, git, root, branch, scaffoldPRTitle, scaffoldPRBody(branch))
+			switch {
+			case perr != nil && pushed:
+				// The consented push already landed on origin — never rolled back, never retried
+				// blindly. Only PR creation itself needs a human to finish by hand.
+				capabilityGap = gapPRCreate
+				prCommand = ghPRCreateCommand(branch)
+				app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr.Error())
+			case perr != nil:
+				capabilityGap = gapPushFailed
+				app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr.Error())
+			default:
+				app.auditAs(principal, "repo.scaffold_branch.pr", prURL)
+				// Record the PR URL in the repo's own ledger as its OWN commit, after the PR
+				// already exists — writing it before the PR exists would have no URL to record,
+				// and leaving it uncommitted after this handler returns recreates the exact
+				// dirty-tree-on-return bug class this repo has already fixed three times (PR #6's
+				// ledger append, PR #7's lease write, this handler's own lock-release-before-
+				// commit ordering above). Best-effort: a failure here never unwinds the real PR
+				// that already exists on GitHub.
+				_ = files.AppendLedger(engine.LedgerEntry{
+					Timestamp:       util.NowISO(),
+					RunID:           "n/a (repo scaffold, not an engine run)",
+					Goal:            "add the l00prite protocol to this repo",
+					TriggeringEvent: `dashboard consent: "create a branch, push it, and open a pull request"`,
+					Decision:        "opened pull request " + prURL,
+					CompletedWork:   "pushed branch \"" + branch + "\" to origin and opened a pull request for a human to review and merge",
+					ChangedFiles:    "(see branch " + branch + ")",
+					EventStatus:     "not applicable",
+					Confidence:      "recorded by l00prite OS after a real `gh pr create`",
+					NextAction:      "human review and merge (or close) " + prURL,
+					LockNote:        "not applicable — the scaffold lock was already released before the protocol commit above",
+				})
+				if aerr := git.AddPaths(root, []string{".l00prite/ledger.md"}); aerr == nil {
+					if _, cerr := engine.CommitUnit(git, root, "Record PR URL in l00prite ledger"); cerr == nil {
+						if perr2 := pushLedgerUpdate(ctx, git, root, branch); perr2 != nil {
+							app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr2.Error())
+						}
+					} else {
+						app.auditAs(principal, "repo.scaffold_branch.pr_gap", cerr.Error())
+					}
+				} else {
+					app.auditAs(principal, "repo.scaffold_branch.pr_gap", aerr.Error())
+				}
+			}
+		}
+	}
+
 	notes := []string{
-		"This repository's working copy on the gateway host is now checked out on \"" + branch +
-			"\". Nothing was pushed automatically — push this branch and open a pull request against " +
-			"your default branch to bring the full l00prite methodology in.",
+		"This repository's working copy on the gateway host is now checked out on \"" + branch + "\".",
+	}
+	switch {
+	case prURL != "":
+		notes[0] += " It was pushed to origin and a pull request was opened — a human still needs to review and merge it."
+	case attemptedPR:
+		notes[0] += " Nothing was pushed: " + capabilityGap
+	default:
+		notes[0] += " Nothing was pushed automatically — push this branch and open a pull request against " +
+			"your default branch to bring the full l00prite methodology in."
 	}
 	if claudeSkipped {
 		notes = append(notes, "CLAUDE.md already existed and was left untouched (never overwritten). "+
 			"Add the fixed \"l00prite Protocol\" section by hand if you want the full benefit there too.")
 	}
-	sendJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"already_complete": false,
 		"branch":           branch, "branched_from": nilIfEmpty(originalBranch),
 		"commit": nilIfEmpty(hash), "files_created": strSliceAny(created),
 		"claude_md_skipped": claudeSkipped,
 		"push_instructions": "git push -u origin " + branch,
 		"notes":             strSliceAny(notes),
-	})
+	}
+	// These keys are only ever added when open_pr=true actually triggered an attempt — an
+	// omitted/false open_pr must produce a response byte-identical to before this field existed,
+	// so pre-existing automation hitting this endpoint sees no shape change at all.
+	if attemptedPR {
+		resp["pushed"] = pushed
+		resp["pr_url"] = nilIfEmpty(prURL)
+		resp["capability_gap"] = nilIfEmpty(capabilityGap)
+		if prCommand != "" {
+			resp["pr_command"] = prCommand
+		}
+	}
+	sendJSON(w, 200, resp)
 }
