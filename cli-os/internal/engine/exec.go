@@ -120,6 +120,24 @@ func (e *Engine) awaitApproval(ctx context.Context, run *Run, gate GateRequest) 
 		_, _ = e.Store.AppendEvent(run.ID, EvToolDenied, map[string]any{"action": gate.Action, "class": gate.Class, "policy": "deny"})
 		return false, ""
 	}
+	// A gate class configured "auto_approve" (only ever push / pr_create, validated at CreateRun
+	// and re-checked here via GateClassAutoApprovable) executes without the human wait -- but
+	// never silently: the decision is recorded as a first-class run event carrying the same
+	// class/action/args the human-approval path records, under a distinct event kind
+	// (EvAutoApproved) so an audit query for human decisions is never polluted. The
+	// GateClassAutoApprovable re-check is defense in depth: if a corrupted or hand-edited DB row
+	// ever carried auto_approve on a class that was never eligible (merge, destructive, deploy,
+	// credential_change, outside_repo), this condition is false and control falls straight
+	// through to the unmodified CreateApproval + waiting_approval + timeout-fail-closed flow
+	// below -- the failure mode of a broken invariant here is require_approval, never
+	// auto-execution.
+	if run.Config.Gates[gate.Class] == PolicyAutoApprove && GateClassAutoApprovable(gate.Class) {
+		_, _ = e.Store.AppendEvent(run.ID, EvAutoApproved, map[string]any{
+			"class": gate.Class, "action": gate.Action, "args": gate.Args,
+			"policy": PolicyAutoApprove, "source": "project_auto_pr_setting_confirmed_at_preflight",
+		})
+		return true, ""
+	}
 	appr, err := e.Store.CreateApproval(run.ID, gate.Class, gate.Action, gate.Args)
 	if err != nil {
 		return false, BoundaryHumanReview

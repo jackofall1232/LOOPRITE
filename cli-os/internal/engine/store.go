@@ -104,8 +104,19 @@ func (s *Store) CreateRun(project, repoRoot string, cfg RunConfig) (*Run, error)
 		if !containsStr(GateClasses, class) {
 			return nil, fmt.Errorf("engine: unknown gate class %q", class)
 		}
-		if policy != PolicyRequireApproval && policy != PolicyDeny {
-			return nil, fmt.Errorf("engine: gate %q has invalid policy %q (want require_approval|deny)", class, policy)
+		switch policy {
+		case PolicyRequireApproval, PolicyDeny:
+			// always valid
+		case PolicyAutoApprove:
+			// auto_approve is structurally restricted to push/pr_create (GateClassAutoApprovable)
+			// -- rejecting it here at creation, not just ignoring it at runtime, means a run's
+			// persisted pre-flight display can never show an auto_approve entry for a class that
+			// was never eligible to have one.
+			if !GateClassAutoApprovable(class) {
+				return nil, fmt.Errorf("engine: gate %q may not use auto_approve (only push and pr_create are eligible)", class)
+			}
+		default:
+			return nil, fmt.Errorf("engine: gate %q has invalid policy %q (want require_approval|deny|auto_approve)", class, policy)
 		}
 	}
 

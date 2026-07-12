@@ -127,6 +127,11 @@ func (app *App) HandleRunCreate(w http.ResponseWriter, r *http.Request) {
 // separate, human-confirmed endpoint (HandleRunStart), and neither this helper nor the chat path
 // may call engine.StartRun. Caller must ensure app.Engine != nil.
 func (app *App) createDraftRun(project, repoRoot string, cfg engine.RunConfig) (*engine.Run, *engine.Preflight, error) {
+	// Project Auto-PR setting (internal/gateway/autopr.go): fills push/pr_create with
+	// auto_approve when ON, but only for keys the caller didn't already set explicitly. Must run
+	// before Store.CreateRun so the merged map is what gets validated, persisted, frozen by the
+	// self-modification guard, and rendered in the pre-flight the human confirms with EXECUTE.
+	cfg.Gates = app.applyAutoPRGates(project, cfg.Gates)
 	run, err := app.Engine.Store.CreateRun(project, repoRoot, cfg)
 	if err != nil {
 		return nil, nil, err

@@ -138,6 +138,11 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleBudgetGet(w, r)
 		case r.Method == http.MethodPost && p == "/v1/budget":
 			app.HandleBudgetSet(w, r)
+		// Authenticated per-project Auto-PR toggle (dashboard "Auto-PR" modal, mirrors budget).
+		case r.Method == http.MethodGet && p == "/v1/auto-pr":
+			app.HandleAutoPRGet(w, r)
+		case r.Method == http.MethodPost && p == "/v1/auto-pr":
+			app.HandleAutoPRSet(w, r)
 		// Authenticated provider lifecycle management (Part E) — flat POST actions, name in the body.
 		case r.Method == http.MethodPost && p == "/v1/providers":
 			app.HandleProviderAdd(w, r)

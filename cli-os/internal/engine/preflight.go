@@ -18,6 +18,7 @@ import (
 // perActionPermissions is the protocol's always-separately-gated action list, displayed verbatim.
 var perActionPermissions = []string{
 	"git push (any remote)",
+	"opening a pull request (gh pr create)",
 	"merge",
 	"deploy / publish",
 	"changing credentials or secrets",

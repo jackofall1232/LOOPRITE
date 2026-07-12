@@ -655,11 +655,35 @@ func classifyCommand(command string) string {
 	case hasCmdPrefix(c, "git push --force"), hasCmdPrefix(c, "git push -f"):
 		return GateDestructive
 	case hasCmdPrefix(c, "git push"):
+		// A force/delete/mirror/prune flag ANYWHERE in a git push -- not just as the immediate
+		// prefix caught above -- must never reach GatePush: GatePush is the one class the
+		// project Auto-PR toggle may set to auto_approve, and "git push origin main --force"
+		// used to classify as plain GatePush (only an immediately-following --force/-f was
+		// caught), which would have made a force-push auto-approvable. containsForcePushToken
+		// closes that regardless of flag position.
+		if containsForcePushToken(c) {
+			return GateDestructive
+		}
 		return GatePush
 	case hasCmdPrefix(c, "git merge"):
 		return GateMerge
 	case hasCmdPrefix(c, "git rebase"), hasCmdPrefix(c, "git reset"), hasCmdPrefix(c, "git clean"):
 		return GateDestructive
+	case hasCmdPrefix(c, "gh pr create"):
+		// The only loosening classifyCommand grants: "gh pr create" (and only that exact prefix
+		// -- hasCmdPrefix requires the next byte after the prefix to be a space or end-of-string,
+		// so "gh pr view/merge/close", "gh repo create", "gh pr createx", and "gh  pr create"
+		// (double space) all miss and fall through to the GateDestructive default below, never
+		// the other way around). run_command executes via `sh -c` (see runCommand), so a shell
+		// metacharacter anywhere in the command -- chaining, piping, redirection, or command
+		// substitution inside a --body -- forces it back to GateDestructive: PolicyAutoApprove
+		// can therefore only ever reach a single, plain "gh pr create ..." invocation with flags
+		// in any order (--title/--body/--head/--base/--draft); a multiline --body needs
+		// --body-file or human approval, the safe direction.
+		if shellChainChars.MatchString(c) {
+			return GateDestructive
+		}
+		return GatePRCreate
 	default:
 		return GateDestructive
 	}
@@ -667,6 +691,25 @@ func classifyCommand(command string) string {
 
 func hasCmdPrefix(c, prefix string) bool {
 	return c == prefix || strings.HasPrefix(c, prefix+" ")
+}
+
+// forcePushTokens: any of these appearing anywhere in a `git push` command's arguments makes it
+// destructive, never auto-approvable. Matched whole-token (strings.Fields), so a branch literally
+// named "my--force" can never false-positive off a substring match.
+var forcePushTokens = map[string]bool{
+	"--force": true, "-f": true, "--force-with-lease": true, "--force-if-includes": true,
+	"--delete": true, "-d": true, "--mirror": true, "--prune": true,
+}
+
+// containsForcePushToken reports whether any whitespace-separated token of c is a force/delete/
+// mirror/prune push flag, wherever it appears in the command string.
+func containsForcePushToken(c string) bool {
+	for _, tok := range strings.Fields(c) {
+		if forcePushTokens[tok] {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- git_command ----
@@ -718,7 +761,7 @@ func (tb *Toolbox) gitCommand(ctx context.Context, args map[string]any, approved
 			return ToolOutcome{
 				Result: fmt.Sprintf("GATE: git %s requires human approval", sub),
 				Gate: &GateRequest{
-					Class:  classifyGitSub(sub),
+					Class:  classifyGitSub(sub, list[1:]),
 					Action: fmt.Sprintf("git_command %v", list),
 					Args:   args,
 				},
@@ -855,9 +898,20 @@ func gitBranchArgsAreSafe(rest []string) bool {
 	}
 }
 
-func classifyGitSub(sub string) string {
+// classifyGitSub assigns a gate class to a gated git_command subcommand. rest is the
+// subcommand's own argument list (list[1:] at the call site) so a push carrying a force/delete/
+// mirror/prune flag -- e.g. git_command ["push","--force"] or ["push","origin","--delete","x"] --
+// is caught here exactly as classifyCommand's containsForcePushToken catches it for the
+// run_command/sh path: GatePush is the one class the project Auto-PR toggle may set to
+// auto_approve, so this must never read GatePush for a push that can rewrite or delete history.
+func classifyGitSub(sub string, rest []string) string {
 	switch sub {
 	case "push":
+		for _, tok := range rest {
+			if forcePushTokens[tok] {
+				return GateDestructive
+			}
+		}
 		return GatePush
 	case "merge":
 		return GateMerge

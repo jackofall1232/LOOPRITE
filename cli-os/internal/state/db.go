@@ -66,6 +66,18 @@ CREATE TABLE IF NOT EXISTS caps (
   PRIMARY KEY (project, window)
 );
 
+-- Per-project settings that are neither budget (caps) nor a run's own config: today just the
+-- Auto-PR toggle (gateway/autopr.go). A dedicated table, not an ALTER onto caps, because caps is
+-- keyed (project, window) for the budget feature specifically and auto_pr has no "window" -- the
+-- wrong home. CREATE TABLE IF NOT EXISTS runs unconditionally on every Open (same guarantee as
+-- every other table here), so a pre-existing DB gains this table with no separate migration step.
+-- A missing row reads as auto_pr=0 (OFF) -- see autoPREnabled -- so every existing and new project
+-- defaults to OFF with no backfill needed.
+CREATE TABLE IF NOT EXISTS project_settings (
+  project TEXT PRIMARY KEY,
+  auto_pr INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS spend (
   project TEXT NOT NULL,
   day TEXT NOT NULL,
