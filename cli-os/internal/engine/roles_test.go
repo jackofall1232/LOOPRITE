@@ -15,8 +15,11 @@ func TestPlanForObjectiveTable(t *testing.T) {
 		review    bool
 		bridge    bool
 	}{
-		{ObjectiveBalanced, map[string]string{"plan": "plan", "code": "code", "review": "review", "summarize": "summarize"}, true, true},
-		{ObjectiveQuality, map[string]string{"plan": "plan", "code": "quality", "review": "review", "summarize": "summarize"}, true, true},
+		// Bridge is always false now (reserved) — the coder can never bridge (see TeamPlan.Bridge
+		// and exec.go runCoder). Balanced/quality used to arm it, which silently broke tool
+		// execution; these expectations pin that it stays off.
+		{ObjectiveBalanced, map[string]string{"plan": "plan", "code": "code", "review": "review", "summarize": "summarize"}, true, false},
+		{ObjectiveQuality, map[string]string{"plan": "plan", "code": "quality", "review": "review", "summarize": "summarize"}, true, false},
 		{ObjectiveCost, map[string]string{"plan": "cheap", "code": "cheap", "review": "review", "summarize": "cheap"}, false, false},
 		{ObjectiveSpeed, map[string]string{"plan": "balanced", "code": "balanced", "review": "review", "summarize": "cheap"}, false, false},
 		{ObjectivePrivacy, map[string]string{"plan": "privacy", "code": "privacy", "review": "privacy", "summarize": "privacy"}, false, false},
@@ -48,7 +51,7 @@ func TestPlanForObjectiveEmptyDefaultsToBalanced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty objective should default to balanced, got error: %v", err)
 	}
-	if got.Profiles[RoleCode] != "code" || !got.Review || !got.Bridge {
+	if got.Profiles[RoleCode] != "code" || !got.Review {
 		t.Fatalf("empty objective did not resolve to balanced: %+v", got)
 	}
 }

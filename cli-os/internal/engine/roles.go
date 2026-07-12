@@ -18,8 +18,7 @@ import (
 // ---- objective → team resolution ----
 
 // TeamPlan is the resolved staffing + options for one objective: which auto-routing profile each
-// role runs through, whether the pre-persist reviewer step is on, and whether coder turns arm
-// cross-provider delegation (the bridge loop).
+// role runs through and whether the pre-persist reviewer step is on.
 //
 // NOTE: the spec called this struct `RolePlan`, but `RolePlan` is already a string const in
 // types.go (the "plan" role id). A type and const cannot share a name in one package, so the
@@ -27,7 +26,13 @@ import (
 type TeamPlan struct {
 	Profiles map[string]string // role -> auto-routing profile name (Model becomes "auto:<profile>")
 	Review   bool              // reviewer step enabled (pre-persist diff review)
-	Bridge   bool              // arm cross-provider delegation on coder turns
+	// Bridge is RESERVED and currently always false. Cross-provider delegation (RunBridge) is
+	// incompatible with the coder's own tool-execution loop — a bridged turn's file/git tool calls
+	// are answered with a capability-gap string and never executed (see exec.go runCoder's invariant
+	// comment). The coder is the only tool-executing role; planner/reviewer/summarize never bridge.
+	// Re-arming this would require a delegation executor inside the engine loop (deferred; see
+	// .l00prite/todos.md). The chat-time bridge (Playground) is a separate path and unaffected.
+	Bridge bool
 }
 
 // PlanForObjective resolves an objective preset to its TeamPlan. The mapping is deliberate,
@@ -55,14 +60,14 @@ func PlanForObjective(objective string) (TeamPlan, error) {
 		return TeamPlan{
 			Profiles: map[string]string{RolePlan: "plan", RoleCode: "code", RoleReview: "review", RoleSummarize: "summarize"},
 			Review:   true,
-			Bridge:   true,
+			Bridge:   false, // reserved; see TeamPlan.Bridge — the coder must never bridge
 		}, nil
 	case ObjectiveQuality:
 		return TeamPlan{
 			// coder ranked purely by quality; plan/review/summarize unchanged from balanced.
 			Profiles: map[string]string{RolePlan: "plan", RoleCode: "quality", RoleReview: "review", RoleSummarize: "summarize"},
 			Review:   true,
-			Bridge:   true,
+			Bridge:   false, // reserved; see TeamPlan.Bridge — the coder must never bridge
 		}, nil
 	case ObjectiveCost:
 		return TeamPlan{

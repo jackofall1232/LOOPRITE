@@ -22,10 +22,11 @@ type scriptedCaller struct {
 	review  map[string]any   // review_verdict args (nil -> approve)
 	preview func(model string) (RoutePreview, error)
 
-	planCalls  int
-	coderUnit  int
-	coderStep  int
-	seenModels []string
+	planCalls   int
+	coderUnit   int
+	coderStep   int
+	seenModels  []string
+	coderBridge []bool // in.Bridge recorded for every coder-role turn (must always be false)
 }
 
 type step struct {
@@ -65,6 +66,7 @@ func (c *scriptedCaller) Turn(ctx context.Context, in TurnInput) (TurnResult, er
 		c.planCalls++
 		res.Message = toolCallMsg("select_unit", c.planner[i])
 	case RoleCode:
+		c.coderBridge = append(c.coderBridge, in.Bridge)
 		steps := c.coder[c.coderUnit]
 		st := steps[c.coderStep]
 		c.coderStep++
@@ -252,6 +254,44 @@ func TestStartRunDoesNotLeakActiveLeaseOntoSourceBranch(t *testing.T) {
 	}
 	if lock["status"] == "active" && lock["owner_session"] == run.ID {
 		t.Fatalf("source branch %q carries this run's ACTIVE lease in its committed lock.json: %v", sourceBranch, lock)
+	}
+}
+
+// TestCoderTurnsNeverBridgeUnderBalanced pins the fix for the 2026-07 "the only tool is
+// l00prite_bridge / cannot git push" run. The default objectives (balanced/quality) used to arm
+// TeamPlan.Bridge on coder turns, routing them through RunBridge — a path that advertises the repo
+// tools but answers every non-bridge tool call with a capability-gap string and never executes it,
+// so the coder could neither write files nor push. This asserts every coder turn is non-bridge
+// under the balanced objective AND that a real write actually lands on disk (which is impossible
+// through a bridged turn).
+func TestCoderTurnsNeverBridgeUnderBalanced(t *testing.T) {
+	caller := &scriptedCaller{
+		planner: []map[string]any{
+			{"action": "unit", "description": "create greeting.txt", "target_paths": []string{"greeting.txt"}, "verification_command": "true"},
+			{"action": "done", "done_reason": "greeting.txt exists and the done-check passes"},
+		},
+		coder: [][]step{
+			{{name: "write_file", args: map[string]any{"path": "greeting.txt", "content": "hello\n"}}, {name: "unit_done", args: map[string]any{"summary": "wrote greeting.txt", "files_changed": []string{"greeting.txt"}}}},
+		},
+	}
+	e := newEngine(t, caller)
+	root := newRepo(t)
+	run := startRun(t, e, root, "add a greeting file", func(rc *RunConfig) { rc.Objective = ObjectiveBalanced })
+
+	final := waitTerminal(t, e, run.ID)
+	if final.Status != StatusDone {
+		t.Fatalf("want done, got %s/%s (%s)", final.Status, final.Boundary, final.Summary)
+	}
+	if len(caller.coderBridge) == 0 {
+		t.Fatal("no coder turns were recorded")
+	}
+	for i, b := range caller.coderBridge {
+		if b {
+			t.Fatalf("coder turn %d ran with Bridge=true; a bridged coder turn cannot execute tools", i)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "greeting.txt")); err != nil {
+		t.Fatalf("greeting.txt not written — coder tool execution is broken: %v", err)
 	}
 }
 
