@@ -711,6 +711,21 @@ func classifyCommand(command, branch string) string {
 		if containsFileReadingPRFlag(c) {
 			return GateDestructive
 		}
+		// PR review (chatgpt-codex-connector): -R/--repo lets `gh pr create` target ANY
+		// repository the gateway's gh token can reach, not necessarily this run's own --
+		// an auto-approved run could otherwise spam or manipulate pull requests on an
+		// entirely unrelated repo. Never auto-approvable.
+		if containsCrossRepoPRFlag(c) {
+			return GateDestructive
+		}
+		// PR review (chatgpt-codex-connector): without an explicit --head, "gh pr create"
+		// falls back to inferring the head branch/repo from ambient git state, which this
+		// classifier cannot confirm from the command text alone. Requiring the flag be
+		// spelled out keeps auto-approval scoped to exactly what the command says, the
+		// same "confirm from text or fail closed" discipline pushTargetsRunBranch uses.
+		if !containsHeadFlag(c) {
+			return GateDestructive
+		}
 		return GatePRCreate
 	default:
 		return GateDestructive
@@ -801,9 +816,24 @@ func pushTargetsRunBranch(args []string, branch string) bool {
 		// An explicit refspec "src:dst" -- what matters is the DESTINATION actually written on
 		// the remote; src just says what local content feeds it, which is no more of an
 		// escalation than the run's own already-ungated commits to its own branch. An empty dst
-		// (e.g. "somebranch:", a remote-ref delete) is rejected by the branch-name comparison
-		// below, since "" can never equal a real branch name.
+		// (e.g. "somebranch:", not a real git refspec form but harmless either way) is rejected
+		// by the branch-name comparison below, since "" can never equal a real branch name.
+		//
+		// Two SRC forms are NOT harmless, though, and containsForcePushToken never sees them
+		// because they're refspec syntax embedded in one token, not a separate --force/--delete
+		// flag (PR review, chatgpt-codex-connector): an empty src ("origin :branch") is git's
+		// refspec form for deleting the remote ref -- exactly as destructive as --delete -- and a
+		// "+"-prefixed src ("origin +HEAD:branch") is refspec syntax for a force push -- exactly
+		// as destructive as --force. Both must fail closed here.
+		src := ref[:i]
+		if src == "" || strings.HasPrefix(src, "+") {
+			return false
+		}
 		dst = ref[i+1:]
+	} else if strings.HasPrefix(ref, "+") {
+		// A bare "+HEAD" (no colon) is the same force-push refspec syntax with an implicit
+		// same-named destination -- still not visible to containsForcePushToken.
+		return false
 	} else if ref == "HEAD" {
 		// "git push origin HEAD" pushes the CURRENTLY CHECKED-OUT commit to a remote branch of
 		// the SAME NAME -- git's own special-cased convention for this bare source. Safe here
@@ -818,17 +848,21 @@ func pushTargetsRunBranch(args []string, branch string) bool {
 
 // fileReadingPRFlagTokens/-Prefixes: gh pr create flags that read an arbitrary LOCAL file (not
 // necessarily inside the repo -- gh reads it directly off the gateway host's filesystem) and use
-// its content as PR text. -F/--body-file and -T/--template both do this per the gh CLI manual;
-// gh accepts either "-F file" (a separate token, still caught below since containsFileReadingPRFlag
-// only needs to see the flag token itself) or "-F=file"/"--body-file=file" (one token, caught by
-// the prefix list). Never auto-approvable: this is how a run could exfiltrate an SSH key or any
-// other host file the gateway process can read into a PUBLIC pull request (PR review finding,
+// its content as PR text. -F/--body-file and -T/--template both do this per the gh CLI manual.
+// gh's shorthand flags (-F, -T) are pflag-based and accept their value three ways: "-F file" (a
+// separate token, still caught below since containsFileReadingPRFlag only needs to see the flag
+// token itself), "-F=file", or attached with NO separator at all, "-Ffile" -- the last form is
+// caught only by matching the bare "-F"/"-T" prefix (PR review, chatgpt-codex-connector: matching
+// only the "=<value>" form left the attached-no-separator form unguarded). Long flags don't
+// support attachment, so --body-file/--template still need their own "=" prefix and exact-token
+// entries. Never auto-approvable: this is how a run could exfiltrate an SSH key or any other host
+// file the gateway process can read into a PUBLIC pull request (PR review finding,
 // chatgpt-codex-connector).
-var fileReadingPRFlagTokens = map[string]bool{"-F": true, "--body-file": true, "-T": true, "--template": true}
-var fileReadingPRFlagPrefixes = []string{"-F=", "--body-file=", "-T=", "--template="}
+var fileReadingPRFlagTokens = map[string]bool{"--body-file": true, "--template": true}
+var fileReadingPRFlagPrefixes = []string{"-F", "-T", "--body-file=", "--template="}
 
 // containsFileReadingPRFlag reports whether any whitespace-separated token of c is a gh pr create
-// flag that reads a local file, in either its bare (separate-argument) or "=<value>" form.
+// flag that reads a local file, in any of its bare/attached/"=<value>" forms.
 func containsFileReadingPRFlag(c string) bool {
 	for _, tok := range strings.Fields(c) {
 		if fileReadingPRFlagTokens[tok] {
@@ -838,6 +872,36 @@ func containsFileReadingPRFlag(c string) bool {
 			if strings.HasPrefix(tok, p) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// crossRepoPRFlagPrefixes: gh pr create's -R/--repo targets an ARBITRARY repository, not
+// necessarily this run's own -- letting an auto-approved run create pull requests against any
+// repo the gateway's gh token can reach. Matched by prefix, the same attached-shorthand
+// discipline as fileReadingPRFlagPrefixes above, so "-Rowner/repo" is caught alongside
+// "-R owner/repo"/"-R=owner/repo"/"--repo=owner/repo" (PR review, chatgpt-codex-connector).
+var crossRepoPRFlagPrefixes = []string{"-R", "--repo"}
+
+func containsCrossRepoPRFlag(c string) bool {
+	for _, tok := range strings.Fields(c) {
+		for _, p := range crossRepoPRFlagPrefixes {
+			if strings.HasPrefix(tok, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// containsHeadFlag reports whether c spells out gh pr create's --head explicitly. Required for
+// GatePRCreate (PR review, chatgpt-codex-connector): without it, gh infers the head branch/repo
+// from ambient git state this classifier cannot see from the command text alone.
+func containsHeadFlag(c string) bool {
+	for _, tok := range strings.Fields(c) {
+		if tok == "--head" || strings.HasPrefix(tok, "--head=") {
+			return true
 		}
 	}
 	return false

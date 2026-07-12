@@ -1473,7 +1473,17 @@
       const sel=document.getElementById("cr-gate-"+cls);
       if(sel) sel.addEventListener("change", ()=>gateTouched.add(cls));
     });
+    // myModalGen guards against a second race (PR review, chatgpt-codex-connector), on top of
+    // gateTouched above: if this modal is closed and a NEW create-run modal opened before this
+    // GET resolves, both instances render the same "cr-gate-*" element ids into the shared
+    // #modal-body -- so the OLD instance's callback, once it does resolve, would otherwise reach
+    // through document.getElementById and silently overwrite the NEW instance's selects (and its
+    // own, empty-at-capture-time gateTouched would never have caught it). Mirrors the existing
+    // modalGen/myGen pattern already used for this exact class of stale-async-callback race
+    // elsewhere (see editModels above).
+    const myModalGen = modalGen;
     api("GET","/v1/auto-pr").then(({res,data})=>{
+      if(myModalGen !== modalGen) return;
       if(!res.ok || !data || !data.enabled) return;
       GATE_AUTO_APPROVABLE.forEach(cls=>{
         if(gateTouched.has(cls)) return;
