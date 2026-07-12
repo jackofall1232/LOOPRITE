@@ -231,6 +231,85 @@ func TestRepoScaffoldBranchOpenPRPushSucceedsButPRCreateFails(t *testing.T) {
 	}
 }
 
+// TestRepoScaffoldBranchOpenPRSucceedsButURLUnparseable (PR review finding, gemini-code-assist +
+// Copilot both independently flagged the same latent bug): `gh pr create` exits 0 -- the pull
+// request really was opened -- but prints nothing parsePRURL recognizes as a URL. Confirmed to
+// fail against the pre-fix code, which fell into the generic success `default:` branch: it wrote
+// a ledger entry claiming "opened pull request " with an empty URL, while the separate notes
+// switch (matching on pushed/prURL, evaluated independently) said "opening the pull request
+// failed" for the exact same event -- directly contradictory, and both wrong, since the PR did
+// open. This test pins the honest, non-contradictory alternative: no pr_url, no ledger commit, a
+// gap message that doesn't claim failure, and a `gh pr view` (never `gh pr create`, which would
+// just fail with "already exists") fallback.
+func TestRepoScaffoldBranchOpenPRSucceedsButURLUnparseable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	srv, _, _, _, token := configured(t)
+	base := srv.URL
+	repoDir := t.TempDir()
+	initGitRepoWithCommit(t, repoDir)
+	// prURL="" -> the stub's `gh pr create` prints an empty line and exits 0, exactly like a real
+	// `gh` whose success-output shape parsePRURL can't recognize.
+	prependToPATH(t, writeStubGH(t, false, ""))
+	bareDir := scaffoldRepoWithOrigin(t, base, token, "prurlunknown", repoDir)
+
+	resp, body := doJSON(t, "POST", base+"/v1/repos/scaffold-branch", token, map[string]any{"id": "prurlunknown", "open_pr": true})
+	if resp.StatusCode != 200 {
+		t.Fatalf("scaffold-branch must be 200, got %d (%v)", resp.StatusCode, body)
+	}
+	if body["pushed"] != true {
+		t.Fatalf("expected pushed=true (the push and PR creation both succeeded), got %v", body)
+	}
+	if body["pr_url"] != nil {
+		t.Fatalf("expected no pr_url (unparseable, not empty-string), got %v", body["pr_url"])
+	}
+	gap, _ := body["capability_gap"].(string)
+	if !strings.Contains(gap, "pull request was opened") {
+		t.Fatalf("expected the fixed succeeded-but-URL-unknown sentence, got %q", gap)
+	}
+	if strings.Contains(gap, "failed") {
+		t.Fatalf("must never say the PR-open failed here -- it succeeded, only its URL is unknown; got %q", gap)
+	}
+	prCmd, _ := body["pr_command"].(string)
+	if !strings.Contains(prCmd, "gh pr view") {
+		t.Fatalf("expected a `gh pr view` fallback (looks up the PR that already exists), got %q", prCmd)
+	}
+	if strings.Contains(prCmd, "gh pr create") {
+		t.Fatalf("must never suggest re-running `gh pr create` -- the PR already exists, that would just fail, got %q", prCmd)
+	}
+	notes, _ := body["notes"].([]any)
+	if len(notes) == 0 {
+		t.Fatal("expected at least one note")
+	}
+	note0 := notes[0].(string)
+	if !strings.Contains(note0, "pushed to origin and a pull request was opened") {
+		t.Fatalf("expected notes to say it WAS pushed and the PR WAS opened, got %v", notes)
+	}
+	if strings.Contains(note0, "failed") {
+		t.Fatalf("notes must never say this failed -- it succeeded, only the URL is unknown, got %v", notes)
+	}
+	assertNoRawGitTextLeaked(t, body)
+
+	// The branch must be REAL on the remote -- the PR really was created despite the unparseable
+	// response, so the consented push was correctly never rolled back.
+	branch, _ := body["branch"].(string)
+	branches := gitRunSrv(t, bareDir, "branch", "--list", branch)
+	if !strings.Contains(branches, branch) {
+		t.Fatalf("expected the branch to have actually reached origin, got: %q", branches)
+	}
+	// No ledger-URL commit: writing "opened pull request " with an empty URL would be exactly the
+	// bug this test exists to catch (see the pre-fix behavior described in the doc comment above).
+	log := gitRunSrv(t, bareDir, "log", "--oneline", branch)
+	if strings.Contains(log, "Record PR URL in l00prite ledger") {
+		t.Fatalf("must NOT have written a ledger-URL commit with an empty/unknown URL, got log: %q", log)
+	}
+	ledgerBytes, err := os.ReadFile(filepath.Join(repoDir, ".l00prite", "ledger.md"))
+	if err == nil && strings.Contains(string(ledgerBytes), "opened pull request \n") {
+		t.Fatalf("ledger.md must not contain an empty-URL entry, got:\n%s", ledgerBytes)
+	}
+}
+
 // TestRepoScaffoldBranchOpenPRFailsClosedWithoutGH (plan step 4b): gh not on PATH must produce a
 // fixed capability_gap and, critically, must NEVER push anything to the remote -- a half-pushed,
 // no-PR state is exactly what this design is required to avoid.

@@ -54,6 +54,12 @@ func TestClassifyCommandForcePushIsDestructive(t *testing.T) {
 		"git push origin --delete stale-branch",
 		"git push --mirror origin",
 		"git push origin refs/heads/*:refs/heads/* --prune",
+		// PR review (gemini-code-assist): --force-with-lease/--force-if-includes accept an
+		// "=<value>" suffix, which is a single whitespace-free token that never exact-matched
+		// forcePushTokens -- a real bypass, since GatePush is auto-approvable. Confirmed to fail
+		// against the pre-isForcePushToken code (exact-match only), which read GatePush for these.
+		"git push --force-with-lease=main origin main",
+		"git push origin main --force-if-includes=true",
 	}
 	for _, cmd := range cases {
 		if got := classifyCommand(cmd); got != GateDestructive {
@@ -80,6 +86,10 @@ func TestClassifyGitSubForcePushIsDestructive(t *testing.T) {
 		{"push", []string{"--force"}, GateDestructive},
 		{"push", []string{"origin", "--delete", "stale"}, GateDestructive},
 		{"push", []string{"--mirror", "origin"}, GateDestructive},
+		// Same "=<value>" bypass as the classifyCommand test above, for the git_command tool-array
+		// path: rest[i] arrives as one token, e.g. "--force-with-lease=main".
+		{"push", []string{"--force-with-lease=main"}, GateDestructive},
+		{"push", []string{"origin", "--force-if-includes=true"}, GateDestructive},
 		{"push", nil, GatePush},
 		{"push", []string{"origin", "main"}, GatePush},
 		{"merge", nil, GateMerge},

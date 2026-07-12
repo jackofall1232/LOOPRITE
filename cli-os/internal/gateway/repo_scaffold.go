@@ -210,6 +210,20 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 			case perr != nil:
 				capabilityGap = gapPushFailed
 				app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr.Error())
+			case prURL == "":
+				// `gh pr create` exited 0 -- the PR really was opened -- but parsePRURL found no
+				// URL-looking line in its output (PR review finding: a future gh version could
+				// change its success-output shape). Must NOT fall into the default branch below:
+				// that would write a ledger entry claiming "opened pull request " with an empty
+				// URL, and the notes switch below would say "opening the pull request failed" —
+				// factually wrong on both counts, since it actually succeeded. `gh pr create`
+				// itself is never offered as the fallback command here (unlike gapPRCreate above)
+				// because the PR already exists — re-running it would just fail with "a pull
+				// request for branch ... already exists"; `gh pr view` looks the real one up
+				// instead.
+				capabilityGap = gapPRURLUnknown
+				prCommand = ghPRViewCommand(branch)
+				app.auditAs(principal, "repo.scaffold_branch.pr_gap", "gh pr create succeeded (exit 0) but printed no parseable PR URL")
 			default:
 				app.auditAs(principal, "repo.scaffold_branch.pr", prURL)
 				// Record the PR URL in the repo's own ledger as its OWN commit, after the PR
@@ -253,6 +267,11 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 	switch {
 	case prURL != "":
 		notes[0] += " It was pushed to origin and a pull request was opened — a human still needs to review and merge it."
+	case pushed && capabilityGap == gapPRURLUnknown:
+		// Ordered BEFORE the generic "pushed" case below: the PR really was opened here (gh
+		// exited 0) — only its URL is unknown — so this must never share the "opening the pull
+		// request failed" wording, which would be factually wrong for this specific gap.
+		notes[0] += " It was pushed to origin and a pull request was opened, but l00prite couldn't read its URL: " + capabilityGap
 	case pushed:
 		// The branch DID reach origin here — only `gh pr create` itself failed (gapPRCreate) —
 		// so this must never be worded as "nothing was pushed" (that would be exactly the raw-

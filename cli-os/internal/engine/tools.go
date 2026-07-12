@@ -701,11 +701,32 @@ var forcePushTokens = map[string]bool{
 	"--delete": true, "-d": true, "--mirror": true, "--prune": true,
 }
 
+// forcePushValueFlagPrefixes: --force-with-lease and --force-if-includes both accept an optional
+// "=<value>" suffix (e.g. "--force-with-lease=main"), which is a single whitespace-free token and
+// so never exact-matches forcePushTokens above -- a real safety bypass, since that let a
+// value-qualified force-with-lease push slip through as auto-approvable GatePush instead of
+// GateDestructive (caught in PR review; see isForcePushToken's regression tests).
+var forcePushValueFlagPrefixes = []string{"--force-with-lease=", "--force-if-includes="}
+
+// isForcePushToken reports whether tok (one whitespace-separated field) is a force/delete/mirror/
+// prune push flag, in either its bare or "=<value>"-qualified form.
+func isForcePushToken(tok string) bool {
+	if forcePushTokens[tok] {
+		return true
+	}
+	for _, p := range forcePushValueFlagPrefixes {
+		if strings.HasPrefix(tok, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // containsForcePushToken reports whether any whitespace-separated token of c is a force/delete/
 // mirror/prune push flag, wherever it appears in the command string.
 func containsForcePushToken(c string) bool {
 	for _, tok := range strings.Fields(c) {
-		if forcePushTokens[tok] {
+		if isForcePushToken(tok) {
 			return true
 		}
 	}
@@ -908,7 +929,7 @@ func classifyGitSub(sub string, rest []string) string {
 	switch sub {
 	case "push":
 		for _, tok := range rest {
-			if forcePushTokens[tok] {
+			if isForcePushToken(tok) {
 				return GateDestructive
 			}
 		}

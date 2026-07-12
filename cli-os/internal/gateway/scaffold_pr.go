@@ -42,6 +42,13 @@ const (
 	gapPushDryRun  = "Pushing to origin isn't possible from this host — check the remote URL and credentials, then try again. Push this branch and open the pull request yourself using the command below."
 	gapPushFailed  = "Pushing this branch to origin failed even though a dry run of the same push just succeeded (a race, or a rejected hook) — nothing else was attempted. Push this branch and open the pull request yourself using the command below."
 	gapPRCreate    = "The branch was pushed to origin, but opening the pull request failed. Open it yourself with the command below."
+	// gapPRURLUnknown is distinct from gapPRCreate: `gh pr create` here exited 0 -- the pull
+	// request really was opened -- but parsePRURL found no URL-looking line in its output (a
+	// future gh version printing extra text, or a differently-shaped success message). Saying
+	// "opening the pull request failed" here would be factually wrong (it succeeded), the same
+	// class of raw-vs-honest-state mismatch this file's gapPushFailed/pushed-but-PR-create-failed
+	// split already exists to avoid — see HandleRepoScaffoldBranch's switch.
+	gapPRURLUnknown = "The branch was pushed and the pull request was opened, but l00prite couldn't read its URL from gh's output. Find it with the command below."
 )
 
 // scaffoldPRTitle is fixed, never derived from request input — see this file's package comment
@@ -68,6 +75,14 @@ func scaffoldPRBody(branch string) string {
 // deliberately never includes an --auto/--merge flag, matching this file's never-auto-merge rule.
 func ghPRCreateCommand(branch string) string {
 	return `gh pr create --title "` + scaffoldPRTitle + `" --head ` + branch
+}
+
+// ghPRViewCommand is the copy-paste fallback for gapPRURLUnknown: unlike ghPRCreateCommand, this
+// case already has a real, successfully-created pull request -- re-running `gh pr create` would
+// just fail with "a pull request for branch ... already exists" instead of helping. `gh pr view`
+// looks up the existing one by branch instead of creating a second.
+func ghPRViewCommand(branch string) string {
+	return `gh pr view ` + branch + ` --json url -q .url`
 }
 
 // probePushPRCapability checks, in fail-closed order, whether this gateway host can actually push
