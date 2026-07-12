@@ -4,6 +4,42 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.4.1-beta — 2026-07-12
+
+**Dark-theme dashboard fixes: invisible checkboxes, and an audit of the Models modal.**
+The "Add provider" panel's two checkboxes ("Make this the default provider", "Add without
+validating") relied entirely on native `appearance:auto` rendering plus `accent-color` —
+`accent-color` only paints the *checked* state, so the unchecked box had no explicit
+background or border and could render with a near-invisible native dark-theme fill against
+the dashboard's dark cards. `.field.check input` now sets an explicit background and border
+so the unchecked state is always visible regardless of the browser's native checkbox theme.
+Investigated the per-provider "Models" modal for a separately reported missing-label bug:
+traced the model-name data end to end (manifest → `ModelsFor` → `/v1/dashboard/summary` →
+`editModels()`) and live-rendered the modal under multiple providers/adapters, viewport
+widths, and disabled-model states — model names were populated and correctly colored in
+every case tested, so the reported blank-label symptom did not reproduce against this
+commit; `.modelrow span` was still given an explicit `color` (previously relied on
+inheritance) as a low-risk hardening measure. Separately confirmed a real, different bug in
+the same area: a provider card's "N models off" count is read directly from the stored
+`disabled_models` list without intersecting it against the provider's *current* model
+catalog, so a stale disabled-model row left over from a manifest update (a model id no
+longer offered) inflates the count even though the Models modal itself only ever lists
+live models — a state bug, not a rendering bug, left unfixed pending a scoping decision.
+
+**OpenAI Chat Completions reasoning models: `max_completion_tokens`.** OpenAI's o-series
+(o1/o3/o4) and, per current reports, the gpt-5.x family reject the legacy `max_tokens`
+field under `/chat/completions` ("Unsupported parameter: 'max_tokens' is not supported
+with this model. Use 'max_completion_tokens' instead."), which broke provider-add
+validation for those models. The openai-compat adapter's `BuildRequest` — the single
+call point shared by both the pre-save validation ping and every real inference
+request — now renames `max_tokens` to `max_completion_tokens` for model ids matching
+those families, leaving every other openai-compat upstream (Zhipu, xAI, Venice, custom
+endpoints) untouched. This repo's OpenAI manifest deliberately carries no confirmed
+model ids (see `internal/gateway/adapters/manifests/openai.json`) and this environment
+could not reach OpenAI's own docs to verify exact current model/version naming, so no
+specific dated model snapshot is asserted here or in the updated `gpt-4o` → `gpt-5`
+placeholder text; both were chosen conservatively rather than guessed.
+
 ## v0.4.0-beta — 2026-07-12
 
 **xAI Grok and Google Gemini added as first-class providers; Venice made selectable.**

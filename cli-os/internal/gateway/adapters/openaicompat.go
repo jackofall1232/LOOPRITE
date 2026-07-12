@@ -16,10 +16,37 @@ type openaiCompatAdapter struct{}
 func (openaiCompatAdapter) Kind() string { return "openai-compat" }
 func (openaiCompatAdapter) Direct() bool { return false }
 
+// reasoningModelPrefixes are OpenAI Chat Completions model families that reject the legacy
+// `max_tokens` field outright ("Unsupported parameter: 'max_tokens' is not supported with this
+// model. Use 'max_completion_tokens' instead.") and require `max_completion_tokens` in its place.
+// This is confirmed for the o-series reasoning models (o1, o3, o4-mini) and is reported for the
+// gpt-5.x family under /chat/completions as well (distinct from the newer /responses endpoint's
+// unrelated `max_output_tokens` field, which this adapter does not target). Every other
+// openai-compat upstream this adapter also serves (Zhipu/GLM, xAI, Gemini-compat, custom
+// endpoints) uses its own model ids and will never match these prefixes, so the rename stays
+// scoped to real OpenAI reasoning-family models.
+var reasoningModelPrefixes = []string{"o1", "o3", "o4", "gpt-5"}
+
+func requiresMaxCompletionTokens(model string) bool {
+	m := strings.ToLower(model)
+	for _, p := range reasoningModelPrefixes {
+		if strings.HasPrefix(m, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (openaiCompatAdapter) BuildRequest(model string, req map[string]any, stream bool) map[string]any {
 	body := copyMap(req)
 	body["model"] = model
 	delete(body, "l00prite") // strip any gateway-only hints
+	// Both the pre-save validation ping (gateway.TestProviderKey) and every real inference call
+	// funnel through this one BuildRequest, so fixing the param name here covers both paths.
+	if _, hasMaxTokens := body["max_tokens"]; hasMaxTokens && requiresMaxCompletionTokens(model) {
+		body["max_completion_tokens"] = body["max_tokens"]
+		delete(body, "max_tokens")
+	}
 	if stream {
 		body["stream"] = true
 		so := map[string]any{}

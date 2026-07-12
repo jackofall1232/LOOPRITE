@@ -222,13 +222,18 @@
   .field input[type=text],.field input[type=password],.field select,.field textarea{width:100%;padding:10px 12px;border-radius:var(--r-md);background:var(--input-bg);border:1px solid var(--stroke);color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none;}
   .field input:focus,.field select:focus,.field textarea:focus{border-color:rgba(79,140,255,.6);}
   .field.check{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text-2);cursor:pointer;}
-  .field.check input{width:16px;height:16px;accent-color:var(--accent);}
+  /* Explicit background/border so the UNCHECKED box is never left to native appearance:auto theming —
+     under color-scheme:dark a browser's own dark checkbox widget can render with a near-black fill and
+     no visible edge against a dark card (accent-color alone only paints the CHECKED state). Modern
+     browsers honor author background/border on appearance:auto checkboxes, so this doesn't require
+     appearance:none or a custom-drawn widget. */
+  .field.check input{width:16px;height:16px;accent-color:var(--accent);background:var(--input-bg-solid);border:1px solid var(--stroke-2);border-radius:4px;}
   .modal-actions{display:flex;gap:10px;margin-top:20px;align-items:center;}
   .modal-actions .spacer{flex:1;}
   .modelgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;max-height:290px;overflow-y:auto;}
   .modelrow{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--stroke);border-radius:var(--r-sm);font-family:var(--font-mono);font-size:12px;cursor:pointer;}
   .modelrow input{accent-color:var(--accent);flex:0 0 auto;}
-  .modelrow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .modelrow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
   @media (max-width:560px){ .modelgrid{grid-template-columns:1fr;} .modal .box{max-width:none;} }
 
   /* playground — prompt the models straight from the dashboard */
@@ -987,8 +992,8 @@
         hint: p.base_url ? "— default shown; edit if self-hosting"
                          : "— required, e.g. https://api.openai.com/v1",
         mHint: p.sample_model ? "— optional; a known model is picked"
-                              : "— usually required (no built-in catalog), e.g. gpt-4o",
-        mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-4o"
+                              : "— usually required (no built-in catalog), e.g. gpt-5",
+        mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-5"
       };
     }
     function resetV(){ epoch++; const gate=!skip.checked; addBtn.disabled=gate; if(gate) note.innerHTML=""; }

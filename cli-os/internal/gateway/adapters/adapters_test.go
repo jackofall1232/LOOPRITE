@@ -84,6 +84,44 @@ func TestAnthropicSSEFold(t *testing.T) {
 	}
 }
 
+// TestOpenAICompatReasoningModelsUseMaxCompletionTokens pins the fix for the real upstream error
+// "Unsupported parameter: 'max_tokens' is not supported with this model. Use
+// 'max_completion_tokens' instead." — both gateway.TestProviderKey's validation ping and every
+// real inference call build their request through this one BuildRequest, so this single rename
+// point fixes both paths at once.
+func TestOpenAICompatReasoningModelsUseMaxCompletionTokens(t *testing.T) {
+	oc := openaiCompatAdapter{}
+	for _, model := range []string{"o1-preview", "o1-mini", "o3-mini", "o4-mini", "gpt-5", "gpt-5-mini", "GPT-5-Turbo"} {
+		body := oc.BuildRequest(model, map[string]any{
+			"messages": []any{map[string]any{"role": "user", "content": "ping"}}, "max_tokens": float64(1),
+		}, false)
+		if _, ok := body["max_tokens"]; ok {
+			t.Fatalf("%s: max_tokens must be renamed away, got %v", model, body["max_tokens"])
+		}
+		if numToInt(body["max_completion_tokens"]) != 1 {
+			t.Fatalf("%s: max_completion_tokens want 1 got %v", model, body["max_completion_tokens"])
+		}
+	}
+}
+
+// TestOpenAICompatNonReasoningModelsKeepMaxTokens guards against an over-broad rename: a
+// pre-reasoning-family OpenAI id (and every non-OpenAI openai-compat upstream, e.g. Zhipu/xAI/
+// Venice ids) must keep sending `max_tokens` unchanged.
+func TestOpenAICompatNonReasoningModelsKeepMaxTokens(t *testing.T) {
+	oc := openaiCompatAdapter{}
+	for _, model := range []string{"gpt-4-turbo", "gpt-3.5-turbo", "glm-5.2", "grok-4.5"} {
+		body := oc.BuildRequest(model, map[string]any{
+			"messages": []any{map[string]any{"role": "user", "content": "ping"}}, "max_tokens": float64(1),
+		}, false)
+		if _, ok := body["max_completion_tokens"]; ok {
+			t.Fatalf("%s: must not gain max_completion_tokens, got %v", model, body["max_completion_tokens"])
+		}
+		if numToInt(body["max_tokens"]) != 1 {
+			t.Fatalf("%s: max_tokens want 1 got %v", model, body["max_tokens"])
+		}
+	}
+}
+
 func TestOpenAICompatDropsStreamOptions(t *testing.T) {
 	oc := openaiCompatAdapter{}
 	body := oc.BuildRequest("gpt-x", map[string]any{
