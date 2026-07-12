@@ -15,8 +15,11 @@ package gitx
 // "core operations still work, passthrough does not" — see engine/tools.go's gitCommand).
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +28,7 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
 type gogitClient struct{}
@@ -375,4 +379,68 @@ func (c gogitClient) Show(repo string, ref string) (string, error) {
 
 func (c gogitClient) Raw(ctx context.Context, repo string, args ...string) (string, error) {
 	return "", ErrRawUnsupported
+}
+
+// RemoteURL reads the first configured URL for remote from the repo's own git config.
+func (c gogitClient) RemoteURL(repo, remote string) (string, error) {
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		return "", err
+	}
+	rem, err := r.Remote(remote)
+	if err != nil {
+		return "", err
+	}
+	urls := rem.Config().URLs
+	if len(urls) == 0 {
+		return "", fmt.Errorf("gitx/gogit: remote %q has no configured URL", remote)
+	}
+	return urls[0], nil
+}
+
+// Push uploads the single branch refspec via go-git's pure-Go transport. A non-nil auth becomes an
+// in-memory HTTP BasicAuth (the token never touches disk or argv). "Already up to date" is not an
+// error (nil). A shallow clone is refused up front with ErrShallowPush — go-git cannot push shallow
+// history reliably, and failing closed keeps a real remote from being corrupted. Any transport
+// error text is scrubbed of the token before it leaves the package.
+//
+// Unlike execClient.Push this writes no upstream-tracking (branch.<name>.remote/merge) config —
+// go-git's PushContext has no `-u` equivalent — which is immaterial here: nothing in this codebase
+// reads that tracking config back, and every Push names its remote and refspec explicitly.
+func (c gogitClient) Push(ctx context.Context, repo, remote, branch string, auth *PushAuth) error {
+	if isShallow(repo) {
+		return ErrShallowPush
+	}
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		return err
+	}
+	opts := &git.PushOptions{
+		RemoteName: remote,
+		RefSpecs:   []config.RefSpec{config.RefSpec(pushRefspec(branch))},
+	}
+	// Attach the token ONLY when the remote is an https URL on the credential's own host (see
+	// credentialScope) — never to a foreign host. Otherwise push unauthenticated, which suffices for
+	// a local-path remote and is honestly refused by a real remote that needs credentials.
+	if auth != nil && auth.Token != "" {
+		if remoteURL, err := c.RemoteURL(repo, remote); err == nil {
+			if _, ok := credentialScope(remoteURL, auth); ok {
+				opts.Auth = &githttp.BasicAuth{Username: auth.Username, Password: auth.Token}
+			}
+		}
+	}
+	if err := r.PushContext(ctx, opts); err != nil {
+		if errors.Is(err, git.NoErrAlreadyUpToDate) {
+			return nil
+		}
+		return errors.New(redactSecrets(err.Error(), auth.token()))
+	}
+	return nil
+}
+
+// isShallow reports whether repo is a shallow clone — go-git records this as a .git/shallow file,
+// exactly as real git does. A missing file (the normal, full-depth case) reads as not shallow.
+func isShallow(repo string) bool {
+	_, err := os.Stat(filepath.Join(repo, ".git", "shallow"))
+	return err == nil
 }

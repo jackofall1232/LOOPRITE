@@ -256,6 +256,12 @@ func (rawErrGit) Show(repo string, ref string) (string, error) {
 func (rawErrGit) Raw(ctx context.Context, repo string, args ...string) (string, error) {
 	panic("not used by checkGitReady")
 }
+func (rawErrGit) RemoteURL(repo, remote string) (string, error) {
+	panic("not used by checkGitReady")
+}
+func (rawErrGit) Push(ctx context.Context, repo, remote, branch string, auth *gitx.PushAuth) error {
+	panic("not used by checkGitReady")
+}
 func (rawErrGit) CurrentBranch(repo string) (string, error) {
 	panic("not used by checkGitReady")
 }
