@@ -25,6 +25,12 @@
 - The Fable 5 adversarial-verify verdicts did not complete (the verifiers hit the same
   egress blocks and ran long). The researchers' own `flags`/confidence self-assessments stand
   in for that pass and are reflected in the confidence column.
+- **2026-07-11 follow-up pass** upgraded **Gemini pricing to first-party** (cloud.google.com
+  fetched directly; `ai.google.dev` still egress-blocked — a Vertex-vs-Developer-API channel
+  caveat is recorded in `gemini.json`'s `verification.pricing_note`), confirmed **xAI's shape
+  first-party** via xai-org's official GitHub repos (SDK + cookbook; `docs.x.ai` still
+  egress-blocked, so xAI **pricing remains null/unconfirmed**), and re-verified **Venice
+  pricing with zero drift** against its first-party docs mirror.
 
 ## The flagged question: does "GLM 5.2" exist?
 
@@ -66,9 +72,10 @@ translation is code + a conformance suite. Two design rules from prior art:
 | **Anthropic** | compat endpoint is *test/eval-only* | **full native adapter** | `https://api.anthropic.com` (`/v1/messages`) | HIGH (first-party) | HIGH (first-party) |
 | **OpenAI** | native (it *is* the schema) | thin shim (+ `/v1/responses` work) | `https://api.openai.com/v1` | HIGH (own OpenAPI spec) | LOW (docs blocked) |
 | **Zhipu / GLM (incl. glm-5.2)** | OpenAI-compat endpoint | thin shim | `https://api.z.ai/api/paas/v4` | HIGH (own SDK) | LOW (third-party) |
-| **Google Gemini** | OpenAI-compat layer | thin shim | `https://generativelanguage.googleapis.com/v1beta/openai/` | MED (docs blocked) | LOW |
+| **Venice AI** (reseller) | OpenAI-compat | thin shim | `https://api.venice.ai/api/v1` | HIGH (first-party) | HIGH (first-party docs mirror; re-verified 2026-07-11, no drift) |
+| **Google Gemini** | OpenAI-compat layer | thin shim | `https://generativelanguage.googleapis.com/v1beta/openai/` | HIGH (own cookbook, 2026-07-11) | HIGH (first-party cloud.google.com, 2026-07-11 — Vertex-channel caveat in manifest) |
 | **DeepSeek** | OpenAI-compat | thin shim | `https://api.deepseek.com` | MED (docs blocked) | LOW |
-| **xAI Grok** | OpenAI-compat | thin shim | `https://api.x.ai/v1` | MED (docs blocked) | LOW |
+| **xAI Grok** | OpenAI-compat | thin shim | `https://api.x.ai/v1` | HIGH (own SDK + cookbook on GitHub, 2026-07-11) | LOW (docs.x.ai egress-blocked; all prices null/unconfirmed) |
 | **Mistral** | OpenAI-compat | thin shim | `https://api.mistral.ai/v1` | HIGH (own OpenAPI+SDK) | MED |
 | **OpenRouter** (aggregator) | OpenAI-compat | thin shim | `https://openrouter.ai/api/v1` | MED (docs blocked) | passthrough |
 
@@ -132,7 +139,28 @@ translation is code + a conformance suite. Two design rules from prior art:
   ~`$1.40/$4.40` reported), `glm-5.1`, `glm-5v-turbo` (vision), `glm-4.6`, `glm-4.5`/`-air`/
   `-flash`(reported free)/`-4.5v`.
 
-### Gemini / DeepSeek / Grok / Mistral / OpenRouter (thin shims)
+### xAI Grok (thin shim — HIGH shape confidence, pricing unconfirmed)
+- Base `https://api.x.ai/v1` (OpenAI-shaped `/chat/completions`); auth is the raw xAI API key
+  (`XAI_API_KEY`) as `Authorization: Bearer <key>`. Both the base URL and the Bearer scheme are
+  **first-party**: xai-org's official cookbook notebooks point the stock `openai` Python client
+  at this base, and `xai-org/xai-sdk-python`'s client defaults to `api.x.ai` — read directly on
+  GitHub 2026-07-11 (`docs.x.ai` itself was egress-blocked).
+- **2026-05-15 retirement:** xAI retired eight model slugs — including **`grok-code-fast-1`** —
+  effective 2026-05-15. Those slugs still resolve but **silently redirect to `grok-4.3` and bill
+  at `grok-4.3`'s rate**. `grok-code-fast-1` is therefore **deliberately absent** from the
+  manifest; **never re-add it** (it would masquerade as a distinct, cheaper coding model while
+  actually billing as the flagship). The current coding-specialized model is **`grok-build-0.1`**.
+- **`grok-4.5`** is xAI's current flagship (announced 2026-07-08, corroborated by independent
+  press). It is real but **not yet present in the official SDK's model list**, so it is included
+  in the manifest but is deliberately **not** `models[0]` — key validation probes the
+  SDK-verbatim `grok-4.3` instead, never depending on the unconfirmed id.
+- **All xAI pricing is `null` / `price_confidence: "unconfirmed"`**: every first-party xAI domain
+  (`docs.x.ai`, `x.ai`, `console.x.ai`) returned HTTP 403 at the proxy CONNECT layer on
+  2026-07-11. Per this repo's pricing discipline, snippet-only figures are not written as numbers,
+  so the cost meter reports Unconfirmed/not-Priced and the cost-router sorts every xAI model last.
+  Re-fetch `docs.x.ai/developers/models` from an unblocked network to upgrade.
+
+### DeepSeek / Mistral / OpenRouter (thin shims, not yet shipped)
 - All expose an OpenAI-compatible `/chat/completions` surface → thin-shim adapters, low
   incremental cost per provider (this is why "more providers" is cheap v2 work, not a
   re-architecture).
@@ -141,8 +169,8 @@ translation is code + a conformance suite. Two design rules from prior art:
 - **OpenRouter** is itself an aggregator: it could serve as a *single upstream adapter* fronting
   many models behind one key (a fast way to widen coverage) — but it hides per-provider control
   and adds a hop; treat it as one adapter among several, not the whole gateway.
-- Gemini/DeepSeek/Grok/OpenRouter: **shapes MED, pricing LOW** (docs egress-blocked) — confirm
-  first-party before v1 inclusion.
+- DeepSeek/OpenRouter: **shapes MED, pricing LOW** (docs egress-blocked) — confirm first-party
+  before v1 inclusion.
 
 ## Prior-art adapter lessons applied (LiteLLM, OpenRouter, Portkey, Cloudflare AI Gateway)
 

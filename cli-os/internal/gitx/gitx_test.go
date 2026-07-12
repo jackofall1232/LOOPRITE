@@ -171,6 +171,121 @@ func TestClientsBasicFlow(t *testing.T) {
 	}
 }
 
+// TestAddPathsBypassesGitignore (Codex review finding on PR #10, repo_scaffold.go): AddPaths must
+// stage the given paths even when the repo's own .gitignore excludes them — CommitUnit's AddAll
+// (`git add -A`) respects .gitignore, so a target repo that ignores e.g. `.l00prite/` would
+// otherwise silently drop the scaffolded protocol files from the commit while the API response
+// still claims they were added. Both implementations must behave identically here.
+func TestAddPathsBypassesGitignore(t *testing.T) {
+	for name, cl := range clients(t) {
+		cl := cl
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			initGitRepo(t, dir)
+			writeFile(t, dir, ".gitignore", ".l00prite/\n")
+			writeFile(t, dir, "README.md", "hello\n")
+			gitFixture(t, dir, "add", "-A")
+			gitFixture(t, dir, "commit", "-m", "init")
+
+			if err := os.MkdirAll(filepath.Join(dir, ".l00prite"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, dir, filepath.Join(".l00prite", "AGENTS.md"), "protocol content\n")
+
+			// A plain AddAll must NOT stage the ignored file — establishes the failure mode this
+			// test guards against before proving AddPaths fixes it. An ignored, untracked file
+			// doesn't appear in `git status --porcelain` at all (that's what .gitignore does), so
+			// the real check is the raw `git status` immediately below showing no staged ("A ")
+			// entry for it — not cl.StatusPorcelain, which would correctly show nothing either way.
+			if err := cl.AddAll(dir); err != nil {
+				t.Fatalf("AddAll: %v", err)
+			}
+			out := gitFixture(t, dir, "status", "--porcelain", "--ignored")
+			if strings.Contains(out, "A  .l00prite") {
+				t.Fatal("AddAll unexpectedly staged a gitignored file — test setup is wrong")
+			}
+
+			if err := cl.AddPaths(dir, []string{".l00prite/AGENTS.md"}); err != nil {
+				t.Fatalf("AddPaths: %v", err)
+			}
+			out = gitFixture(t, dir, "status", "--porcelain")
+			if !strings.Contains(out, "A  .l00prite/AGENTS.md") {
+				t.Fatalf("expected AddPaths to force-stage the gitignored file, git status: %q", out)
+			}
+
+			hash, err := cl.Commit(dir, "add gitignored protocol file")
+			if err != nil || hash == "" {
+				t.Fatalf("Commit: hash=%q err=%v", hash, err)
+			}
+			show := gitFixture(t, dir, "show", "--stat", hash)
+			if !strings.Contains(show, "AGENTS.md") {
+				t.Fatalf("committed tree should contain the force-added file, git show --stat: %q", show)
+			}
+		})
+	}
+}
+
+// TestAddPathsEmptyIsNoop: an empty paths slice must not error (the handler calls AddPaths
+// unconditionally with whatever ScaffoldFull reported, which can legitimately be empty).
+func TestAddPathsEmptyIsNoop(t *testing.T) {
+	for name, cl := range clients(t) {
+		cl := cl
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			initGitRepo(t, dir)
+			writeFile(t, dir, "README.md", "hello\n")
+			gitFixture(t, dir, "add", "-A")
+			gitFixture(t, dir, "commit", "-m", "init")
+			if err := cl.AddPaths(dir, nil); err != nil {
+				t.Fatalf("AddPaths(nil) should be a no-op, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestGogitCheckoutNewBranchFailsOnDirtyTrackedFile pins a real gogit-only characteristic (Codex
+// review finding on PR #10, repo_scaffold.go): even though CheckoutNewBranch creates the new
+// branch at the CURRENT commit (so its tree is byte-identical to what's already checked out),
+// go-git's Worktree.Checkout still errors "worktree contains unstaged changes" if a TRACKED file
+// has been modified without being committed — unlike real git's `checkout -B`, which tolerates
+// this exact case (verified below: the same setup succeeds under execClient). This is exactly why
+// every caller that both writes to a tracked `.l00prite/` file (e.g. AcquireLock's lock.json
+// rewrite) AND creates a branch must do the checkout FIRST — see engine.go's StartRun ordering
+// and repo_scaffold.go's HandleRepoScaffoldBranch, both of which acquire the lock only after
+// EnsureRunBranch for exactly this reason.
+func TestGogitCheckoutNewBranchFailsOnDirtyTrackedFile(t *testing.T) {
+	setup := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		if err := os.MkdirAll(filepath.Join(dir, ".l00prite"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, dir, filepath.Join(".l00prite", "lock.json"), `{"status":"unlocked"}`)
+		gitFixture(t, dir, "add", "-A")
+		gitFixture(t, dir, "commit", "-m", "init with tracked lock.json")
+		// Dirty the TRACKED file without committing — simulating AcquireLock's rewrite.
+		writeFile(t, dir, filepath.Join(".l00prite", "lock.json"), `{"status":"active","owner_session":"x"}`)
+		return dir
+	}
+
+	t.Run("gogit fails", func(t *testing.T) {
+		dir := setup(t)
+		if err := (gogitClient{}).CheckoutNewBranch(dir, "l00prite/add-protocol-test"); err == nil {
+			t.Fatal("expected gogit CheckoutNewBranch to fail with a dirty tracked file — if this now passes, the ordering workaround in repo_scaffold.go/engine.go may no longer be necessary (a go-git upgrade may have changed this), but don't assume that without re-checking those callers")
+		}
+	})
+	t.Run("exec tolerates it", func(t *testing.T) {
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("git not available")
+		}
+		dir := setup(t)
+		if err := (execClient{}).CheckoutNewBranch(dir, "l00prite/add-protocol-test"); err != nil {
+			t.Fatalf("expected real git's checkout -B to tolerate a dirty tracked file (same source/target commit), got: %v", err)
+		}
+	})
+}
+
 // TestStatusPorcelainListsFilesInsideUntrackedDirectories pins the fix for a real-git-only
 // collapsing bug (PR #6 review): `git status --porcelain`'s DEFAULT mode reports one "?? dir/"
 // line for an entirely-untracked directory instead of listing the files inside it. Every caller of

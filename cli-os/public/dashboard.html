@@ -813,7 +813,8 @@
         <span style="margin-left:auto">${statusPill}</span></div>
       <div class="r-sub" style="margin-top:10px">${esc(r.root)}</div>
       <div class="r-mem">${badges}</div>
-      <div class="p-actions"><button class="btn tiny danger" style="margin-left:auto" data-action="repo-remove" data-repo="${esc(r.id)}">Remove</button></div>
+      <div class="p-actions"><button class="btn tiny" data-action="repo-scaffold" data-repo="${esc(r.id)}">Add l00prite</button>
+        <button class="btn tiny danger" style="margin-left:auto" data-action="repo-remove" data-repo="${esc(r.id)}">Remove</button></div>
     </article>`;
   }
 
@@ -914,25 +915,51 @@
     }
     return fallback||"Something went wrong.";
   }
+  // ---- Add-provider presets (served by GET /v1/providers/catalog; static embedded manifest facts) ----
+  const CUSTOM_PRESET = {key:"custom", display_name:"Custom / other (OpenAI-compatible)",
+                         adapter:"openai-compat", base_url:"", sample_model:null};
+  // Degrade path = today's exact two-option behavior: anthropic native + a generic
+  // OpenAI-compatible entry (CUSTOM_PRESET, appended unconditionally below).
+  const FALLBACK_PRESETS = [{key:"anthropic", display_name:"Anthropic (Claude)",
+                             adapter:"native-messages", base_url:"https://api.anthropic.com",
+                             sample_model:"claude-fable-5"}];
+  let presetsPromise = null;
+  function loadPresets(){                       // cached across calls; a failure is NOT cached
+    if(!presetsPromise){
+      // Plain fetch — the catalog is unauthenticated, so it deliberately does NOT go through api().
+      presetsPromise = fetch("/v1/providers/catalog")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => (d && Array.isArray(d.presets) && d.presets.length) ? d.presets : null)
+        .catch(() => null)
+        .then(p => { if(!p) presetsPromise = null; return p || FALLBACK_PRESETS; });
+    }
+    return presetsPromise;
+  }
   function findProvider(name){ return ((S.summary&&S.summary.providers)||[]).find(p=>p.name===name); }
-  function openModal(html){ $("modal-body").innerHTML=html; $("modal").classList.remove("hidden"); }
+  // Bumped by every open/close, and by add() itself (to reserve a generation before awaiting
+  // loadPresets()), so a stale async modal builder can detect the modal was closed or reopened
+  // while it was awaiting something, and bail before overwriting the DOM.
+  let modalGen = 0;
+  function openModal(html){ modalGen++; $("modal-body").innerHTML=html; $("modal").classList.remove("hidden"); }
   function openWideModal(html){ openModal(html); $("modal").classList.add("wide"); }
-  function closeModal(){ stopRunPoll(); $("modal").classList.add("hidden"); $("modal").classList.remove("wide"); $("modal-body").innerHTML=""; }
+  function closeModal(){ modalGen++; stopRunPoll(); $("modal").classList.add("hidden"); $("modal").classList.remove("wide"); $("modal-body").innerHTML=""; }
   async function afterMutation(){ closeModal(); await refresh(); }
   function busy(btn,label){ btn.dataset.old=btn.innerHTML; btn.disabled=true; btn.innerHTML=`<span class="spin"></span> ${esc(label)}`; }
   function unbusy(btn,label){ btn.disabled=false; btn.innerHTML=label||btn.dataset.old||""; }
 
-  function add(){
+  async function add(){
+    const myGen = ++modalGen; // reserve this generation; any other open/close bumps past it
+    const presets = (await loadPresets()).concat([CUSTOM_PRESET]);
+    if(myGen !== modalGen) return; // modal was closed or reopened while the catalog was loading
     openModal(`
       <div class="eyebrow"><span class="tick"></span> Add provider</div>
       <h3>Add a provider</h3>
       <div class="sub">The key is validated with a real call, stored encrypted in the vault, and marked <b>unverified</b> until its first successful request.</div>
-      <div class="field"><label>Adapter type</label>
-        <select id="m-adapter">
-          <option value="native-messages">Anthropic (native /v1/messages)</option>
-          <option value="openai-compat">OpenAI-compatible (OpenAI, GLM, DeepSeek, Groq, …)</option>
-        </select></div>
-      <div class="field"><label>Provider name</label><input type="text" id="m-name" placeholder="anthropic"></div>
+      <div class="field"><label>Provider</label>
+        <select id="m-adapter">${presets.map(p =>
+          `<option value="${esc(p.key)}">${esc(p.display_name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Provider name</label><input type="text" id="m-name" placeholder="anthropic">
+        <div id="m-namewarn" style="font-size:11.5px;color:var(--text-3);margin-top:4px"></div></div>
       <div class="field" id="m-modelwrap"><label>Model to test <span class="opt" id="m-modelhint">— optional</span></label><input type="text" id="m-model" placeholder="auto (first known model)"></div>
       <div class="field" id="m-keywrap"><label>API key</label><input type="password" id="m-key" placeholder="sk-…" autocomplete="off"></div>
       <div class="field" id="m-basewrap"><label>Base URL <span class="opt" id="m-basehint"></span></label><input type="text" id="m-base"></div>
@@ -949,22 +976,51 @@
     const adapterSel=g("m-adapter"), nameIn=g("m-name"), baseIn=g("m-base"), baseHint=g("m-basehint");
     const validateBtn=g("m-validate"), addBtn=g("m-add"), skip=g("m-skip"), note=g("m-note");
     let epoch=0;
-    const D={"native-messages":{name:"anthropic",base:"https://api.anthropic.com",hint:"— default shown; edit if self-hosting",
-               mHint:"— optional; a known model is picked",mPh:"auto (first known model)"},
-             "openai-compat":{name:"openai",base:"",hint:"— required, e.g. https://api.openai.com/v1",
-               // OpenAI-compatible endpoints usually have no built-in catalog here, so validation
-               // needs a concrete model id — labeling it "optional" would dead-end the flow.
-               mHint:"— usually required (no built-in catalog), e.g. gpt-4o",mPh:"e.g. gpt-4o"}};
+    // The dropdown value is now a PRESET KEY (not the wire adapter). The POSTed `adapter` is resolved
+    // from the preset object in body(), decoupling "which provider" from "which adapter kind".
+    const byKey = Object.fromEntries(presets.map(p => [p.key, p]));
+    function presetDefaults(p){
+      return {
+        name: p.key === "custom" ? "" : p.key,
+        namePh: p.key === "custom" ? "my-provider" : p.key,
+        base: p.base_url || "",
+        hint: p.base_url ? "— default shown; edit if self-hosting"
+                         : "— required, e.g. https://api.openai.com/v1",
+        mHint: p.sample_model ? "— optional; a known model is picked"
+                              : "— usually required (no built-in catalog), e.g. gpt-4o",
+        mPh:   p.sample_model ? "auto (e.g. " + p.sample_model + ")" : "e.g. gpt-4o"
+      };
+    }
     function resetV(){ epoch++; const gate=!skip.checked; addBtn.disabled=gate; if(gate) note.innerHTML=""; }
+    // Codex review finding (PR #10): renaming a manifest-backed preset away from its key means
+    // adapters.ModelsFor(newName) finds no catalog under that name, so this provider won't be
+    // found by bare-model/auto/default routing or listed in /v1/models — only explicit
+    // "name/model" pins still work. There's no server-side fix for this yet (it would mean
+    // persisting the originating preset key separately from the display name); until then, warn
+    // rather than silently let the key validate into a partially-broken state.
+    function syncNameWarning(){
+      const p=byKey[adapterSel.value];
+      const warn=g("m-namewarn");
+      if(p && p.key!=="custom" && nameIn.value.trim() && nameIn.value.trim()!==p.key){
+        warn.innerHTML=`⚠ Renamed from the default "<span class="mono">${esc(p.key)}</span>" — this provider will only be reachable by pinning "${esc(nameIn.value.trim())}/&lt;model&gt;" explicitly, not by automatic or default model routing.`;
+      } else {
+        warn.innerHTML="";
+      }
+    }
     function sync(){
-      const d=D[adapterSel.value];
+      const d=presetDefaults(byKey[adapterSel.value]);
       if(!nameIn.dataset.touched) nameIn.value=d.name;
+      nameIn.placeholder=d.namePh;
       baseIn.value=d.base; baseHint.textContent=d.hint;
       g("m-modelhint").textContent=d.mHint; g("m-model").placeholder=d.mPh;
+      syncNameWarning();
       resetV();
     }
-    function body(){ return {name:nameIn.value.trim(), adapter:adapterSel.value, base_url:baseIn.value.trim(), api_key:g("m-key").value, model:g("m-model").value.trim()}; }
-    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; resetV(); };
+    // Fall back to the preset's own sample model when the field is left blank: the server would
+    // otherwise auto-pick by looking up the POSTED provider NAME in the manifest, which misses if
+    // the user renamed the provider away from the preset key (e.g. "gemini" -> "my-gemini-key").
+    function body(){ const p=byKey[adapterSel.value]||CUSTOM_PRESET; const model=g("m-model").value.trim()||p.sample_model||""; return {name:nameIn.value.trim(), adapter:p.adapter, base_url:baseIn.value.trim(), api_key:g("m-key").value, model}; }
+    nameIn.oninput=()=>{ nameIn.dataset.touched="1"; syncNameWarning(); resetV(); };
     [baseIn,g("m-key"),g("m-model")].forEach(el=>el.oninput=resetV);
     adapterSel.onchange=sync;
     skip.onchange=()=>{ if(skip.checked){ addBtn.disabled=false; note.innerHTML=`<div class="note warn">Skipping validation — a bad key will only fail on the first real request.</div>`; } else resetV(); };
@@ -1087,8 +1143,37 @@
   // Registering a repo points the gateway at a path on ITS OWN filesystem, or clones one from a
   // URL into a managed workspace dir; the server verifies before storing anything, so a typo
   // fails right here in the modal. finishRegister() is the shared success path for both.
-  function finishRegister(data, btn, note, label){
+  // scaffoldResultNote renders a POST /v1/repos/scaffold-branch response as a note block —
+  // shared by finishRegister's post-register checkbox and the standalone scaffoldRepo() action
+  // so the two entry points can never render this differently.
+  function scaffoldResultNote(sdata){
+    if(sdata.already_complete){
+      return `<div class="note ok">This repo already has the full l00prite protocol (AGENTS.md, the loop prompts, and the vendor adapters) — nothing to add.</div>`;
+    }
+    const n=(sdata.files_created||[]).length;
+    const pushCmd=sdata.push_instructions||"";
+    return `<div class="note ok"><b>l00prite added</b> on a new branch <span class="mono">${esc(sdata.branch)}</span>
+        (${n} file${n===1?"":"s"} committed${sdata.claude_md_skipped?", CLAUDE.md left untouched":""}).</div>
+      <div class="mono" style="background:var(--bg-2,rgba(127,127,127,.08));border-radius:8px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:10px;overflow-x:auto">
+        <span style="flex:1;white-space:nowrap">${esc(pushCmd)}</span>
+        <button class="btn tiny" data-copy="${esc(pushCmd)}">Copy</button>
+      </div>
+      <div class="hint" style="font-size:11.5px;color:var(--text-3);margin-top:6px">Nothing was pushed automatically — push
+        this branch and open a pull request against your default branch to bring the full l00prite methodology in.</div>`;
+  }
+  function finishRegister(data, btn, note, label, repoId, scaffoldFull){
     const mem=(data&&data.memory)||{};
+    if(scaffoldFull && repoId){
+      busy(btn,"Adding l00prite…");
+      api("POST","/v1/repos/scaffold-branch",{id:repoId}).then(({res,data:sdata})=>{
+        unbusy(btn,"Done"); btn.onclick=()=>{ closeModal(); refresh(); };
+        note.innerHTML = res.ok
+          ? scaffoldResultNote(sdata)
+          : `<div class="note warn"><b>Registered.</b> Could not add l00prite: ${esc(mErr(sdata,"the scaffold action failed"))}</div>`;
+        refresh();
+      });
+      return;
+    }
     if(!mem.present_count){
       // Registered fine, but be honest that there's no memory to inject yet. Prefer the backend's
       // OWN note (e.g. ".l00prite scaffolding failed: <reason>") over a generic fallback -- the
@@ -1134,6 +1219,10 @@
         <div class="field"><label>Project <span class="opt">— only same-project tokens can use a repo; this token's project is <span class="mono">${esc(project)}</span></span></label>
           <input type="text" id="rp-project" value="${esc(project)}" autocomplete="off"></div>
       </div>
+      <label class="field check"><input type="checkbox" id="rp-scaffold" checked> Add l00prite to this repo
+        <span class="opt">— creates a branch with the full protocol (AGENTS.md, the loop prompts, and the
+        vendor adapter files) so any AI agent gets the full benefit, not just the memory folder. Nothing is
+        pushed automatically.</span></label>
       <div id="rp-note"></div>
       <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div><button class="btn primary" id="rp-add">Clone &amp; register</button></div>`);
     const cloneGroup=document.getElementById("rp-clone-group"), pathGroup=document.getElementById("rp-path-group");
@@ -1157,6 +1246,7 @@
     }
     document.getElementById("rp-clone-id").focus();
     btn.onclick=async()=>{
+      const scaffoldFull=document.getElementById("rp-scaffold").checked;
       if(mode==="clone"){
         const id=document.getElementById("rp-clone-id").value.trim(), url=document.getElementById("rp-clone-url").value.trim();
         if(!id){ note.innerHTML=`<div class="note err">Give the repo a short id.</div>`; return; }
@@ -1164,7 +1254,7 @@
         busy(btn,"Cloning…");
         const {res,data}=await api("POST","/v1/repos/clone",{id, url});
         if(!res.ok){ unbusy(btn,"Clone & register"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not clone the repo."))}</div>`; return; }
-        finishRegister(data, btn, note, "Clone & register");
+        finishRegister(data, btn, note, "Clone & register", id, scaffoldFull);
         return;
       }
       const id=document.getElementById("rp-id").value.trim(), root=document.getElementById("rp-root").value.trim(), project=document.getElementById("rp-project").value.trim();
@@ -1173,7 +1263,30 @@
       busy(btn,"Registering…");
       const {res,data}=await api("POST","/v1/repos",{id, root, project});
       if(!res.ok){ unbusy(btn,"Register"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not register the repo."))}</div>`; return; }
-      finishRegister(data, btn, note, "Register");
+      finishRegister(data, btn, note, "Register", id, scaffoldFull);
+    };
+  }
+  // scaffoldRepo is the standalone "Add l00prite" action for an already-registered repo (the
+  // Register-repo modal's checkbox above covers the at-registration-time path; this covers a
+  // repo registered earlier, or one where the checkbox was left unchecked).
+  function scaffoldRepo(id){
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Add l00prite</div>
+      <h3>Add the full l00prite protocol to <span class="mono">${esc(id)}</span></h3>
+      <div class="sub">Creates a local branch and commits AGENTS.md, the six loop prompts, and the vendor
+        adapter files this repo doesn't already have — the parts today's automatic memory-folder
+        scaffold deliberately skips. Nothing is pushed automatically.</div>
+      <div id="sc-note"></div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><div class="spacer"></div>
+        <button class="btn primary" id="sc-go">Add l00prite</button></div>`);
+    const note=document.getElementById("sc-note"), btn=document.getElementById("sc-go");
+    btn.onclick=async()=>{
+      busy(btn,"Adding l00prite…");
+      const {res,data}=await api("POST","/v1/repos/scaffold-branch",{id});
+      unbusy(btn,"Done");
+      if(!res.ok){ note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not add l00prite."))}</div>`; btn.onclick=()=>scaffoldRepo(id); return; }
+      note.innerHTML=scaffoldResultNote(data);
+      btn.textContent="Done"; btn.onclick=()=>{ closeModal(); refresh(); };
     };
   }
   function removeRepo(id){
@@ -1707,7 +1820,32 @@
   $("providers-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(b){ handleProviderAction(b.dataset.action, b.dataset.provider); } });
   $("repos-body").addEventListener("click",e=>{ const b=e.target.closest("[data-action]"); if(!b) return;
     if(b.dataset.action==="repo-add") addRepo();
-    if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo); });
+    if(b.dataset.action==="repo-remove") removeRepo(b.dataset.repo);
+    if(b.dataset.action==="repo-scaffold") scaffoldRepo(b.dataset.repo); });
+  // copyText tries the async Clipboard API first, falling back to the legacy execCommand path —
+  // navigator.clipboard is undefined entirely in non-secure contexts (e.g. this gateway bound to a
+  // non-loopback host without TLS, a supported deployment mode elsewhere in this file) and in some
+  // older WebViews, and even where it exists, writeText() can still reject on a denied permission.
+  function copyText(text){
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      return navigator.clipboard.writeText(text).then(()=>true).catch(()=>legacyCopy(text));
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+  function legacyCopy(text){
+    try{
+      const ta=document.createElement("textarea");
+      ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    }catch(e){ return false; }
+  }
+  // Delegated on #modal-body (not a per-render listener) since scaffoldResultNote's copy button is
+  // injected into whichever modal happens to be open (the register flow or the standalone action).
+  $("modal-body").addEventListener("click",e=>{ const b=e.target.closest("[data-copy]"); if(!b) return;
+    copyText(b.dataset.copy).then(ok=>{ const old=b.textContent; b.textContent=ok?"Copied!":"Copy failed — select and copy manually"; setTimeout(()=>{ b.textContent=old; },1500); }); });
   $("play-scope-warn").addEventListener("click",e=>{ const b=e.target.closest("[data-action='register-scope']");
     if(b) addRepo(b.dataset.repo); });
   $("new-run-btn").onclick=()=>createRunModal();

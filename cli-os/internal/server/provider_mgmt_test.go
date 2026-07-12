@@ -462,6 +462,59 @@ func TestProviderRemovalImpactSignals(t *testing.T) {
 	}
 }
 
+// TestProviderCatalogUnauthenticated: GET /v1/providers/catalog is a pre-auth, read-only projection of
+// the embedded manifests (same non-secret class as /v1/setup/status). It must return the six UI presets
+// with NO Authorization header, both before first-run setup completes AND after it locks down, and it
+// must never expose the internal mock adapter.
+func TestProviderCatalogUnauthenticated(t *testing.T) {
+	// before setup: a genuine zero-config first run (no vault, no provider, no token).
+	srvU, _, _ := unconfigured(t)
+	assertProviderCatalog(t, srvU.URL)
+
+	// after setup: vault + a provider + a token, so SetupComplete() latches true.
+	srvC, _, _, _, token := configured(t)
+	if resp, m := doJSON(t, "POST", srvC.URL+"/v1/providers", token, map[string]any{"name": "mock", "adapter": "mock", "default": true}); resp.StatusCode != 200 {
+		t.Fatalf("add mock provider to complete setup: %d %v", resp.StatusCode, m)
+	}
+	if _, st := doJSON(t, "GET", srvC.URL+"/v1/setup/status", "", nil); st["setup_complete"] != true {
+		t.Fatalf("setup should be complete once vault+provider+token exist: %v", st)
+	}
+	assertProviderCatalog(t, srvC.URL)
+}
+
+// assertProviderCatalog hits GET /v1/providers/catalog with NO Authorization header and asserts the
+// contract the Add-provider UI depends on: 200, six presets, first key anthropic, no "mock" key.
+func assertProviderCatalog(t *testing.T, base string) {
+	t.Helper()
+	resp, raw := getRaw(t, base+"/v1/providers/catalog")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /v1/providers/catalog without a token must be 200, got %d: %s", resp.StatusCode, raw)
+	}
+	var body struct {
+		Object  string `json:"object"`
+		Presets []struct {
+			Key string `json:"key"`
+		} `json:"presets"`
+	}
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatalf("catalog body must be JSON: %v (%s)", err, raw)
+	}
+	if body.Object != "l00prite.provider_presets" {
+		t.Fatalf("catalog object want l00prite.provider_presets got %q", body.Object)
+	}
+	if len(body.Presets) != 6 {
+		t.Fatalf("catalog want 6 presets got %d: %s", len(body.Presets), raw)
+	}
+	if body.Presets[0].Key != "anthropic" {
+		t.Fatalf("first preset key want anthropic got %q", body.Presets[0].Key)
+	}
+	for _, p := range body.Presets {
+		if p.Key == "mock" {
+			t.Fatalf("the internal mock adapter must never appear in the catalog: %s", raw)
+		}
+	}
+}
+
 // ---- helpers ----
 
 func asString(v any) string { s, _ := v.(string); return s }

@@ -108,10 +108,16 @@ previously queued dashboard Runs view (moved to Next, below).
 
 Deferred to Phase 3+ (see android-architecture.md §8): real-device smoke test (no emulator
 ABI possible in this container), clone-from-URL e2e coverage (needs network egress),
-venice/gemini capability confirmation from an unblocked network, making the internal `mock`
-test adapter selectable in the setup wizard (currently only reachable by direct API/DB
-injection, and must be named after a real manifest like `anthropic` to be routable —
-recorded in failures.md), a committed reusable Playwright harness for future UI regressions,
+~~venice/gemini capability confirmation from an unblocked network~~ — **done, 2026-07-12**:
+Gemini pricing/model-lineup (incl. confirming Gemini 3.5 is real) was re-verified first-party
+this pass (cloud.google.com was reachable), and Venice was re-checked with zero drift; see the
+"xAI Grok + Gemini providers, Venice made selectable" ledger entry. Still deferred: making the
+internal `mock` test adapter selectable in the setup wizard (currently only reachable by direct
+API/DB injection, and must be named after a real manifest like `anthropic` to be routable —
+recorded in failures.md; the new provider-presets dropdown from that same 2026-07-12 pass
+deliberately keeps `mock` excluded, enforced by a whitelist + a test), a committed reusable
+Playwright harness for future UI regressions (a scratchpad-only script was used again this pass,
+per the standing convention below),
 ssh clone support once a key-provisioning UI exists, the Termux/remote-verifier bridge
 (needs its own design pass), SAF export, split ABIs/app bundle, release signing ceremony,
 battery/doze tuning, F-Droid-style reproducible build recipe, on-device model
@@ -195,6 +201,29 @@ fresh from the new `main` (squash-merge, so no commits were orphaned) for the ne
 - [ ] Playwright end-to-end of the Runs UI against the real binary once the view exists.
 
 ## Next
+- [ ] **Persist a provider's originating manifest key separately from its editable display name**
+      (deeper fix for a Codex review finding on PR #10, 2026-07-12): renaming a manifest-backed
+      "Add provider" preset (e.g. `gemini` → `my-gemini-key`) breaks bare/default-model routing —
+      `adapters.ModelsFor(p.Name)` (used by `router.go`'s Rules 3-4 and `/v1/models`) finds no
+      catalog under the edited name, so the renamed provider is unreachable except via an explicit
+      `name/model` pin and never appears in the model picker. Root cause: an earlier fix in the
+      same PR (falling back to the preset's `sample_model` when validating a renamed provider)
+      removed the validation failure that used to accidentally guard against saving this exact
+      broken state. A real fix needs a schema change — store the preset key the provider was
+      added from (e.g. a `manifest_key` column) alongside its user-editable `name`, and have
+      `ModelsFor`/the router/the model picker resolve the catalog by that key instead of by name.
+      Judged architecturally significant, not a small confident fix, so NOT done inline; a
+      client-side warning (fires when a manifest-backed preset's name diverges from its key,
+      `setup.html`/`dashboard.html`) shipped instead as the interim mitigation, per maintainer
+      decision on the PR. Queued here as real follow-up work, not dropped.
+- [ ] **Extend validator byte-parity to the cli-os protocol embed** (small, standalone gated
+      follow-up, 2026-07-12; NOT part of the v1.2 batch below — different scope, cli-os-specific):
+      `cli-os/internal/engine/protocol/prompts/*.md` is now an 8th verbatim mirror of the six
+      canonical loop prompts (added by the consent-gated full-protocol repo-scaffold feature —
+      see the ledger), but `scripts/validate-l00prite.js`'s byte-parity check does not cover it
+      yet, since extending that check means editing a review-gated file. Until reviewed, this
+      mirror's sync is enforced only by convention (like `l00pfiles.go`'s existing hand-copied
+      constants), not mechanically.
 - [ ] Maintainer decisions on l00prite CLI-OS design (branch `claude/looprite-cli-os-jntwqi`,
       `cli-os/`): answer `cli-os/docs/open-questions.md` — esp. Q1 (which providers in v1),
       Q2 ("quality" in routing), Q3 (runtime language), Q7 (authoritative pricing). Bless

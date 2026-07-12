@@ -1,7 +1,8 @@
 // Package gitx is the engine's git seam (docs/android-architecture.md §4 G4): a Client interface
-// with the ten primitives the run engine actually needs (clone, rev-parse HEAD, status
-// --porcelain, checkout -B, add -A, commit, diff HEAD, log, show, and a raw passthrough), plus two
-// implementations. Detect picks the exec-git implementation when a "git" binary is on PATH — this
+// with the primitives the run engine actually needs (clone, rev-parse HEAD, status --porcelain,
+// checkout -B, add -A, force-add specific paths, commit, current branch, diff HEAD, log, show, and
+// a raw passthrough), plus two implementations. Detect picks the exec-git implementation when a
+// "git" binary is on PATH — this
 // is byte-for-byte the behavior every desktop host had before this package existed — and falls
 // back to a pure-Go go-git implementation only when no git binary exists at all (stock Android
 // ships neither git nor ssh). Callers hold a Client (Engine.Git / Toolbox.Git) rather than calling
@@ -31,6 +32,12 @@ type Client interface {
 	// (an "unborn" HEAD) or repo is not a git repository at all.
 	RevParseHead(repo string) (string, error)
 
+	// CurrentBranch returns the name of the currently checked-out branch, or "" (with a nil
+	// error) on a detached HEAD — never an error just because there's no branch name to report.
+	// Read-only; added for callers that need to report (not restore) which branch a new branch
+	// was created from.
+	CurrentBranch(repo string) (string, error)
+
 	// StatusPorcelain reports the working tree status. An empty string means a clean tree; callers
 	// in this codebase never rely on anything beyond that emptiness check and the per-line "XY
 	// path" shape (see gogit's doc comment on the caveats of its rendering).
@@ -42,6 +49,11 @@ type Client interface {
 
 	// AddAll stages every change in the working tree (the semantics of `git add -A`).
 	AddAll(repo string) error
+
+	// AddPaths force-stages the given repo-relative paths, bypassing .gitignore (the semantics
+	// of `git add -f`) — for generated content that must land in the next commit regardless of
+	// the target repo's own ignore rules. A no-op for an empty paths slice.
+	AddPaths(repo string, paths []string) error
 
 	// Commit commits the currently staged changes with message and returns the new commit hash.
 	// "Nothing staged to commit" is not an error: it returns ("", nil).

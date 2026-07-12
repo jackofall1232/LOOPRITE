@@ -7,39 +7,72 @@
   "auth": {
     "scheme": "bearer",
     "header": "Authorization",
-    "notes": "Bearer token is the Gemini API key. Google's documented OpenAI-compatibility layer accepts it as a standard Authorization: Bearer <key> header on this endpoint."
+    "notes": "Bearer token is the Gemini API key. Google's documented OpenAI-compatibility layer accepts it as a standard Authorization: Bearer <key> header on this endpoint. Re-confirmed 2026-07-11 via Google's own cookbook (google-gemini/cookbook, Get_started_OpenAI_Compatibility.ipynb, fetched directly)."
   },
   "streaming": "openai-sse-chunks",
   "tool_schema": "openai-function",
   "notes": [
-    "Targets Google's documented OpenAI-compatible endpoint (generativelanguage.googleapis.com/v1beta/openai), not the native Gemini REST/SDK shape -- so it plugs into the same openai-compat adapter as Zhipu/Venice with no new translation code.",
-    "Capability flags (tools/vision) below are TRAINING-KNOWLEDGE pending first-party confirmation from this environment's egress-restricted network -- treat as a starting point, not a verified fact.",
-    "Pricing could not be first-party-verified from this build environment; both models ship with a null price_per_mtok and price_confidence \"unconfirmed\" so the cost meter reports Unconfirmed/not-Priced rather than a fabricated $0, and PriceTierFor sorts them tier-2 (unpriced) -- last in cost-preference auto-routing, matching this repo's existing pricing-verification discipline (see openai.json / zhipu.json)."
+    "Targets Google's documented OpenAI-compatible endpoint (generativelanguage.googleapis.com/v1beta/openai), not the native Gemini REST/SDK shape -- so it plugs into the same openai-compat adapter as Zhipu/Venice/xAI with no new translation code.",
+    "2026-07-11 pass: pricing upgraded from null/unconfirmed to FIRST-PARTY figures fetched directly (raw HTML) from Google's own pricing page -- see verification.pricing_note for the channel caveat. gemini-3.5-flash confirmed real and GA two independent first-party ways (priced line item on Google's pricing page; selectable id in Google's official cookbook notebook).",
+    "Capability flags (tools/vision) are cookbook-demonstrated: every id below appears in the official google-gemini/cookbook OpenAI-compatibility notebook's model picker, exercised there against tool-calling and image-input cells. Not exercised against the live API from this build environment.",
+    "context/max_output are intentionally omitted for every model: the widely-reported 1M/65K figures for the 2.5/3.x families were secondary-source-only this pass (ai.google.dev egress-blocked), so they read as unverified fail-closed rather than guessed.",
+    "No 'Gemini 3.5 Pro' exists on Google's own pricing page as of 2026-07-11 -- claims of one (2M context, 'Deep Think mode') trace only to SEO content farms and were rejected. gemini-3-pro-preview is likewise excluded: not a pricing line item, not in the cookbook; secondary sources claim it now aliases to gemini-3.1-pro-preview (unconfirmed first-party)."
   ],
   "verification": {
     "shape": "high",
-    "shape_source": "Google's documented OpenAI-compatibility endpoint for the Gemini API (generativelanguage.googleapis.com/v1beta/openai)",
-    "pricing": "unverified from this environment",
-    "pricing_source": "NONE fetched first-party -- see pricing_note",
-    "pricing_checked": "2026-07-05",
-    "pricing_note": "First-party Gemini API pricing pages were not reachable from this build environment. Per this repo's pricing-verification discipline, prices are left null rather than backfilled from training-data memory -- see docs/pricing-confirmation.md precedent (openai.json, zhipu.json).",
-    "capabilities": "training-knowledge",
-    "capabilities_note": "tools/vision flags are training-knowledge (Gemini 2.5 Pro/Flash are well known to support function calling and multimodal input), not first-party confirmed from this environment."
+    "shape_source": "Google's documented OpenAI-compatibility endpoint + google-gemini/cookbook Get_started_OpenAI_Compatibility.ipynb (official, fetched directly via raw.githubusercontent.com, 2026-07-11)",
+    "pricing": "high",
+    "pricing_source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing (first-party; redirect target of cloud.google.com/vertex-ai/generative-ai/pricing; raw HTML fetched and grepped 2026-07-11)",
+    "pricing_checked": "2026-07-11",
+    "pricing_note": "CHANNEL CAVEAT: figures are from Google's Vertex/'Gemini Enterprise Agent Platform' pricing page (Global tier, standard, <=200K-context tier where tiering applies), because ai.google.dev -- the standalone Gemini Developer API pricing page for the endpoint this manifest actually targets -- was egress-blocked (403 at the CONNECT layer) for the whole session. Historically the two channels' pay-as-you-go list prices match, and third-party citations of ai.google.dev's displayed gemini-3.5-flash price matched these figures exactly ($1.50/$9.00). Marked high on that basis; re-check ai.google.dev from an unblocked network if the meter and a Google invoice ever disagree.",
+    "capabilities": "cookbook-demonstrated",
+    "capabilities_note": "tools/vision flags come from each id's presence in Google's official OpenAI-compat cookbook notebook (tool-calling + image-input cells) -- first-party-adjacent, not live-API-exercised from this environment."
   },
   "models": [
     {
       "id": "gemini-2.5-pro",
       "capabilities": { "tools": true, "vision": true },
-      "price_per_mtok": { "input": null, "output": null },
-      "price_confidence": "unconfirmed",
-      "notes": "Flagship reasoning model. Context/max_output and pricing are unverified from this environment; left null/omitted rather than guessed."
+      "price_per_mtok": { "input": 1.25, "output": 10.00 },
+      "price_confidence": "high",
+      "price_source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+      "price_checked": "2026-07-11",
+      "notes": "Flagship 2.5 reasoning model. TIERED: $1.25/$10 per 1M applies to <=200K-token context; >200K bills $2.50/$15 (manifest carries the base tier; the meter does not yet tier by context -- same treatment as anthropic's dated intro pricing note). Non-global regions +10%."
     },
     {
       "id": "gemini-2.5-flash",
       "capabilities": { "tools": true, "vision": true },
-      "price_per_mtok": { "input": null, "output": null },
-      "price_confidence": "unconfirmed",
-      "notes": "Faster/cheaper sibling. Context/max_output and pricing are unverified from this environment; left null/omitted rather than guessed."
+      "price_per_mtok": { "input": 0.30, "output": 2.50 },
+      "price_confidence": "high",
+      "price_source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+      "price_checked": "2026-07-11",
+      "notes": "Flat (not context-tiered) text/image/video input rate; audio input is priced separately ($1/1M) and is not modeled here."
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "capabilities": { "tools": true, "vision": true },
+      "price_per_mtok": { "input": 1.50, "output": 9.00 },
+      "price_confidence": "high",
+      "price_source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+      "price_checked": "2026-07-11",
+      "notes": "Google's current Flash-tier model, GA. Confirmed real two first-party ways 2026-07-11 (priced line item on Google's own pricing page; selectable id in the official cookbook). Cross-corroborated by this repo's venice.json reselling the same model as gemini-3-5-flash at $1.55/$9.45 (~3-5% reseller markup over these native figures). Flat rate, not context-tiered."
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "capabilities": { "tools": true, "vision": true },
+      "price_per_mtok": { "input": 2.00, "output": 12.00 },
+      "price_confidence": "high",
+      "price_source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+      "price_checked": "2026-07-11",
+      "notes": "Google's current frontier reasoning model. PREVIEW id -- expect churn; secondary sources say the older gemini-3-pro-preview now aliases here (unconfirmed first-party). TIERED: $2/$12 per 1M for <=200K context; >200K bills $4/$18 (manifest carries the base tier)."
+    },
+    {
+      "id": "gemini-3.1-flash-lite",
+      "capabilities": { "tools": true, "vision": true },
+      "price_per_mtok": { "input": 0.25, "output": 1.50 },
+      "price_confidence": "high",
+      "price_source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+      "price_checked": "2026-07-11",
+      "notes": "Cheapest 3.x tier. $0.25 in (text/image/video, Global) / $1.50 out per 1M; audio input priced separately ($0.50/1M), not modeled here."
     }
   ]
 }
