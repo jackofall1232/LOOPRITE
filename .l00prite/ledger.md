@@ -1673,3 +1673,335 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260711-213500-claude-budget-execute-lock-help acquired for this append;
   released at end of run.
+
+### Run 2026-07-12T00:15:00Z — Claude (Sonnet 5 orchestrator + researchers, Fable 5 architect/verifier, Opus 4.8 implementer), branch claude/add-grok-gemini-providers-ou4e8k
+- **Goal:** Maintainer request — add xAI Grok and Google Gemini as first-class "Add provider"
+  options and make Venice AI selectable too (today only Anthropic-native + a generic
+  OpenAI-compatible option exist in the dropdown), with sensible default endpoints per provider
+  and a custom-entry fallback, orchestrated via a Workflow pipeline (Sonnet research → Fable
+  design spec → Opus implementation → Fable adversarial verify).
+- **Triggering event:** Direct maintainer request, explicit role assignment (Fable
+  advisor/senior-dev/verifier, Sonnet research, Opus implementation) and explicit instruction to
+  use the l00prite method to reach done.
+- **Research (Sonnet, parallel):** xAI's own domains (docs.x.ai/x.ai/console.x.ai) were egress-
+  blocked; fell back to xAI's official GitHub SDK/cookbook (xai-org) and confirmed **Grok 4.5**
+  is real (announced 2026-07-08) and that the retired `grok-code-fast-1` (retired 2026-05-15,
+  silently redirects to `grok-4.3` at its billing rate) has been superseded by **`grok-build-0.1`**
+  as xAI's current coding-specialized model — the correct answer to "add Grok's coding model."
+  Gemini research WAS first-party-reachable this session (cloud.google.com), upgrading
+  gemini.json's pricing from null/unconfirmed to first-party-verified and confirming
+  **Gemini 3.5** (`gemini-3.5-flash`) is real and GA, plus `gemini-3.1-pro-preview`/
+  `gemini-3.1-flash-lite`. Venice freshness check: zero drift against the 2026-07-05 baseline.
+- **Design (Fable):** decoupled "which provider preset the user picked" from "which wire adapter
+  kind is POSTed" (today's dropdown conflates the two, which only worked with exactly one
+  provider per adapter kind) — new `adapters.Presets()` + unauthenticated `GET
+  /v1/providers/catalog` (same non-secret class as `/v1/setup/status`) drives both `setup.html`
+  and `dashboard.html`'s Add-provider dropdowns from the embedded manifests, with a client-side
+  "custom" fallback and a fetch-failure degrade to today's two-option behavior.
+- **Implementation (Opus):** new `manifests/xai.json` (grok-4.3 first as the validation probe —
+  the only id with verbatim first-party SDK confirmation — plus grok-4.5/grok-build-0.1/grok-4;
+  all pricing null/unconfirmed, `grok-code-fast-1` deliberately absent); `gemini.json` upgraded
+  to first-party pricing + the confirmed 3.x models; `venice.json` verification-date refresh
+  only (zero catalog drift); `"grok"→"xai"` alias; `Presets()`/`Preset` in registry.go; new
+  `internal/gateway/presets.go` (`HandleProviderPresets`) + route; both HTML twins rewritten to
+  fetch the catalog and resolve the POSTed `adapter` from the selected preset, not the dropdown
+  value; new/updated Go tests; docs (`provider-adapters.md`, manifests `README.md`) updated.
+- **Verify (Fable, adversarial):** zero blocking findings. Traced the preset→adapter resolution
+  through `body()/formBody()` → `resolveAdapterKind` → `storeProvider` → `AdapterFor` and proved
+  it non-tautological via mutation testing. Four non-blocking findings, all fixed in-session by
+  the orchestrator (not deferred): (1) an unguarded stale-async-render race in both HTML files if
+  the user navigates/reopens a modal while the catalog fetch is in flight — fixed with a
+  `renderGen`/`modalGen` token guard, style-matched to the file's existing `epoch` pattern; (2)
+  `gofmt` flagging two pre-existing-dirty files untouched by this diff — correctly left alone,
+  confirmed via `git diff` that neither file appears in this change; (3) a tautological dead
+  assertion in `TestPresets` (`p.Key=="mock"` inside a loop that already asserts exact order,
+  and `mock` is never in `wantKeys`) — moved to a real assertion on `presetOrder` directly
+  (same package); (4) renaming a provider away from its preset key while leaving the model field
+  blank made server-side `pickValidationModel` miss the manifest (it looks up by POSTed name) —
+  fixed by falling back client-side to the preset's `sample_model` whenever the model field is
+  empty, verified end-to-end at the network-request level (see Tests).
+- **Changed files:** `cli-os/internal/gateway/adapters/manifests/{xai.json (new),gemini.json,
+  venice.json,README.md}`; `cli-os/internal/gateway/adapters/registry.go`;
+  `cli-os/internal/gateway/presets.go` (new); `cli-os/internal/server/server.go`;
+  `cli-os/internal/gateway/adapters/adapters_test.go`;
+  `cli-os/internal/server/provider_mgmt_test.go`; `cli-os/public/{setup.html,dashboard.html}`;
+  `cli-os/docs/provider-adapters.md`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && gofmt -l <diff files>` · `exit_code: 0` · `summary: clean` ·
+    2026-07-12T00:40Z.
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` · `summary: clean` ·
+    2026-07-12T00:41Z.
+  - `command: cd cli-os && go test ./... -count=1` · `exit_code: 0` · `summary: all packages
+    green, uncached, incl. new TestXaiManifest/TestGrokAliasResolvesToXai/TestPresets/
+    TestProviderCatalogUnauthenticated` · 2026-07-12T00:55Z (final run, after all four fixes).
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS, 0 FAIL
+    (unchanged — this feature touches nothing the protocol validator scopes)` ·
+    2026-07-12T00:56Z.
+  - `command: live gateway smoke (built binary, isolated data dir) + Playwright (Chromium,
+    pre-installed) against setup.html and dashboard.html` · `summary: all 7 dropdown options
+    render with correct labels/order in both files; per-preset defaults populate correctly
+    (xai/venice/gemini/custom); a real Add-provider POST for a RENAMED "xai" provider
+    (my-xai-key) correctly resolved wire adapter openai-compat + base_url api.x.ai/v1 end-to-end;
+    a real /v1/providers/test request for a RENAMED "gemini" provider with the model field left
+    blank confirmed the client now sends model:"gemini-2.5-pro" (the fix for finding #4);
+    modal close/reopen exercised the modalGen race-guard with no console errors; the one
+    console error observed (a 404) was independently confirmed via curl to be a pre-existing,
+    unrelated `/favicon.ico` 404 (no favicon route exists anywhere in this app)` ·
+    2026-07-12T00:50Z.
+- **Response drafted/sent:** progress updates sent in-session; final summary pending at close.
+- **Event status:** not applicable.
+- **Failures:** none outstanding.
+- **Decisions:** Gemini pricing shipped `price_confidence:"high"` despite a Vertex-vs-Developer-
+  API channel caveat (recorded in the manifest's `pricing_note`) because the page is genuine
+  Google first-party and third-party citations of the Developer API's own displayed price matched
+  exactly — the alternative (leaving it unconfirmed) would waste the first real Gemini pricing
+  this repo has had. xAI's fast/legacy tiers (`grok-4-fast`, `grok-4-1-fast`, `grok-3-latest`)
+  were deliberately excluded: their suffixed siblings were retired with silent redirect billing
+  and the bare ids' post-retirement status is unconfirmed — users can still hand-enter any model
+  id for a named provider; this can be revisited after a live docs.x.ai check.
+- **Confidence:** High on shape/UI-decoupling correctness (traced and mutation-tested); high on
+  Gemini pricing (first-party fetched and independently re-confirmed); explicitly unconfirmed on
+  all xAI pricing (every first-party xAI domain was egress-blocked this session — recorded
+  verbatim in `xai.json`'s `pricing_note`, matching this repo's existing openai.json/zhipu.json
+  discipline rather than backfilling from training-data memory).
+- **Next action:** maintainer review; re-check xAI pricing from a network where docs.x.ai is
+  reachable before treating any xai model as cost-routable; a maintainer-requested follow-up
+  (branch/consent-gated full-protocol scaffolding on repo registration) is queued next, to start
+  only after this change is committed to avoid concurrent edits to the same shared files
+  (`dashboard.html`, `server.go`).
+- **Do-not-retry notes:** none.
+- **Lock:** none held (no `.l00prite/lock.json` contention on this pass — single-agent-orchestrated
+  Workflow, not a multi-session race).
+
+### Run 2026-07-12T02:00:00Z — Claude (Sonnet 5), branch claude/add-grok-gemini-providers-ou4e8k
+- **Goal:** Maintainer-requested follow-up (queued at the end of the prior run above): registering
+  or cloning a repo via the dashboard only ever auto-scaffolds a MINIMAL `.l00prite/` memory
+  subset silently — no `AGENTS.md`, no `CLAUDE.md` protocol section, no `.l00prite/prompts/`, no
+  vendor adapters, nothing branched or committed — so a registered repo does not get "the full
+  benefit of the l00prite methodology" per the maintainer's own words. Build a consent-gated
+  action (never automatic) that creates a local branch, writes the FULL protocol, and commits it,
+  offered both at registration time (a checkbox) and as a standalone action for already-registered
+  repos, with local-only branch/commit (no auto-push/PR) plus clear push/PR instructions.
+- **Triggering event:** Direct maintainer follow-up request after the provider-presets pass above;
+  three design questions resolved via AskUserQuestion before implementation: full-protocol scope
+  (not just the memory folder), local branch+commit only (not push/PR'd), offered at both
+  registration time AND as a standalone later action.
+- **Ultracode note:** ultracode was OFF for this pass (a system reminder confirmed it after the
+  provider-presets Workflow completed), so this was implemented directly by the main session
+  (Sonnet 5) with targeted read-only Explore-agent research fan-out for investigation, not a full
+  Workflow pipeline — consistent with the standard opt-in bar applying again.
+- **Investigation (Explore agent, read-only):** mapped `internal/gitx`'s ten primitives — no
+  "create branch + commit" one-shot existed, and `CheckoutNewBranch`'s `checkout -B` create-or-
+  reset semantics mean a name collision would silently reset an existing branch, so a random-
+  suffixed branch name was needed rather than a fixed one; the `EnsureRunBranch`/`CommitUnit`/
+  `AutoCheckpoint` precedent in
+  `internal/engine/tools.go` (clean-tree-outside-`.l00prite/` guard, scaffold-after-checkout
+  ordering); the current `Files.Scaffold` (memory-file baseline only, explicitly documented as
+  NOT writing prompts/AGENTS.md); that `cli-os` cannot `go:embed` the repo-root `templates/`
+  directory (outside its module tree) and carries no existing copy-into-cli-os build step; and
+  the dashboard's Register-repo modal / repo-card renderer locations.
+- **Design decision (own judgment, not delegated):** cli-os is a standalone portable binary (must
+  run against arbitrary repos, including from the Android APK, with no access to this monorepo's
+  `templates/` at runtime) — so `internal/engine/protocol/` carries its own embedded verbatim
+  copy of `AGENTS.md.template`, the six canonical prompts, the vendor adapter files, and the fixed
+  `CLAUDE.md` protocol section (extracted from `templates/CLAUDE.md.template` lines 11-28,
+  diffed byte-identical against the source range before use) — the same "separate copy kept in
+  sync by hand" pattern `l00pfiles.go`'s own heartbeat/state/lock constants already use, just
+  embedded from real files instead of hand-transcribed. This 8th mirror of the six prompts is
+  explicitly NOT added to `scripts/validate-l00prite.js`'s byte-parity enforcement (human-review-
+  gated file) — flagged as a queued follow-up, not touched.
+- **A real bug found and fixed by my own test, not a reviewer:** the first implementation
+  `defer`-released the scaffold lock, so its release write (`lock.json`) landed AFTER
+  `CommitUnit`'s commit, leaving the new branch's working tree dirty the instant the handler
+  returned — the exact class of bug this repo's own PR #6/#7 review rounds already fixed twice
+  for `ledger.md`'s append and the run engine's lease write. My own `TestRepoScaffoldBranchWritesFullProtocolOnANewBranch`
+  (which asserts `git status --porcelain` is empty after the call, not just that the HTTP response
+  looks right) caught it immediately. Fixed by releasing the lock explicitly BEFORE `CommitUnit`
+  (removing the `defer` entirely) so the released lock state is captured in the same commit.
+- **Built:** `gitx.Client` gained one new read-only primitive, `CurrentBranch(repo) (string, error)`
+  (both exec and gogit backends), added purely to REPORT what branch the new one came from in the
+  API response — deliberately NOT used to restore/checkout back to the original branch, since
+  `CheckoutNewBranch`'s create-or-reset semantics would silently fast-forward that branch to the
+  new commit if reused for a "restore," moving a branch the user never asked to move (found and
+  fixed the one existing test double, `rawErrGit` in `preflight_test.go`, that needed the new
+  method to keep satisfying the interface). `engine.Files.ScaffoldFull` (new,
+  `protocol_embed.go`): runs the baseline `Scaffold()` then additionally writes `AGENTS.md`
+  (template-filled), the six loop prompts, the vendor adapter files, and — only when no
+  `CLAUDE.md` exists at all — a starter `CLAUDE.md` carrying just the fixed protocol section;
+  never overwrites anything that already exists (same `createIfMissing` discipline). New
+  `FullProtocolGaps()` previews what's missing without writing, so the handler can skip creating
+  a pointless empty branch when a repo already has everything. New `POST /v1/repos/scaffold-branch`
+  (`gateway/repo_scaffold.go`): authenticated, project-scoped (`repoRootForToken`), acquires the
+  same lock convention as the sibling auto-scaffold under its own session literal
+  (`gateway-scaffold-full-branch`), creates a `l00prite/add-protocol-<random>` branch, scaffolds,
+  releases the lock, commits, and returns `{branch, branched_from, commit, files_created,
+  claude_md_skipped, push_instructions, notes}` — never pushes or opens a PR (this codebase's own
+  hard rule, `AGENTS.md.template`'s "never push... without explicit per-action permission",
+  applies to l00prite's own automation too). Dashboard (`public/dashboard.html`): a checked-by-
+  default "Add l00prite to this repo" checkbox in the Register-repo modal (wired through
+  `finishRegister`'s new `repoId`/`scaffoldFull` params), a new standalone "Add l00prite" button
+  on every repo card, a shared `scaffoldResultNote()` renderer (branch name, files-committed
+  count, a copyable `git push` command, explicit "nothing was pushed automatically" copy) used by
+  both entry points, and a delegated `[data-copy]` clipboard handler (dashboard.html had no
+  existing copy-to-clipboard utility before this).
+- **Changed files:** `cli-os/internal/gitx/{gitx.go,exec.go,gogit.go}`;
+  `cli-os/internal/engine/protocol_embed.go` (new) + `cli-os/internal/engine/protocol/` (new
+  embedded template mirror: `AGENTS.md.template`, `claude_protocol_section.md`, `prompts/*.md`
+  ×6, `adapters/*` ×6); `cli-os/internal/gateway/repo_scaffold.go` (new);
+  `cli-os/internal/server/server.go` (new route); `cli-os/public/dashboard.html`;
+  `cli-os/internal/engine/{l00pfiles_test.go,preflight_test.go}`;
+  `cli-os/internal/server/repo_scaffold_branch_test.go` (new).
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` · `summary: clean` ·
+    2026-07-12T02:40Z.
+  - `command: cd cli-os && gofmt -l <every new/changed .go file>` · `exit_code: 0` ·
+    `summary: clean (chattools.go/config.go remain the SAME pre-existing gofmt drift noted in the
+    prior run, untouched by this one)` · 2026-07-12T02:41Z.
+  - `command: cd cli-os && go test -race ./... -count=1` · `exit_code: 0` · `summary: all packages
+    green, incl. new TestFullProtocolGapsOnEmptyDir/TestScaffoldFullWritesEverythingThenIsIdempotent/
+    TestScaffoldFullNeverTouchesExistingClaudeMD (engine) and
+    TestRepoScaffoldBranch{AuthRequired,UnregisteredRepo404s,WritesFullProtocolOnANewBranch}
+    (server, against a REAL git repo with `os/exec` — asserts the actual branch/commit/clean-tree
+    state on disk, not just the HTTP response shape)` · 2026-07-12T02:55Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS, 0 FAIL
+    (unchanged)` · 2026-07-12T02:56Z.
+  - `command: live gateway smoke (rebuilt binary) + Playwright (Chromium) driving BOTH dashboard
+    entry points against real local git repos` · `summary: registration with the checkbox checked
+    (default) produces a real branch + 15 committed files + a working copy-to-clipboard push
+    command; registering with the checkbox unchecked skips scaffolding; the standalone repo-card
+    "Add l00prite" button on an already-registered repo produces the identical result; independently
+    confirmed via \`git branch --list\`/\`git log\`/\`git status --porcelain\` on both real test
+    repos afterward (real branch, real commit, clean tree, all 6 prompts + AGENTS.md + CLAUDE.md +
+    vendor adapters present on disk) — not just trusting the JSON response` · 2026-07-12T03:05Z.
+- **Response drafted/sent:** progress updates sent in-session; final summary pending at close.
+- **Event status:** not applicable.
+- **Failures:** none outstanding. The lock/commit-ordering bug above was found and fixed within
+  this same pass, before ever being reported as done.
+- **Decisions:** leave the repo checked out on the new branch after scaffolding (matching
+  `EnsureRunBranch`'s existing precedent for run branches) rather than attempting to restore the
+  original branch — restoring would require a second, riskier git primitive (checking out an
+  EXISTING branch without `-B`'s create-or-reset semantics), and `CurrentBranch` is reported in
+  the response for the user's own reference instead. The checkbox defaults to checked (opt-out,
+  not opt-in) since the existing minimal auto-scaffold is already unconditional today — this is
+  presented as upgrading that default, not introducing a new mutation from nothing.
+- **Confidence:** High — every new git operation was verified against REAL on-disk git state
+  (not mocked), the lock/commit-ordering bug was caught by a test asserting real filesystem/git
+  state rather than trusting the HTTP response, and the one existing `gitx.Client` test double
+  was found and fixed rather than silently left broken.
+- **Next action:** maintainer review; the byte-parity gap for the new 8th prompt mirror
+  (`internal/engine/protocol/prompts/`) against `scripts/validate-l00prite.js` remains an
+  explicitly deferred, human-review-gated follow-up (see `.l00prite/todos.md`).
+- **Do-not-retry notes:** none.
+- **Lock:** none held (no `.l00prite/lock.json` contention on this pass).
+
+### Run 2026-07-12T03:20:00Z — Claude (Sonnet 5), branch claude/add-grok-gemini-providers-ou4e8k, PR #10 automated review round
+- **Goal:** Address bot review findings on PR #10 (opened from this branch to `add-grok` via the
+  Claude Code UI, then subscribed to for webhook activity). Copilot's review (3 findings) was
+  addressed first — see the prior close-out; this entry covers the Codex review round (4 findings,
+  all P2, all on the repo-scaffold feature).
+- **Triggering event:** `chatgpt-codex-connector[bot]`'s automated review, delivered as four
+  `<github-webhook-activity>` events.
+- **Investigation discipline:** did not trust any finding's claim at face value — reproduced each
+  one against real git state (a real repo, a real go-git open-source library, real HTTP calls)
+  before deciding whether/how to fix it, per this repo's established empirical-reproduction habit.
+- **Finding 1 — "Keep manifest identity when preset names are edited" (setup.html, also present in
+  dashboard.html):** confirmed real via `internal/gateway/router.go`: bare-model/auto/default
+  routing (Rules 3-4) resolves a provider by calling `adapters.ModelsFor(p.Name)`, which returns
+  nothing for a renamed manifest-backed provider (no manifest key matches the edited name) —
+  explicit `provider/model` pins (Rule 1b) are unaffected since they bypass the catalog entirely.
+  Root cause traces back to this same branch's earlier fix for Fable's finding #4 (send the
+  preset's sample_model when the model field is blank): that fix made validation succeed for a
+  renamed provider, which previously acted as an unintentional guard rail against saving exactly
+  this broken configuration. A full fix (persisting the originating preset key separately from the
+  editable display name, threaded through storeProvider/ModelsFor/router/the model picker) is a
+  real schema change — genuinely architecturally significant, not a small confident fix — so it is
+  NOT done here; instead shipped a client-side warning in both setup.html and dashboard.html (a
+  `#pnamewarn`/`#m-namewarn` div, synced on name input and preset change) explaining the routing
+  implication the moment a manifest-backed preset's name diverges from its key, verified live in a
+  real browser (warns on rename, clears when restored to the exact key, never fires for the
+  "custom" preset). The deeper fix is flagged to the maintainer as a question, not assumed.
+- **Finding 2 — "Avoid dirtying lock.json before the go-git checkout" (repo_scaffold.go):**
+  REPRODUCED, not assumed: a standalone test acquiring/dirtying a TRACKED `.l00prite/lock.json`
+  then calling `gogitClient{}.CheckoutNewBranch` at the SAME commit failed with "worktree contains
+  unstaged changes" — while the identical setup under `execClient{}.CheckoutNewBranch` succeeded
+  (real git's `checkout -B` tolerates a same-commit dirty tracked file; go-git's `Worktree.Checkout`
+  does not). This meant the handler's original order (AcquireLock's write, THEN EnsureRunBranch's
+  checkout) would hard-fail on the Android/gogit backend on every call after the first (once
+  `lock.json` is tracked from a prior commit) — precisely the ordering class this repo's own PR
+  #6/#7 rounds already fixed twice, and precisely what `engine.go`'s `StartRun` already does
+  correctly (checkout, THEN acquire) — this handler just built it backwards. Fixed by reordering:
+  peek the lock (read-only, `Files.ReadLock` + `engine.LockAvailability`) BEFORE the checkout so a
+  genuinely foreign lock still 409s without creating a pointless branch, then checkout, THEN the
+  real acquire (a write), THEN scaffold, THEN release (still before the commit, per the earlier
+  fix), THEN commit. Pinned the underlying go-git characteristic with a permanent regression test
+  (`TestGogitCheckoutNewBranchFailsOnDirtyTrackedFile`, both backends) and added a server-level test
+  proving a foreign lock still refuses without creating a branch.
+- **Finding 3 — "Force-add scaffold files that match .gitignore" (repo_scaffold.go):** REPRODUCED:
+  a server-level test registering a repo whose `.gitignore` excludes `.l00prite/` showed
+  `CommitUnit`'s `git add -A` (respects .gitignore) silently dropped those files from the commit
+  while the response still reported them as created. Researched go-git v5.18.0's actual source
+  (`worktree_status.go`) rather than guessing: `Worktree.Add(path)` for a single explicit path
+  passes an EMPTY ignore-pattern list to `doAdd` (unlike `AddWithOptions{All:true}`, which passes
+  the real excludes) — so it already behaves as a force-add with no lower-level API needed. Added
+  `AddPaths(repo, paths) error` to `gitx.Client` (both backends: `git add -f --` for exec,
+  looped `Worktree.Add` for gogit — both verified against a real `.gitignore` in
+  `TestAddPathsBypassesGitignore`), plus a NEW exported `Files.FullProtocolPaths()` (the complete
+  canonical path set — baseline + full-protocol extras + CLAUDE.md) used instead of just
+  `ScaffoldFull`'s `created` return value, because a file already sitting on disk uncommitted from
+  an EARLIER partial scaffold (the auto-scaffold on register, which always runs before this
+  action) is just as gitignorable and was still silently dropped by the first, narrower version of
+  this fix — caught by the same regression test before it could ship incomplete.
+- **Finding 4 — "Include baseline memory files in gap detection" (protocol_embed.go):**
+  confirmed real: `FullProtocolGaps()` only checked ScaffoldFull's own additions, so a repo missing
+  the baseline `Scaffold()` files (e.g. the auto-scaffold was skipped by a foreign lock at register
+  time, or failed on a read-only filesystem) but carrying some leftover full-protocol file would be
+  misreported `already_complete` and never repaired. Fixed by adding `baselineScaffoldPaths` (kept
+  in sync by hand with `Scaffold()`'s own list, documented as such) to the gap check.
+- **Changed files:** `cli-os/internal/gitx/{gitx.go,exec.go,gogit.go,gitx_test.go}`;
+  `cli-os/internal/engine/protocol_embed.go`; `cli-os/internal/gateway/repo_scaffold.go`;
+  `cli-os/internal/engine/{l00pfiles_test.go,preflight_test.go}`;
+  `cli-os/internal/server/repo_scaffold_branch_test.go`; `cli-os/public/{setup.html,dashboard.html}`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` · `summary: clean`.
+  - `command: cd cli-os && gofmt -l <every changed .go file>` · `exit_code: 0` · `summary: clean
+    (chattools.go/config.go remain the same pre-existing drift noted twice already, untouched)`.
+  - `command: cd cli-os && go test -race ./... -count=1` · `exit_code: 0` · `summary: all packages
+    green, incl. new TestGogitCheckoutNewBranchFailsOnDirtyTrackedFile (both backends, pins the
+    reproduced go-git characteristic), TestAddPathsBypassesGitignore/TestAddPathsEmptyIsNoop (both
+    backends), TestFullProtocolGapsCatchesMissingBaselineFiles,
+    TestRepoScaffoldBranchCommitsGitignoredProtocolFiles (failed against the first, narrower fix
+    before the FullProtocolPaths broadening — confirmed catching a real gap, not a tautology),
+    TestRepoScaffoldBranchForeignLockRefusesWithoutCreatingABranch`.
+  - `command: node scripts/validate-l00prite.js` (from repo root) · `exit_code: 0` · `summary:
+    519 PASS, 0 FAIL (unchanged)`.
+  - `command: live gateway smoke + Playwright (Chromium) against the real built binary` ·
+    `summary: the rename warning fires exactly on a manifest-backed preset's name diverging from
+    its key, clears when restored, never fires for "custom" — in both setup.html and
+    dashboard.html`.
+- **Response drafted/sent:** progress updates sent in-session per finding as webhook events
+  arrived; a summary question to the maintainer about Finding 1's deeper fix is pending at
+  turn-close (not yet answered).
+- **Event status:** the Codex review round is addressed; Gemini Code Assist's review had no
+  actionable feedback (a bot deprecation notice only); Vercel's preview-deployment comments are
+  routine, no action taken.
+- **Failures:** none outstanding from this round. The first (narrower) version of the Finding-3
+  fix was itself caught as incomplete by its own regression test before being shipped — recorded
+  as a real self-correction, not a silent iteration.
+- **Decisions:** Finding 1 gets a UI warning now, not a schema change, pending maintainer input —
+  the warning is strictly additive/non-breaking and doesn't foreclose whichever direction is
+  chosen later.
+- **Confidence:** High — all three git/lock/gitignore findings were reproduced empirically (a
+  failing test first, a real fix confirmed to flip it green) rather than pattern-matched from the
+  bot's prose; Finding 1's severity (bare/default routing broken, explicit pins unaffected) was
+  independently traced through router.go, not assumed from the review comment alone.
+- **Maintainer decision (2026-07-12T03:40Z):** ship the client-side warning as the immediate
+  mitigation for Finding 1; the deeper schema change (persisting the preset key separately from
+  the editable display name) is NOT done inline in this PR, but IS queued as real follow-up work
+  (maintainer request, 2026-07-12T03:55Z — see `.l00prite/todos.md` "Next": persist a provider's
+  originating manifest key separately from its display name, threaded through
+  `storeProvider`/`ModelsFor`/`router.go`/the model picker) rather than dropped.
+- **Next action:** continuing to watch PR #10 for further activity and CI results, with a
+  standing ~1-hour self check-in armed; the queued manifest-key follow-up above waits on its own
+  future session.
+- **Do-not-retry notes:** none.
+- **Lock:** none held.

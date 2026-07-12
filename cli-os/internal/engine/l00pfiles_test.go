@@ -753,6 +753,151 @@ func TestScaffoldCreatesAllThenIsIdempotent(t *testing.T) {
 	}
 }
 
+// ---- full protocol scaffold (AGENTS.md, loop prompts, vendor adapters, starter CLAUDE.md) ----
+
+func TestFullProtocolGapsOnEmptyDir(t *testing.T) {
+	f := Files{Root: t.TempDir()}
+	missing, claudeMissing := f.FullProtocolGaps()
+	if len(missing) == 0 {
+		t.Error("expected gaps on an empty dir")
+	}
+	if !claudeMissing {
+		t.Error("expected claudeMissing=true on an empty dir")
+	}
+}
+
+// TestFullProtocolGapsCatchesMissingBaselineFiles: a repo carrying ONLY ScaffoldFull's own
+// additions (AGENTS.md, prompts, adapters, CLAUDE.md) but missing the baseline Scaffold() memory
+// files (e.g. because the auto-scaffold on register/clone was skipped by a foreign lock, or
+// failed on a read-only filesystem) must NOT be reported as gap-free — otherwise the "Add
+// l00prite" repair action would see already_complete and never call ScaffoldFull to fill in
+// blueprint.md/state.json/etc.
+func TestFullProtocolGapsCatchesMissingBaselineFiles(t *testing.T) {
+	dir := t.TempDir()
+	f := Files{Root: dir}
+	// Write ONLY the full-protocol extras "by hand", simulating a leftover/manual copy —
+	// deliberately not via ScaffoldFull, so the baseline is genuinely absent.
+	writeFile(t, filepath.Join(dir, "AGENTS.md"), "leftover AGENTS.md")
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "leftover CLAUDE.md")
+	for _, rel := range fullProtocolTargets() {
+		if rel == "AGENTS.md" {
+			continue
+		}
+		writeFile(t, filepath.Join(dir, filepath.FromSlash(rel)), "leftover")
+	}
+	missing, claudeMissing := f.FullProtocolGaps()
+	if claudeMissing {
+		t.Error("CLAUDE.md exists, claudeMissing should be false")
+	}
+	if len(missing) == 0 {
+		t.Fatal("expected the missing baseline files to still be reported as gaps")
+	}
+	for _, want := range []string{".l00prite/blueprint.md", ".l00prite/state.json"} {
+		found := false
+		for _, m := range missing {
+			if m == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected %q in missing, got %v", want, missing)
+		}
+	}
+}
+
+func TestScaffoldFullWritesEverythingThenIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	f := Files{Root: dir}
+
+	created, claudeSkipped, err := f.ScaffoldFull("my-project", "ship the widget")
+	if err != nil {
+		t.Fatalf("ScaffoldFull: %v", err)
+	}
+	if claudeSkipped {
+		t.Error("expected CLAUDE.md to be created on a repo with none, not skipped")
+	}
+	wantExtra := []string{
+		"AGENTS.md", "CLAUDE.md",
+		".l00prite/prompts/README.md", ".l00prite/prompts/event-loop.md",
+		".l00prite/prompts/execute-loop.md", ".l00prite/prompts/handoff-summary.md",
+		".l00prite/prompts/heartbeat.md", ".l00prite/prompts/respond-to-review.md",
+		".l00prite/prompts/resume-loop.md",
+		"GEMINI.md", "QWEN.md", ".github/copilot-instructions.md",
+		".cursor/rules/l00prite.mdc", ".windsurf/rules/l00prite.md", "CONVENTIONS.md",
+	}
+	gotSet := map[string]bool{}
+	for _, c := range created {
+		gotSet[c] = true
+	}
+	for _, w := range wantExtra {
+		if !gotSet[w] {
+			t.Errorf("ScaffoldFull did not create %q (created=%v)", w, created)
+		}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(w))); err != nil {
+			t.Errorf("scaffolded file missing on disk: %q (%v)", w, err)
+		}
+	}
+	// The baseline Scaffold() files must ALSO be present — ScaffoldFull adds to the baseline,
+	// it never replaces it.
+	if _, err := os.Stat(filepath.Join(dir, ".l00prite", "blueprint.md")); err != nil {
+		t.Errorf("ScaffoldFull must still write the baseline Scaffold() files: %v", err)
+	}
+	// AGENTS.md has the project name filled in, no leftover {{placeholder}} tokens.
+	agents := readText(filepath.Join(dir, "AGENTS.md"))
+	if !strings.Contains(agents, "my-project") {
+		t.Error("AGENTS.md missing the filled-in project name")
+	}
+	if strings.Contains(agents, "{{") {
+		t.Errorf("AGENTS.md has an unfilled {{placeholder}}: %q", agents)
+	}
+	// CLAUDE.md carries the fixed protocol section verbatim.
+	claude := readText(filepath.Join(dir, "CLAUDE.md"))
+	if !strings.Contains(claude, "## l00prite Protocol (fixed") || !strings.Contains(claude, ".l00prite/prompts/README.md") {
+		t.Errorf("CLAUDE.md missing the fixed protocol section: %q", claude)
+	}
+
+	if missing, claudeMissing := f.FullProtocolGaps(); len(missing) != 0 || claudeMissing {
+		t.Errorf("expected no gaps after ScaffoldFull, got missing=%v claudeMissing=%v", missing, claudeMissing)
+	}
+
+	// Idempotent: nothing new, nothing clobbered, and an existing CLAUDE.md is now reported skipped.
+	writeFile(t, filepath.Join(dir, "GEMINI.md"), "USER EDITED — DO NOT CLOBBER")
+	created2, claudeSkipped2, err := f.ScaffoldFull("my-project", "ship the widget")
+	if err != nil {
+		t.Fatalf("second ScaffoldFull: %v", err)
+	}
+	if len(created2) != 0 {
+		t.Errorf("second ScaffoldFull created %v, want nothing", created2)
+	}
+	if !claudeSkipped2 {
+		t.Error("expected claudeSkipped=true once CLAUDE.md already exists")
+	}
+	if got := readText(filepath.Join(dir, "GEMINI.md")); got != "USER EDITED — DO NOT CLOBBER" {
+		t.Errorf("second ScaffoldFull clobbered an existing file: %q", got)
+	}
+}
+
+func TestScaffoldFullNeverTouchesExistingClaudeMD(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Pre-existing project doc\nDo not overwrite.")
+	f := Files{Root: dir}
+	created, claudeSkipped, err := f.ScaffoldFull("my-project", "ship the widget")
+	if err != nil {
+		t.Fatalf("ScaffoldFull: %v", err)
+	}
+	if !claudeSkipped {
+		t.Error("expected claudeSkipped=true when CLAUDE.md already exists")
+	}
+	for _, c := range created {
+		if c == "CLAUDE.md" {
+			t.Error("ScaffoldFull must never report writing an already-existing CLAUDE.md")
+		}
+	}
+	if got := readText(filepath.Join(dir, "CLAUDE.md")); got != "# Pre-existing project doc\nDo not overwrite." {
+		t.Errorf("ScaffoldFull modified an existing CLAUDE.md: %q", got)
+	}
+}
+
 // ---- snapshot ----
 
 func TestReadSnapshotOnScaffold(t *testing.T) {

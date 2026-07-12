@@ -121,6 +121,10 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleDashboardSummary(w, r)
 		case r.Method == http.MethodGet && p == "/v1/setup/status":
 			app.HandleSetupStatus(w, r)
+		// Unauthenticated read-only provider presets for the Add-provider UI (static embedded
+		// manifest facts only -- same non-secret class as /v1/setup/status).
+		case r.Method == http.MethodGet && p == "/v1/providers/catalog":
+			app.HandleProviderPresets(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/vault":
 			app.HandleSetupVault(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/provider/test":
@@ -155,6 +159,11 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleRepoRemove(w, r)
 		case r.Method == http.MethodPost && p == "/v1/repos/clone":
 			app.HandleRepoClone(w, r)
+		// Consent-gated "add l00prite" action — branch + commit the full protocol (AGENTS.md,
+		// loop prompts, vendor adapters), reused by both the Register-repo checkbox and a
+		// standalone per-repo dashboard action.
+		case r.Method == http.MethodPost && p == "/v1/repos/scaffold-branch":
+			app.HandleRepoScaffoldBranch(w, r)
 		// L00prite OS run engine — the "enter a prompt, press Start" autonomous surface.
 		case r.Method == http.MethodPost && p == "/v1/runs":
 			app.HandleRunCreate(w, r)

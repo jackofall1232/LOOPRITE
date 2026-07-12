@@ -83,6 +83,21 @@ func (c execClient) RevParseHead(repo string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// CurrentBranch returns the name of the currently checked-out branch, or "" (with a nil error)
+// on a detached HEAD — "rev-parse --abbrev-ref HEAD" prints the literal string "HEAD" in that
+// case, which is not a branch name.
+func (c execClient) CurrentBranch(repo string) (string, error) {
+	out, err := c.runTimed(repo, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(out)
+	if name == "HEAD" {
+		return "", nil
+	}
+	return name, nil
+}
+
 // --untracked-files=all matters: real git's default ("normal") mode collapses an ENTIRELY
 // untracked directory to one "?? dirname/" line instead of listing the files inside it (verified:
 // `git status --porcelain` on a repo with a brand-new `config/` containing `prod.pem` reports only
@@ -104,6 +119,19 @@ func (c execClient) CheckoutNewBranch(repo, name string) error {
 
 func (c execClient) AddAll(repo string) error {
 	_, err := c.runTimed(repo, "add", "-A")
+	return err
+}
+
+// AddPaths force-stages specific repo-relative paths, bypassing .gitignore (`git add -f`) — for
+// callers that must guarantee particular generated files land in the next commit regardless of
+// the target repo's own ignore rules (e.g. scaffolding `.l00prite/` into a repo that gitignores
+// it). A no-op for an empty paths slice, not an error.
+func (c execClient) AddPaths(repo string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	args := append([]string{"add", "-f", "--"}, paths...)
+	_, err := c.runTimed(repo, args...)
 	return err
 }
 

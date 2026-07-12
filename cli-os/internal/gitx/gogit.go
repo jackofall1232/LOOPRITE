@@ -59,6 +59,23 @@ func (c gogitClient) RevParseHead(repo string) (string, error) {
 	return head.Hash().String(), nil
 }
 
+// CurrentBranch returns the name of the currently checked-out branch, or "" (with a nil error)
+// on a detached HEAD — mirrors execClient.CurrentBranch's semantics.
+func (c gogitClient) CurrentBranch(repo string) (string, error) {
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		return "", err
+	}
+	head, err := r.Head()
+	if err != nil {
+		return "", err
+	}
+	if head.Name().IsBranch() {
+		return head.Name().Short(), nil
+	}
+	return "", nil
+}
+
 // StatusPorcelain renders worktree.Status() in a porcelain-LIKE format: "XY path" per changed
 // file, sorted for determinism. This is NOT guaranteed byte-identical to `git status
 // --porcelain`'s exact status-code semantics (go-git's StatusCode set is a close but not perfect
@@ -135,6 +152,32 @@ func (c gogitClient) AddAll(repo string) error {
 		return err
 	}
 	return wt.AddWithOptions(&git.AddOptions{All: true})
+}
+
+// AddPaths force-stages specific repo-relative paths, bypassing .gitignore — mirrors
+// execClient.AddPaths's `git add -f` semantics. go-git's single-path Worktree.Add(path) already
+// behaves like a force-add for that one path: unlike AddWithOptions{All: true} (which passes the
+// repository's real exclude patterns to doAdd), Add(path) calls doAdd with an EMPTY ignore-pattern
+// list, so it never consults .gitignore at all (verified against go-git v5.18.0's source,
+// worktree_status.go) — exactly the behavior needed here, achieved without a lower-level API.
+func (c gogitClient) AddPaths(repo string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		return err
+	}
+	wt, err := r.Worktree()
+	if err != nil {
+		return err
+	}
+	for _, p := range paths {
+		if _, err := wt.Add(p); err != nil {
+			return fmt.Errorf("add %q: %w", p, err)
+		}
+	}
+	return nil
 }
 
 // Commit stages nothing itself (AddAll already ran) and commits with the resolved identity.
