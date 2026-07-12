@@ -220,8 +220,9 @@ channel for the L00prite OS Android app — the shipped APK must never trail mer
 
 - **Every push to `main` that touches `cli-os/` (gateway, dashboard, adapters) or `android/`
   must rebuild the APK** via `cli-os/scripts/build-apk.sh <version>` (hermetic toolchain: apt
-  `aapt`/`zipalign`/`apksigner`/`dalvik-exchange`/`android-framework-res`, no Google-hosted
-  downloads — install via apt if missing), copy the signed output into `downloads/`, regenerate
+  `aapt`/`zipalign`/`apksigner`/`dalvik-exchange`/`android-framework-res`/`openjdk-21-jdk-headless`
+  (or `default-jdk`, for `javac`/`keytool`), no Google-hosted downloads — install via apt if
+  missing), copy the signed output into `downloads/`, regenerate
   `downloads/SHA256SUMS`, remove the old version's `.apk` from `downloads/`, and update every
   version/filename/size/SHA-256 reference in `index.html` (nav CTA, hero download button, and
   the Android section's download button + `#sha-val`). Verify with `apksigner verify` (v2+v3
