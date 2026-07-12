@@ -95,6 +95,25 @@ CREATE TABLE IF NOT EXISTS project_settings (
   auto_pr INTEGER NOT NULL DEFAULT 0
 );
 
+-- Per-project git host credential (today only github.com) for the "Connect GitHub" flow. The token
+-- is vault-sealed (enc_token, same AES-256-GCM at-rest as providers.enc_key) — this table never
+-- stores it in the clear. Keyed (project, host) so credentials follow the same project isolation as
+-- caps/repos/runs, and so a second host (GitLab, ...) can be added later without a migration. The
+-- login column is the GitHub account discovered at connect time via GET /user, kept for display
+-- only (never the token). CREATE
+-- TABLE IF NOT EXISTS runs unconditionally on every Open (same guarantee as every table here), so a
+-- pre-existing DB gains it with no migration step; a missing row reads as "not connected".
+CREATE TABLE IF NOT EXISTS git_credentials (
+  project TEXT NOT NULL,
+  host TEXT NOT NULL,
+  username TEXT NOT NULL,
+  enc_token TEXT NOT NULL,
+  login TEXT,
+  verified INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project, host)
+);
+
 CREATE TABLE IF NOT EXISTS spend (
   project TEXT NOT NULL,
   day TEXT NOT NULL,

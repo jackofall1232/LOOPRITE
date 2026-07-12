@@ -26,7 +26,7 @@ import (
 // friendly gap message up front.
 func TestProbePushPRCapabilityGogitBackendGapsWithoutExecing(t *testing.T) {
 	git := gitx.NewGogitClient()
-	ok, gapMsg, rawErr := probePushPRCapability(context.Background(), git, t.TempDir(), "l00prite/add-protocol-test")
+	ok, gapMsg, rawErr := probePushPRCapability(context.Background(), git, t.TempDir(), "l00prite/add-protocol-test", nil)
 	if ok {
 		t.Fatalf("expected ok=false for the gogit backend, got true")
 	}
@@ -54,7 +54,7 @@ func TestProbePushPRCapabilityNoGHOnPathGapsWithoutPushing(t *testing.T) {
 		// silently passing for the wrong reason if that ever changes.
 		t.Skip("gitx.Detect() did not resolve to the exec backend in this environment")
 	}
-	ok, gapMsg, rawErr := probePushPRCapability(context.Background(), git, t.TempDir(), "l00prite/add-protocol-test")
+	ok, gapMsg, rawErr := probePushPRCapability(context.Background(), git, t.TempDir(), "l00prite/add-protocol-test", nil)
 	if ok {
 		t.Fatalf("expected ok=false with no gh on PATH, got true")
 	}
@@ -110,7 +110,7 @@ func TestGHPRCreateCommandNeverAutoMerges(t *testing.T) {
 // failure as "a PR exists".
 func TestLookupExistingPRFailsOpenToEmpty(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // a directory with no gh in it
-	if url := lookupExistingPR(context.Background(), t.TempDir(), "l00prite/add-protocol-test"); url != "" {
+	if url := lookupExistingPR(context.Background(), gitx.Detect(), t.TempDir(), "l00prite/add-protocol-test", nil); url != "" {
 		t.Fatalf("expected \"\" when gh is unavailable (fail open), got %q", url)
 	}
 }
@@ -132,7 +132,7 @@ func TestLookupExistingPRIsReadOnlyAndNeverMerges(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 
-	url := lookupExistingPR(context.Background(), t.TempDir(), "l00prite/add-protocol-test")
+	url := lookupExistingPR(context.Background(), gitx.Detect(), t.TempDir(), "l00prite/add-protocol-test", nil)
 	if url != "https://github.com/example/repo/pull/1" {
 		t.Fatalf("expected the stub's URL to be parsed back, got %q", url)
 	}

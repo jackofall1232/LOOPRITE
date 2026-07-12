@@ -249,6 +249,88 @@ func TestGitCommand(t *testing.T) {
 	}
 }
 
+// ---- push_branch ----
+
+func newRepoOnBranch(t *testing.T, branch string) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFileRaw(t, filepath.Join(dir, "f.txt"), "x\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "init")
+	gitRun(t, dir, "checkout", "-B", branch)
+	return dir
+}
+
+// TestPushBranchGatesOnGatePush: an unapproved push_branch on a capable (exec) backend suspends on
+// the GatePush class, naming the run's own branch — nothing is pushed until approval.
+func TestPushBranchGatesOnGatePush(t *testing.T) {
+	dir := newRepoOnBranch(t, "l00prite/run-x")
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.Detect()}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if o.Gate == nil || o.Gate.Class != GatePush {
+		t.Fatalf("push_branch should gate on GatePush, got gate=%+v result=%q", o.Gate, o.Result)
+	}
+	if o.Gate.Args["branch"] != "l00prite/run-x" || o.Gate.Args["remote"] != "origin" {
+		t.Fatalf("gate must be pinned to origin + the run branch, got %v", o.Gate.Args)
+	}
+}
+
+// TestPushBranchGogitNoCredentialIsCapabilityGap: on a host with no git binary AND no GitHub
+// connection there is no way to push, so push_branch returns a plain capability gap — NOT a gate
+// (no human approval could conjure a credential).
+func TestPushBranchGogitNoCredentialIsCapabilityGap(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.NewGogitClient()} // PushCred nil
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if o.Gate != nil {
+		t.Fatalf("a no-credential gogit push has nothing to approve; it must not gate, got %+v", o.Gate)
+	}
+	if !strings.Contains(o.Result, "Connect GitHub") {
+		t.Fatalf("expected a connect-GitHub capability gap, got %q", o.Result)
+	}
+}
+
+// TestPushBranchWithCredentialGates: a gogit backend WITH a credential is capable, so push_branch
+// consults PushCred and then gates (rather than reporting a capability gap).
+func TestPushBranchWithCredentialGates(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	called := false
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.NewGogitClient(),
+		PushCred: func() (*gitx.PushAuth, error) { called = true; return &gitx.PushAuth{Username: "x", Token: "t"}, nil }}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if !called {
+		t.Fatal("push_branch must consult PushCred")
+	}
+	if o.Gate == nil || o.Gate.Class != GatePush {
+		t.Fatalf("with a credential present the push is capable and should gate, got gate=%+v result=%q", o.Gate, o.Result)
+	}
+}
+
+// TestPushBranchApprovedPushesRunBranch: once approved, push_branch actually lands the run branch
+// on origin (a local bare remote here) — the real "the AI can push" guarantee.
+func TestPushBranchApprovedPushesRunBranch(t *testing.T) {
+	dir := newRepoOnBranch(t, "l00prite/run-x")
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+	gitRun(t, dir, "remote", "add", "origin", bare)
+
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.Detect()}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, true) // approved
+	if o.Gate != nil {
+		t.Fatalf("approved push should not gate, got %+v", o.Gate)
+	}
+	if !strings.Contains(o.Result, `"status":"pushed"`) {
+		t.Fatalf("expected a pushed result, got %q", o.Result)
+	}
+	if got := strings.TrimSpace(gitRun(t, bare, "rev-parse", "refs/heads/l00prite/run-x")); len(got) != 40 {
+		t.Fatalf("run branch did not land on the bare origin: %q", got)
+	}
+}
+
 // ---- git_command under the gogit fallback (Kind()!="exec") ----
 
 // gogitRefusal is the exact, unchanged hard-refusal message any out-of-contract git_command call

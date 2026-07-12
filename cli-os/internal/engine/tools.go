@@ -65,6 +65,13 @@ type Toolbox struct {
 	// the git_command tool's Kind() check. Nil defaults to gitx.Detect() (a fresh, cheap decision)
 	// so a Toolbox built without wiring one — every existing test literal — keeps working unchanged.
 	Git gitx.Client
+	// PushCred resolves the GitHub credential (a *gitx.PushAuth) for the push_branch tool, decrypting
+	// it at call time (never cached, so a dashboard disconnect takes effect immediately). Bound to
+	// the run's project by whoever builds the Toolbox. Nil, or a nil return, means "no stored
+	// credential" — push_branch then falls back to ambient credentials on the exec backend and
+	// reports an honest capability gap on gogit. The engine package never imports the vault: this
+	// closure is injected by the gateway (see Engine.PushCred / githubAuthFor).
+	PushCred func() (*gitx.PushAuth, error)
 }
 
 // gitClient returns tb.Git, defaulting to gitx.Detect() when unset.
@@ -145,10 +152,21 @@ func (tb *Toolbox) Definitions() []map[string]any {
 				"approval; so does a bare `branch` (list) or `branch <name>` (create one) — any branch flag "+
 				"(-d/-D/-f/-m/-M/--delete/--force/--move, etc.) requires approval since it can delete, rename, or "+
 				"force-move a ref. push/merge and history rewrites (rebase/reset/clean/force-push, etc.) require "+
-				"human approval. Paths inside args are repo-relative.",
+				"human approval. Paths inside args are repo-relative. To push this run's branch to origin, prefer "+
+				"the dedicated push_branch tool — it works even on a host with no git binary and uses the "+
+				"dashboard's GitHub connection.",
 			objSchema(map[string]any{
 				"args": mergeSchema(strArr, map[string]any{"description": "git argument vector; args[0] is the subcommand"}),
 			}, "args")),
+
+		fnTool("push_branch",
+			"Push THIS run's branch to origin so a human can review it and open a pull request. Takes no "+
+				"arguments — it always pushes exactly this run's own branch, never a force push, never another "+
+				"branch or refspec. Requires per-action human approval unless the project's Auto-PR setting "+
+				"pre-approved pushes. Uses the dashboard's GitHub connection when one exists, so it works even on "+
+				"a device with no git binary; without a connection on such a device it reports that pushing is "+
+				"unavailable.",
+			objSchema(map[string]any{})),
 
 		fnTool("unit_done",
 			"Signal that the current unit of work is complete. Provide a short `summary` and the list of "+
@@ -218,6 +236,8 @@ func (tb *Toolbox) Execute(ctx context.Context, name string, args map[string]any
 		return tb.runCommand(ctx, args, approved)
 	case "git_command":
 		return tb.gitCommand(ctx, args, approved)
+	case "push_branch":
+		return tb.pushBranch(ctx, approved)
 	case "unit_done", "unit_blocked":
 		return ToolOutcome{Result: "acknowledged"}
 	default:
@@ -977,6 +997,53 @@ func (tb *Toolbox) gitCommand(ctx context.Context, args map[string]any, approved
 	cmd.Env = util.ScrubSecretEnv(os.Environ()) // Android G8: never leak the vault/setup secrets
 	out, runErr := cmd.CombinedOutput()
 	return ToolOutcome{Result: formatCmdResult(out, runErr, cctx, gitOutputCap, gitTimeoutSec)}
+}
+
+// pushBranch pushes THIS run's branch to origin. It is structurally pinned — origin, the run's own
+// branch, never a force push, no arguments to parse — so unlike a model-composed `git push` there
+// is nothing for a classifier to get wrong; it is strictly stronger than string-analyzing a push
+// command, and it works identically on the gogit backend where `git_command` passthrough can't
+// exist. Order: resolve the credential and check capability FIRST — a host with no git binary AND
+// no GitHub connection genuinely cannot push, so return a plain capability gap (not a gate no human
+// approval could satisfy) the model can adapt to or escalate via unit_blocked(missing_credentials).
+// Otherwise gate on GatePush exactly like every consequential action (human approval, or the
+// project's Auto-PR pre-approval via the unmodified awaitApproval path), and push only once
+// approved. The stored token is spent ONLY here and in the scaffold-PR path — never injected into a
+// model-composed git command.
+func (tb *Toolbox) pushBranch(ctx context.Context, approved bool) ToolOutcome {
+	if strings.TrimSpace(tb.Branch) == "" {
+		return ToolOutcome{Result: "ERROR: this run has no branch set, so there is nothing to push"}
+	}
+	var auth *gitx.PushAuth
+	if tb.PushCred != nil {
+		a, err := tb.PushCred()
+		if err != nil {
+			return ToolOutcome{Result: "ERROR: could not load the GitHub credential from the vault: " + err.Error()}
+		}
+		// The credential carries its own host (PushAuth.Host); gitx.Push attaches it ONLY to an
+		// https remote on that exact host, so passing it here can never leak the token to a run whose
+		// origin is a non-GitHub (or ssh) remote — it silently falls back to ambient credentials
+		// there. No origin check is needed at this call site; the seam enforces host-scoping.
+		auth = a
+	}
+	if tb.gitClient().Kind() != "exec" && auth == nil {
+		return ToolOutcome{Result: "This device has no git binary and no GitHub connection, so the branch cannot be pushed. " +
+			"Connect GitHub in the dashboard to enable pushing, then retry — or call unit_blocked with kind=missing_credentials."}
+	}
+	if !approved {
+		return ToolOutcome{
+			Result: "GATE: pushing the run branch to origin requires human approval",
+			Gate: &GateRequest{
+				Class:  GatePush,
+				Action: fmt.Sprintf("push_branch origin %s", tb.Branch),
+				Args:   map[string]any{"remote": "origin", "branch": tb.Branch},
+			},
+		}
+	}
+	if err := tb.gitClient().Push(ctx, tb.Root, "origin", tb.Branch, auth); err != nil {
+		return ToolOutcome{Result: "ERROR: push failed: " + err.Error()}
+	}
+	return ToolOutcome{Result: fmt.Sprintf(`{"status":"pushed","remote":"origin","branch":%q}`, tb.Branch)}
 }
 
 // logNArg matches git log's bare "-<N>" shorthand for "-n <N>" (e.g. "-5"): a leading dash

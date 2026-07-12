@@ -114,7 +114,17 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 	// prompting-disabled invocation this endpoint always has (see the package doc comment above);
 	// the go-git fallback (no git binary on the host) handles https itself and returns a clear
 	// error for an ssh URL instead of this endpoint 500ing for want of a git binary.
-	if err := gitx.Detect().Clone(r.Context(), url, dest, 1); err != nil {
+	//
+	// Depth: exec keeps its long-standing depth-1 shallow clone (a git binary can push from a
+	// shallow clone just fine). The gogit backend clones FULL depth (0): go-git cannot reliably push
+	// from a shallow repository, and this backend is exactly the one where push_branch / scaffold-PR
+	// must work on-device — a shallow gogit clone would leave the repo unable to push (gitx.Push
+	// fail-closes with ErrShallowPush). See internal/gitx/gogit.go Push.
+	depth := 1
+	if gitx.Detect().Kind() != "exec" {
+		depth = 0
+	}
+	if err := gitx.Detect().Clone(r.Context(), url, dest, depth); err != nil {
 		_ = os.RemoveAll(dest) // don't leave a half-clone behind
 		msg := "git clone failed: " + strings.TrimSpace(lastLine(err.Error()))
 		// An auth-shaped failure sends new users hunting through GitHub permission screens; tell

@@ -26,6 +26,12 @@ type Engine struct {
 	// goes through. New defaults it to gitx.Detect().
 	Git gitx.Client
 
+	// PushCred resolves the GitHub push credential for a run's project — injected by the gateway at
+	// boot (app.githubAuthFor) so the engine never imports the vault. Nil (the New default) means no
+	// credential source; the push_branch tool then uses ambient credentials on exec and reports an
+	// honest capability gap on gogit. Bound to each run's project when the Toolbox is built.
+	PushCred func(project string) (*gitx.PushAuth, error)
+
 	// LeaseTTLSec is the .l00prite lock TTL for an armed run (refreshed each iteration).
 	LeaseTTLSec int
 	// IterationTimeout bounds one unit's tool-loop wall-clock.
@@ -413,7 +419,14 @@ func (e *Engine) iterate(ctx context.Context, run *Run, f Files) iterOutcome {
 	})
 
 	// --- execute: coder tool-loop ---
-	tb := &Toolbox{Root: run.RepoRoot, Denylist: ParseDenylist(snap.Constraints), Allowlist: run.Config.CommandAllowlist, Branch: run.Branch, Git: e.Git}
+	// Bind the push credential to THIS run's project (decrypted at call time inside the closure, so
+	// a disconnect mid-run takes effect immediately). Nil when the gateway wired no PushCred.
+	var pushCred func() (*gitx.PushAuth, error)
+	if e.PushCred != nil {
+		project := run.Project
+		pushCred = func() (*gitx.PushAuth, error) { return e.PushCred(project) }
+	}
+	tb := &Toolbox{Root: run.RepoRoot, Denylist: ParseDenylist(snap.Constraints), Allowlist: run.Config.CommandAllowlist, Branch: run.Branch, Git: e.Git, PushCred: pushCred}
 	blocked, boundary := e.runCoder(ictx, run, f, tb, plan, sel)
 	if boundary != "" {
 		return iterOutcome{boundary: boundary, summary: blocked}
