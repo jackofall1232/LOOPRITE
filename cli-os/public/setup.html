@@ -5,6 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>l00prite CLI-OS — Setup</title>
+<script>
+/* Device-authoritative theme. The Android wrapper loads this page with ?theme=dark|light taken
+   from the device's night-mode setting (MainActivity.onPollFinished); we stamp it onto <html> as
+   data-theme so the page's own palette — not the WebView's flaky prefers-color-scheme /
+   force-dark — decides light vs dark. Persisted in localStorage so the choice survives the
+   setup -> dashboard navigation (which drops the query string). Desktop browsers get no ?theme=
+   and never store the key, so data-theme is never set and behavior is byte-identical to before. */
+(function(){
+  var m=/[?&]theme=(dark|light)\b/.exec(location.search);
+  var t=m?m[1]:null;
+  try{ if(t){localStorage.setItem('l00p_theme',t);} else {t=localStorage.getItem('l00p_theme');} }catch(e){}
+  if(t==='dark'||t==='light'){
+    document.documentElement.setAttribute('data-theme',t);
+    var mc=document.querySelector('meta[name=color-scheme]');
+    if(mc){ mc.content=(t==='dark'?'dark light':'light dark'); }
+  }
+})();
+</script>
 <style>
   :root{
     --bg:#0B0F14; --panel:rgba(255,255,255,.04); --panel-2:rgba(255,255,255,.06);
@@ -123,6 +141,25 @@
     body{background:radial-gradient(1100px 560px at 12% -10%, rgba(79,140,255,.14), transparent 60%), var(--bg);}
     pre{background:#0d1420;color:#cfe0ff;}
   }
+  /* Explicit device-theme override (set by the head script from ?theme=/localStorage). Higher
+     specificity than the bare :root above and the @media :root, so it wins the cascade in BOTH
+     directions regardless of what the WebView reports for prefers-color-scheme — the actual fix
+     for the black-on-black modals. Keep each block in sync with the :root + @media blocks above. */
+  :root[data-theme="dark"]{color-scheme:dark;
+    --bg:#0B0F14; --panel:rgba(255,255,255,.04); --panel-2:rgba(255,255,255,.06);
+    --stroke:rgba(255,255,255,.09); --stroke-2:rgba(255,255,255,.16);
+    --text:#E7EDF5; --text-2:#9AA7B8; --text-3:#5E6B7C;
+    --input-bg:rgba(0,0,0,.25); --input-bg-focus:rgba(0,0,0,.35); --input-bg-solid:#0A0E13;}
+  :root[data-theme="dark"] body{background:
+    radial-gradient(1100px 560px at 12% -10%, rgba(79,140,255,.13), transparent 60%),
+    radial-gradient(900px 500px at 100% -6%, rgba(45,212,191,.06), transparent 55%),
+    var(--bg);}
+  :root[data-theme="light"]{color-scheme:light;
+    --bg:#F5F7FB;--panel:rgba(10,20,40,.03);--panel-2:rgba(10,20,40,.05);--stroke:rgba(10,20,40,.12);--stroke-2:rgba(10,20,40,.22);
+    --text:#0E1726;--text-2:#465064;--text-3:#7A8698;
+    --input-bg:#fff;--input-bg-focus:#fff;--input-bg-solid:#fff;}
+  :root[data-theme="light"] body{background:radial-gradient(1100px 560px at 12% -10%, rgba(79,140,255,.14), transparent 60%), var(--bg);}
+  :root[data-theme="light"] pre{background:#0d1420;color:#cfe0ff;}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
 </style>
 </head>
