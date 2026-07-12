@@ -302,3 +302,122 @@ A pull request (PR #6) was opened from this branch after Section 7's implementat
 9. *(A ninth, lower-priority item from the same batch — the base-branch-lineage gap already recorded as deliberately deferred in Section 7 — was re-flagged by Codex and left deferred for the same reason.)*
 
 **Final verification (Codex round):** `go build ./...`, `go vet ./...`, `go test -race ./...` (all packages green after every commit), `node scripts/validate-l00prite.js` (519 PASS, 0 FAIL), zero edits to the two review-gated files across both review rounds. Every fix was pushed to the existing PR #6 branch (`claude/looprite-control-plane-diagnosis-ao4v62`) rather than opening a new PR, per the standing instruction to reference the already-open PR.
+
+---
+
+## 9. Unrelated later work item (same repo, different branch/session): chat/bridge capability-gap wording (Issue 1) and consent-gated push+PR (Issue 2)
+
+This section is **not** about Bug 1/Bug 2 above — it is a separate two-part fix implemented in a
+later session and recorded here only because this file is this repo's established
+diagnosis/implementation ledger location. No content above this line was touched.
+
+### 9.1 Issue 1 (implemented first, same branch) — fixed capability-gap tool result
+
+**Problem:** when a model on the ordinary chat or bridge path (`internal/gateway/chatloop.go`'s
+`RunChatTools`, `internal/gateway/bridge.go`'s `RunBridge`) called a tool name shaped like an
+execution action (`git_command`, `run_command`, `bash`, `gh`, etc.) that neither the gateway
+itself nor the client owned, the tool result fed back into the model's own context was the bare
+string `ERROR: unknown tool "..."` (`gateway/chattools.go:218`) — the model then had to reason
+about that in free text, producing the reported "long internal-reasoning wall of text" instead of
+a short, honest answer.
+
+**Fix:** `internal/gateway/capability.go` (new) — `executionShapedTool` (a fixed name/prefix set),
+`capabilityGapNote` (a fixed `{"status":"capability_gap","tool":...,"note":...}` JSON string, never
+dynamic/error text — the same "fixed sentence, never the raw error" discipline `humanizeStartError`
+(§7 above, `gateway/runs.go`) and `checkGitReady`'s Blockers already use), and `unownedToolResult`
+(the single decision point both `RunChatTools` and `RunBridge` now delegate to: a client-owned tool
+name always wins and defers to the client; an unowned execution-shaped name gets the capability-gap
+note; everything else is unchanged). A real gap found by the implementer's own first test run (not
+in the original plan): both loops had an early-return guard (`chatCalls == 0` / `bridgeCalls == 0`)
+that exited *before* reaching the new dispatch logic whenever a round contained **only** one unowned
+tool call — the realistic single-tool-call case a model actually produces — so that call fell
+through as an unresolved raw `tool_call` and never even reached `deferredClientTool`, let alone the
+new logic. Fixed by adding a `hasCapabilityGapCall` check to both guards.
+
+**Verification:** `go test -race ./...` all green (new `capability_test.go` table tests plus two real
+HTTP end-to-end tests through the actual `RunChatTools` path confirming both the capability-gap note
+and that a client-defined tool literally named `git_command` is still deferred untouched, never
+hijacked).
+
+### 9.2 Issue 2 (this implementation) — real push + PR creation for "Add l00prite"
+
+**Problem:** `internal/gateway/repo_scaffold.go`'s `HandleRepoScaffoldBranch` (the "Add l00prite"
+action — creates a local branch, writes the full protocol, commits it) always stopped there: the
+response carried copy-paste `git push` instructions and nothing was ever pushed or PR'd, even
+though the maintainer's actual request was for this to happen automatically once a human
+explicitly consents to it from the dashboard.
+
+**Design resolution (the load-bearing judgment call):** the handler's own comment read
+AGENTS.md's rule as "nothing is ever pushed or PR'd automatically" — an absolute prohibition. The
+codebase's own run-engine approval flow (`internal/engine/preflight.go`'s `perActionPermissions`,
+which lists "git push (any remote)" as a gated-but-*possible* action once a human clicks Allow)
+shows the actual invariant is per-action **permission**, not per-action **prohibition**. A live
+click on a dashboard control explicitly labeled "Create a branch, push it, and open a pull
+request" is structurally the same consent as clicking Allow on a pending git-push approval:
+explicit, in-session (never a persisted flag), and scoped to exactly one action instance (this
+one branch, hard-coded by the handler). Three things keep this from eroding the invariant: the
+label must name push+PR explicitly (a plain "Add l00prite" checkbox would not be permission to
+push — this is why the dashboard copy change is load-bearing, not cosmetic); the handler must
+never merge (a separate, still-never-granted action); and a headless API caller that never
+rendered that label gets the server-side default of `false`, so the permission is always
+traceable to a human who read what they were permitting.
+
+**Implementation (this session):**
+
+- `internal/gateway/scaffold_pr.go` (new) — ambient-credentials-only (no vault, same trust model
+  `git_command`/`run_command` already use): `probePushPRCapability` (fail-closed, read-only checks
+  in order — `git.Kind()!="exec"`, `gh` not on `PATH`, `gh auth status`, `git push --dry-run`) and
+  `openScaffoldPR` (real `git push`, then `gh pr create` via an `exec.Command` arg vector, never a
+  shell — branch/title/body are either internally generated (`util.RID`) or fixed constants, never
+  interpolated from request input). Every gap is one of six fixed, hand-authored sentences (the
+  `humanizeStartError`/Blocker discipline from §7/§9.1 above); every raw `err.Error()` this file's
+  callers see goes to `app.auditAs` only.
+- `internal/gateway/repo_scaffold.go` — `repoScaffoldBranchReq` gains `OpenPR *bool`. Nil/false
+  (including every pre-existing caller of this endpoint) is byte-identical to yesterday's
+  behavior — verified by a dedicated regression test asserting the exact key set. `open_pr=true`
+  is only even attempted when a real commit was made this call (`len(created) > 0`); on success, a
+  **second** commit records the PR URL in the repo's own `ledger.md` and re-pushes — deliberately
+  its own commit, after the PR exists (so it has a URL to record), landed and pushed *before* the
+  handler returns, for the same "never leave the branch dirty on return" reason this repo has
+  already fixed three times (§7's PR #6 ledger-append ordering, §8's PR #7 lease-write ordering,
+  this same handler's own lock-release-before-commit ordering above it). A push that itself
+  succeeds but whose follow-up `gh pr create` fails is reported as `pushed=true` with a fixed gap
+  message and a copy-paste `gh pr create` command — the consented push is never rolled back.
+  Nothing in this path calls a merge API or a `--merge`/`--auto` flag.
+- A real bug caught by the implementer's own test (not a reviewer, not in the original plan): the
+  first draft of the response-building `switch` labeled the "push succeeded but `gh pr create`
+  failed" case as "Nothing was pushed: ..." — factually wrong, since the branch really did reach
+  origin. Caught by `TestRepoScaffoldBranchOpenPRPushSucceedsButPRCreateFails` (which asserts the
+  `notes` text says "It was pushed..."), confirmed to fail against the mislabeled version, then
+  fixed by giving that case its own `switch` branch ahead of the generic "nothing pushed" one.
+- `public/dashboard.html` — the Register-repo modal's consent checkbox is relabeled to explicitly
+  name the action ("Create a branch, push it, and open a pull request", checked by default,
+  copy states a human reviews and merges); the standalone "Add l00prite" action (for an
+  already-registered repo) gets its own separate, also-default-checked checkbox, since there that
+  modal's primary action (add the protocol locally) and this permission (also push it) are two
+  genuinely separable asks in the same flow; `scaffoldResultNote` (shared by both entry points)
+  now renders `pr_url` as a link, or `capability_gap` plus a copy-paste fallback command (the
+  git-push instructions, or — when the push itself already succeeded — the `gh pr create`
+  command), reusing the existing note-block/copy-button pattern rather than inventing new UI.
+
+**What could NOT be verified live in this sandbox, and why:** there is no real `gh` binary and no
+GitHub network access available here. The push+PR flow was instead exercised end to end against a
+**real local git remote** (a bare repository on disk — pushing to a plain filesystem path needs no
+network) with a small shell-script stand-in for `gh` on `PATH` that mimics `gh auth status`/
+`gh pr create`'s observable contract (exit code; for `pr create`, a PR URL printed on stdout) —
+this proves the handler's own push/commit/probe/response logic end to end (a real branch reaches
+the real remote, the ledger commit is a real second commit, the working tree is verified clean via
+`git status --porcelain` on disk afterward, `pr_command` never suggests merging) but cannot prove
+anything about a *real* `gh` binary's actual current CLI flags or a *real* GitHub server's
+behavior. The Android APK was **not** rebuilt this pass (no `aapt`/`apksigner`/`zipalign` toolchain
+installed in this environment for this session) — this is a gateway/dashboard source change, not a
+release; `CHANGELOG.md` records it as unreleased/source-only rather than claiming a shipped,
+signed build that was not actually produced.
+
+**Final verification:** `go build ./...`, `go vet ./...`, `go test -race ./...` (all packages
+green, including 5 new end-to-end tests in `internal/server/repo_scaffold_branch_pr_test.go` and 4
+new package-internal unit tests in `internal/gateway/scaffold_pr_test.go`, each of the 5 new
+end-to-end tests independently confirmed to fail against the pre-fix handler first — see this
+session's report for the pasted failing-then-passing output), `gofmt -l` clean on every changed Go
+file, `node scripts/validate-l00prite.js` (519 PASS, 0 FAIL, unchanged), zero edits to the two
+review-gated files (`.claude/commands/build-loop.md`, `scripts/validate-l00prite.js`).

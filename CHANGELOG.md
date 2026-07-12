@@ -4,6 +4,35 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## Unreleased (source only — no new APK build this pass)
+
+**"Add l00prite" can now push and open a pull request for you.** Previously, adding the
+full l00prite protocol to a repo from the dashboard always stopped after a local commit —
+you had to copy-paste a `git push` command yourself. The Register-repo modal's consent
+checkbox now reads "Create a branch, push it, and open a pull request" (checked by
+default; the standalone "Add l00prite" action for an already-registered repo has its own
+matching, also-default-checked option) — when you leave that checked, l00prite pushes the
+branch and opens a pull request using this gateway host's own git/GitHub CLI credentials,
+the same ones a `git push` typed at this host's own terminal would use. l00prite never
+merges anything it opens — a human always reviews and merges (or closes) the pull
+request. If the host can't push or open a PR (no `git`/`gh` installed, `gh` not signed
+in, or the remote rejects the push), you get a clear plain-language explanation and the
+same copy-paste fallback instructions as before — the branch and commit always still
+happen locally either way, and nothing is ever left half-pushed with no explanation.
+
+Also fixed a related bug caught by this pass's own tests before it shipped: if the push
+itself succeeded but opening the pull request specifically failed, the response and
+on-screen note used to describe it as "nothing was pushed" — factually wrong, since the
+branch really had reached the remote. That case now says so correctly and gives you a
+copy-paste `gh pr create` command instead of a push command.
+
+*Not exercised against a real GitHub repository or a real `gh` CLI in this session (no
+`gh` binary or GitHub network access in this sandbox) — verified instead against a real
+local git remote with a stand-in `gh` script that mimics `gh`'s exit codes and output
+shape. No new Android APK was built or signed this pass (no Android build toolchain
+installed in this environment); this entry describes a source-level gateway/dashboard
+change that will ship in the next versioned build.*
+
 ## v0.4.1-beta — 2026-07-12
 
 **Dark-theme dashboard fixes: invisible checkboxes, and an audit of the Models modal.**

@@ -253,6 +253,11 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 	switch {
 	case prURL != "":
 		notes[0] += " It was pushed to origin and a pull request was opened — a human still needs to review and merge it."
+	case pushed:
+		// The branch DID reach origin here — only `gh pr create` itself failed (gapPRCreate) —
+		// so this must never be worded as "nothing was pushed" (that would be exactly the raw-
+		// vs-honest-state mismatch this whole design is meant to avoid).
+		notes[0] += " It was pushed to origin, but opening the pull request failed: " + capabilityGap
 	case attemptedPR:
 		notes[0] += " Nothing was pushed: " + capabilityGap
 	default:

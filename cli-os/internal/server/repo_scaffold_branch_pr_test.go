@@ -41,6 +41,24 @@ func writeStubGH(t *testing.T, authFails bool, prURL string) string {
 	return dir
 }
 
+// writeStubGHPRCreateFails writes a fake `gh` whose `auth status` always succeeds (so the probe's
+// push --dry-run is reached and passes) but whose `pr create` always fails -- for the "push
+// succeeded, PR creation itself failed" path, distinct from every other gap (this is the ONLY gap
+// where a real push already landed on the remote before the failure).
+func writeStubGHPRCreateFails(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then exit 0; fi\n" +
+		"if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then echo \"synthetic gh pr create failure\" >&2; exit 1; fi\n" +
+		"exit 1\n"
+	path := filepath.Join(dir, "gh")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub gh: %v", err)
+	}
+	return dir
+}
+
 // prependToPATH puts dir first on PATH for the duration of the test, keeping the rest of PATH
 // (so the real `git` binary this whole suite depends on is still found).
 func prependToPATH(t *testing.T, dir string) {
@@ -155,6 +173,61 @@ func TestRepoScaffoldBranchOpenPRHappyPath(t *testing.T) {
 	status := gitRunSrv(t, repoDir, "status", "--porcelain")
 	if strings.TrimSpace(status) != "" {
 		t.Fatalf("working tree should be clean after both commits, got: %q", status)
+	}
+}
+
+// TestRepoScaffoldBranchOpenPRPushSucceedsButPRCreateFails: the one gap where a real push already
+// landed on origin before the failure -- the response must say pushed=true (never claim "nothing
+// was pushed"), carry a copy-paste `gh pr create` command (never one that tries to push again),
+// and the branch must actually exist on the remote, proving the consented push was never rolled
+// back just because the follow-up step failed.
+func TestRepoScaffoldBranchOpenPRPushSucceedsButPRCreateFails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	srv, _, _, _, token := configured(t)
+	base := srv.URL
+	repoDir := t.TempDir()
+	initGitRepoWithCommit(t, repoDir)
+	prependToPATH(t, writeStubGHPRCreateFails(t))
+	bareDir := scaffoldRepoWithOrigin(t, base, token, "prcreatefail", repoDir)
+
+	resp, body := doJSON(t, "POST", base+"/v1/repos/scaffold-branch", token, map[string]any{"id": "prcreatefail", "open_pr": true})
+	if resp.StatusCode != 200 {
+		t.Fatalf("scaffold-branch must be 200, got %d (%v)", resp.StatusCode, body)
+	}
+	if body["pushed"] != true {
+		t.Fatalf("expected pushed=true (the push itself succeeded), got %v", body)
+	}
+	if body["pr_url"] != nil {
+		t.Fatalf("expected no pr_url since gh pr create failed, got %v", body["pr_url"])
+	}
+	gap, _ := body["capability_gap"].(string)
+	if !strings.Contains(gap, "pushed to origin") {
+		t.Fatalf("expected the fixed pushed-but-PR-create-failed sentence, got %q", gap)
+	}
+	prCmd, _ := body["pr_command"].(string)
+	if !strings.Contains(prCmd, "gh pr create") {
+		t.Fatalf("expected a copy-paste gh pr create command, got %q", prCmd)
+	}
+	if strings.Contains(prCmd, "push") {
+		t.Fatalf("the PR-create fallback command must never suggest pushing again, got %q", prCmd)
+	}
+	notes, _ := body["notes"].([]any)
+	if len(notes) == 0 || !strings.Contains(notes[0].(string), "It was pushed to origin, but opening the pull request failed") {
+		t.Fatalf("expected notes to say it WAS pushed (not 'nothing was pushed'), got %v", notes)
+	}
+	assertNoRawGitTextLeaked(t, body)
+	if strings.Contains(gap, "synthetic gh pr create failure") || strings.Contains(prCmd, "synthetic gh pr create failure") {
+		t.Fatalf("the stub gh's raw stderr text must never reach the client, got capability_gap=%q pr_command=%q", gap, prCmd)
+	}
+
+	// The branch must be REAL on the remote -- the consented push was never rolled back just
+	// because the follow-up `gh pr create` failed.
+	branch, _ := body["branch"].(string)
+	branches := gitRunSrv(t, bareDir, "branch", "--list", branch)
+	if !strings.Contains(branches, branch) {
+		t.Fatalf("expected the branch to have actually reached origin despite the PR-create failure, got: %q", branches)
 	}
 }
 
