@@ -166,3 +166,23 @@ func TestApplyAutoPRGatesOnlyFillsAbsentPushAndPRCreate(t *testing.T) {
 		t.Fatalf("toggle OFF must leave an explicit map byte-identical, got %+v", got)
 	}
 }
+
+// TestApplyAutoPRGatesDoesNotMutateCallersMap (PR review, gemini-code-assist): applyAutoPRGates
+// must never mutate the caller's map in place -- maps are reference types, and a future caller
+// that reuses/shares a map across requests would otherwise see one request's auto-approve fill
+// leak into another's. Confirmed to fail against the pre-fix code (which filled `gates` in place
+// and returned the same map), which left the original map mutated below.
+func TestApplyAutoPRGatesDoesNotMutateCallersMap(t *testing.T) {
+	app := newAutoPRTestApp(t)
+	tok := mintToken(t, app, "proj-mut")
+	doAuthed(app, "POST", "/v1/auto-pr", tok, map[string]any{"enabled": true}, app.HandleAutoPRSet)
+
+	original := map[string]string{engine.GateMerge: engine.PolicyRequireApproval}
+	_ = app.applyAutoPRGates("proj-mut", original)
+	if len(original) != 1 {
+		t.Fatalf("caller's original map must be untouched, got %+v", original)
+	}
+	if _, ok := original[engine.GatePush]; ok {
+		t.Fatalf("caller's original map must not gain entries the callee filled, got %+v", original)
+	}
+}

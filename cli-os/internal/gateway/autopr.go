@@ -85,13 +85,19 @@ func (app *App) applyAutoPRGates(project string, gates map[string]string) map[st
 	if !app.autoPREnabled(project) {
 		return gates
 	}
-	if gates == nil {
-		gates = map[string]string{}
+	// Copy rather than mutate the caller's map in place (PR review, gemini-code-assist): maps are
+	// reference types, and nothing here guarantees the caller's map is this call's to own -- a
+	// future caller that reuses/shares a literal across requests would otherwise see one request's
+	// fill leak into another's. No current caller does that (createDraftRun's cfg.Gates is always
+	// freshly decoded per request), but the copy is cheap and removes the aliasing hazard outright.
+	copied := make(map[string]string, len(gates)+2)
+	for k, v := range gates {
+		copied[k] = v
 	}
 	for _, cls := range []string{engine.GatePush, engine.GatePRCreate} {
-		if _, explicit := gates[cls]; !explicit {
-			gates[cls] = engine.PolicyAutoApprove
+		if _, explicit := copied[cls]; !explicit {
+			copied[cls] = engine.PolicyAutoApprove
 		}
 	}
-	return gates
+	return copied
 }

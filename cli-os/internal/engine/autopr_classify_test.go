@@ -149,6 +149,13 @@ func TestClassifyCommandForcePushIsDestructive(t *testing.T) {
 		// against the pre-isForcePushToken code (exact-match only), which read GatePush for these.
 		"git push --force-with-lease=main origin main",
 		"git push origin main --force-if-includes=true",
+		// PR review (gemini-code-assist): --receive-pack/--exec (aliases per `git push -h`) tell
+		// git to invoke an ARBITRARY PROGRAM on the remote side of an SSH-transport push instead of
+		// git-receive-pack -- the classic git-push-over-SSH command-execution vector, far more
+		// severe than a force-push. Confirmed to fail against the pre-fix forcePushTokens (missing
+		// these two entries), which read GatePush for every case below.
+		"git push --receive-pack=touch\\ /tmp/pwned origin main",
+		"git push origin main --exec=id",
 	}
 	for _, cmd := range cases {
 		// branch="" here: this test is scoped to force-flag detection specifically, independent
@@ -233,6 +240,10 @@ func TestClassifyGitSubForcePushIsDestructive(t *testing.T) {
 		// path: rest[i] arrives as one token, e.g. "--force-with-lease=main".
 		{"push", []string{"--force-with-lease=main"}, GateDestructive},
 		{"push", []string{"origin", "--force-if-includes=true"}, GateDestructive},
+		// Same --receive-pack/--exec command-execution-via-SSH-transport vector as the
+		// run_command test above, for the git_command tool-array path.
+		{"push", []string{"--receive-pack=id", "origin", "main"}, GateDestructive},
+		{"push", []string{"origin", "main", "--exec=id"}, GateDestructive},
 		{"push", nil, GatePush},
 		{"push", []string{"origin", "main"}, GatePush},
 		{"merge", nil, GateMerge},

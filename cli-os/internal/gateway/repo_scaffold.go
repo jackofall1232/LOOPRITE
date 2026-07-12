@@ -362,7 +362,13 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 				// ledger append, PR #7's lease write, this handler's own lock-release-before-
 				// commit ordering above). Best-effort: a failure here never unwinds the real PR
 				// that already exists on GitHub.
-				_ = files.AppendLedger(engine.LedgerEntry{
+				// Each step below only runs if the previous one actually succeeded (PR review,
+				// gemini-code-assist): AppendLedger's error was previously discarded, so a failed
+				// append (e.g. ledger.md unwritable) still fell through to AddPaths/CommitUnit on a
+				// file that was never actually updated -- staging/committing an unchanged file is at
+				// best a wasted no-op commit attempt and at worst papers over the real failure behind
+				// a misleading "commit failed" audit line instead of the true "append failed" one.
+				if lerr := files.AppendLedger(engine.LedgerEntry{
 					Timestamp:       util.NowISO(),
 					RunID:           "n/a (repo scaffold, not an engine run)",
 					Goal:            "add the l00prite protocol to this repo",
@@ -374,17 +380,14 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 					Confidence:      "recorded by l00prite OS after a real `gh pr create`",
 					NextAction:      "human review and merge (or close) " + prURL,
 					LockNote:        "not applicable — the scaffold lock was already released before the protocol commit above",
-				})
-				if aerr := git.AddPaths(root, []string{".l00prite/ledger.md"}); aerr == nil {
-					if _, cerr := engine.CommitUnit(git, root, "Record PR URL in l00prite ledger"); cerr == nil {
-						if perr2 := pushLedgerUpdate(ctx, git, root, branch); perr2 != nil {
-							app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr2.Error())
-						}
-					} else {
-						app.auditAs(principal, "repo.scaffold_branch.pr_gap", cerr.Error())
-					}
-				} else {
+				}); lerr != nil {
+					app.auditAs(principal, "repo.scaffold_branch.pr_gap", lerr.Error())
+				} else if aerr := git.AddPaths(root, []string{".l00prite/ledger.md"}); aerr != nil {
 					app.auditAs(principal, "repo.scaffold_branch.pr_gap", aerr.Error())
+				} else if _, cerr := engine.CommitUnit(git, root, "Record PR URL in l00prite ledger"); cerr != nil {
+					app.auditAs(principal, "repo.scaffold_branch.pr_gap", cerr.Error())
+				} else if perr2 := pushLedgerUpdate(ctx, git, root, branch); perr2 != nil {
+					app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr2.Error())
 				}
 			}
 		}

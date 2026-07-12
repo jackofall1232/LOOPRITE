@@ -742,6 +742,12 @@ func hasCmdPrefix(c, prefix string) bool {
 var forcePushTokens = map[string]bool{
 	"--force": true, "-f": true, "--force-with-lease": true, "--force-if-includes": true,
 	"--delete": true, "-d": true, "--mirror": true, "--prune": true,
+	// --receive-pack/--exec (aliases of each other, per `git push -h`) tell git to invoke an
+	// ARBITRARY PROGRAM on the remote side of the connection instead of git-receive-pack -- the
+	// classic git-push-over-SSH command-execution vector (`git push --receive-pack='<cmd>' ...`
+	// runs <cmd> via the SSH transport, not git-receive-pack). Far more severe than a force-push;
+	// never auto-approvable (PR review, gemini-code-assist).
+	"--receive-pack": true, "--exec": true,
 }
 
 // forcePushValueFlagPrefixes: --force-with-lease and --force-if-includes both accept an optional
@@ -749,7 +755,7 @@ var forcePushTokens = map[string]bool{
 // so never exact-matches forcePushTokens above -- a real safety bypass, since that let a
 // value-qualified force-with-lease push slip through as auto-approvable GatePush instead of
 // GateDestructive (caught in PR review; see isForcePushToken's regression tests).
-var forcePushValueFlagPrefixes = []string{"--force-with-lease=", "--force-if-includes="}
+var forcePushValueFlagPrefixes = []string{"--force-with-lease=", "--force-if-includes=", "--receive-pack=", "--exec="}
 
 // isForcePushToken reports whether tok (one whitespace-separated field) is a force/delete/mirror/
 // prune push flag, in either its bare or "=<value>"-qualified form.
