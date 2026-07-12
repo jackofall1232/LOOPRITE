@@ -201,27 +201,14 @@ fresh from the new `main` (squash-merge, so no commits were orphaned) for the ne
 - [ ] Playwright end-to-end of the Runs UI against the real binary once the view exists.
 
 ## Next
-- [ ] **Consent-gated full-protocol scaffold on repo register/clone** (maintainer request,
-      2026-07-12): today's auto-scaffold (`engine.Files.Scaffold`, `internal/gateway/repos.go`)
-      silently writes only a minimal `.l00prite/` memory-file subset with no branch/commit and
-      no user consent step — it does NOT ship `AGENTS.md`, the `CLAUDE.md` protocol section,
-      `.l00prite/prompts/` (the six canonical loop prompts execute-loop needs), or the vendor
-      adapters, so a registered repo does not get "the full benefit of the l00prite methodology"
-      per the maintainer's own words. Agreed design: (1) full-protocol scope (everything
-      `/build-loop` produces, not just the memory folder); (2) local branch + commit only, no
-      push/PR automation — instead surface clear copyable instructions telling the user to push
-      and open a PR themselves to get the full benefit; (3) offered BOTH as a checkbox at
-      registration/clone time AND as a standalone later action for already-registered repos.
-      Key open design question for whoever implements this: cli-os is a standalone portable
-      binary (must run against arbitrary repos, including from the Android APK, with no access
-      to this meta-repo's `templates/` folder at runtime) — the full scaffold needs its own
-      embedded copy of `AGENTS.md.template`/the six prompts/vendor adapters, mirroring the
-      existing pattern of separate template copies elsewhere in this repo, but NOT yet wired
-      into the validator's byte-parity enforcement (that would mean editing the review-gated
-      `scripts/validate-l00prite.js` — flag as a follow-up needing maintainer review rather
-      than doing it unreviewed). Deliberately sequenced to start only after the Grok/Gemini/
-      Venice provider-presets change (same session) is committed, since both touch
-      `dashboard.html`/`server.go`.
+- [ ] **Extend validator byte-parity to the cli-os protocol embed** (small, standalone gated
+      follow-up, 2026-07-12; NOT part of the v1.2 batch below — different scope, cli-os-specific):
+      `cli-os/internal/engine/protocol/prompts/*.md` is now an 8th verbatim mirror of the six
+      canonical loop prompts (added by the consent-gated full-protocol repo-scaffold feature —
+      see the ledger), but `scripts/validate-l00prite.js`'s byte-parity check does not cover it
+      yet, since extending that check means editing a review-gated file. Until reviewed, this
+      mirror's sync is enforced only by convention (like `l00pfiles.go`'s existing hand-copied
+      constants), not mechanically.
 - [ ] Maintainer decisions on l00prite CLI-OS design (branch `claude/looprite-cli-os-jntwqi`,
       `cli-os/`): answer `cli-os/docs/open-questions.md` — esp. Q1 (which providers in v1),
       Q2 ("quality" in routing), Q3 (runtime language), Q7 (authoritative pricing). Bless

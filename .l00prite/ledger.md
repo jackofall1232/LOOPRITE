@@ -1772,3 +1772,124 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none.
 - **Lock:** none held (no `.l00prite/lock.json` contention on this pass — single-agent-orchestrated
   Workflow, not a multi-session race).
+
+### Run 2026-07-12T02:00:00Z — Claude (Sonnet 5), branch claude/add-grok-gemini-providers-ou4e8k
+- **Goal:** Maintainer-requested follow-up (queued at the end of the prior run above): registering
+  or cloning a repo via the dashboard only ever auto-scaffolds a MINIMAL `.l00prite/` memory
+  subset silently — no `AGENTS.md`, no `CLAUDE.md` protocol section, no `.l00prite/prompts/`, no
+  vendor adapters, nothing branched or committed — so a registered repo does not get "the full
+  benefit of the l00prite methodology" per the maintainer's own words. Build a consent-gated
+  action (never automatic) that creates a local branch, writes the FULL protocol, and commits it,
+  offered both at registration time (a checkbox) and as a standalone action for already-registered
+  repos, with local-only branch/commit (no auto-push/PR) plus clear push/PR instructions.
+- **Triggering event:** Direct maintainer follow-up request after the provider-presets pass above;
+  three design questions resolved via AskUserQuestion before implementation: full-protocol scope
+  (not just the memory folder), local branch+commit only (not push/PR'd), offered at both
+  registration time AND as a standalone later action.
+- **Ultracode note:** ultracode was OFF for this pass (a system reminder confirmed it after the
+  provider-presets Workflow completed), so this was implemented directly by the main session
+  (Sonnet 5) with targeted read-only Explore-agent research fan-out for investigation, not a full
+  Workflow pipeline — consistent with the standard opt-in bar applying again.
+- **Investigation (Explore agent, read-only):** mapped `internal/gitx`'s ten primitives — no
+  "create branch + commit" one-shot existed, and `CheckoutNewBranch`'s `checkout -B` create-or-
+  reset semantics mean a name collision would silently reset an existing branch, so a random-
+  suffixed branch name was needed rather than a fixed one; the `EnsureRunBranch`/`CommitUnit`/
+  `AutoCheckpoint` precedent in
+  `internal/engine/tools.go` (clean-tree-outside-`.l00prite/` guard, scaffold-after-checkout
+  ordering); the current `Files.Scaffold` (memory-file baseline only, explicitly documented as
+  NOT writing prompts/AGENTS.md); that `cli-os` cannot `go:embed` the repo-root `templates/`
+  directory (outside its module tree) and carries no existing copy-into-cli-os build step; and
+  the dashboard's Register-repo modal / repo-card renderer locations.
+- **Design decision (own judgment, not delegated):** cli-os is a standalone portable binary (must
+  run against arbitrary repos, including from the Android APK, with no access to this monorepo's
+  `templates/` at runtime) — so `internal/engine/protocol/` carries its own embedded verbatim
+  copy of `AGENTS.md.template`, the six canonical prompts, the vendor adapter files, and the fixed
+  `CLAUDE.md` protocol section (extracted from `templates/CLAUDE.md.template` lines 11-28,
+  diffed byte-identical against the source range before use) — the same "separate copy kept in
+  sync by hand" pattern `l00pfiles.go`'s own heartbeat/state/lock constants already use, just
+  embedded from real files instead of hand-transcribed. This 8th mirror of the six prompts is
+  explicitly NOT added to `scripts/validate-l00prite.js`'s byte-parity enforcement (human-review-
+  gated file) — flagged as a queued follow-up, not touched.
+- **A real bug found and fixed by my own test, not a reviewer:** the first implementation
+  `defer`-released the scaffold lock, so its release write (`lock.json`) landed AFTER
+  `CommitUnit`'s commit, leaving the new branch's working tree dirty the instant the handler
+  returned — the exact class of bug this repo's own PR #6/#7 review rounds already fixed twice
+  for `ledger.md`'s append and the run engine's lease write. My own `TestRepoScaffoldBranchWritesFullProtocolOnANewBranch`
+  (which asserts `git status --porcelain` is empty after the call, not just that the HTTP response
+  looks right) caught it immediately. Fixed by releasing the lock explicitly BEFORE `CommitUnit`
+  (removing the `defer` entirely) so the released lock state is captured in the same commit.
+- **Built:** `gitx.Client` gained one new read-only primitive, `CurrentBranch(repo) (string, error)`
+  (both exec and gogit backends), added purely to REPORT what branch the new one came from in the
+  API response — deliberately NOT used to restore/checkout back to the original branch, since
+  `CheckoutNewBranch`'s create-or-reset semantics would silently fast-forward that branch to the
+  new commit if reused for a "restore," moving a branch the user never asked to move (found and
+  fixed the one existing test double, `rawErrGit` in `preflight_test.go`, that needed the new
+  method to keep satisfying the interface). `engine.Files.ScaffoldFull` (new,
+  `protocol_embed.go`): runs the baseline `Scaffold()` then additionally writes `AGENTS.md`
+  (template-filled), the six loop prompts, the vendor adapter files, and — only when no
+  `CLAUDE.md` exists at all — a starter `CLAUDE.md` carrying just the fixed protocol section;
+  never overwrites anything that already exists (same `createIfMissing` discipline). New
+  `FullProtocolGaps()` previews what's missing without writing, so the handler can skip creating
+  a pointless empty branch when a repo already has everything. New `POST /v1/repos/scaffold-branch`
+  (`gateway/repo_scaffold.go`): authenticated, project-scoped (`repoRootForToken`), acquires the
+  same lock convention as the sibling auto-scaffold under its own session literal
+  (`gateway-scaffold-full-branch`), creates a `l00prite/add-protocol-<random>` branch, scaffolds,
+  releases the lock, commits, and returns `{branch, branched_from, commit, files_created,
+  claude_md_skipped, push_instructions, notes}` — never pushes or opens a PR (this codebase's own
+  hard rule, `AGENTS.md.template`'s "never push... without explicit per-action permission",
+  applies to l00prite's own automation too). Dashboard (`public/dashboard.html`): a checked-by-
+  default "Add l00prite to this repo" checkbox in the Register-repo modal (wired through
+  `finishRegister`'s new `repoId`/`scaffoldFull` params), a new standalone "Add l00prite" button
+  on every repo card, a shared `scaffoldResultNote()` renderer (branch name, files-committed
+  count, a copyable `git push` command, explicit "nothing was pushed automatically" copy) used by
+  both entry points, and a delegated `[data-copy]` clipboard handler (dashboard.html had no
+  existing copy-to-clipboard utility before this).
+- **Changed files:** `cli-os/internal/gitx/{gitx.go,exec.go,gogit.go}`;
+  `cli-os/internal/engine/protocol_embed.go` (new) + `cli-os/internal/engine/protocol/` (new
+  embedded template mirror: `AGENTS.md.template`, `claude_protocol_section.md`, `prompts/*.md`
+  ×6, `adapters/*` ×6); `cli-os/internal/gateway/repo_scaffold.go` (new);
+  `cli-os/internal/server/server.go` (new route); `cli-os/public/dashboard.html`;
+  `cli-os/internal/engine/{l00pfiles_test.go,preflight_test.go}`;
+  `cli-os/internal/server/repo_scaffold_branch_test.go` (new).
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` · `summary: clean` ·
+    2026-07-12T02:40Z.
+  - `command: cd cli-os && gofmt -l <every new/changed .go file>` · `exit_code: 0` ·
+    `summary: clean (chattools.go/config.go remain the SAME pre-existing gofmt drift noted in the
+    prior run, untouched by this one)` · 2026-07-12T02:41Z.
+  - `command: cd cli-os && go test -race ./... -count=1` · `exit_code: 0` · `summary: all packages
+    green, incl. new TestFullProtocolGapsOnEmptyDir/TestScaffoldFullWritesEverythingThenIsIdempotent/
+    TestScaffoldFullNeverTouchesExistingClaudeMD (engine) and
+    TestRepoScaffoldBranch{AuthRequired,UnregisteredRepo404s,WritesFullProtocolOnANewBranch}
+    (server, against a REAL git repo with `os/exec` — asserts the actual branch/commit/clean-tree
+    state on disk, not just the HTTP response shape)` · 2026-07-12T02:55Z.
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS, 0 FAIL
+    (unchanged)` · 2026-07-12T02:56Z.
+  - `command: live gateway smoke (rebuilt binary) + Playwright (Chromium) driving BOTH dashboard
+    entry points against real local git repos` · `summary: registration with the checkbox checked
+    (default) produces a real branch + 15 committed files + a working copy-to-clipboard push
+    command; registering with the checkbox unchecked skips scaffolding; the standalone repo-card
+    "Add l00prite" button on an already-registered repo produces the identical result; independently
+    confirmed via \`git branch --list\`/\`git log\`/\`git status --porcelain\` on both real test
+    repos afterward (real branch, real commit, clean tree, all 6 prompts + AGENTS.md + CLAUDE.md +
+    vendor adapters present on disk) — not just trusting the JSON response` · 2026-07-12T03:05Z.
+- **Response drafted/sent:** progress updates sent in-session; final summary pending at close.
+- **Event status:** not applicable.
+- **Failures:** none outstanding. The lock/commit-ordering bug above was found and fixed within
+  this same pass, before ever being reported as done.
+- **Decisions:** leave the repo checked out on the new branch after scaffolding (matching
+  `EnsureRunBranch`'s existing precedent for run branches) rather than attempting to restore the
+  original branch — restoring would require a second, riskier git primitive (checking out an
+  EXISTING branch without `-B`'s create-or-reset semantics), and `CurrentBranch` is reported in
+  the response for the user's own reference instead. The checkbox defaults to checked (opt-out,
+  not opt-in) since the existing minimal auto-scaffold is already unconditional today — this is
+  presented as upgrading that default, not introducing a new mutation from nothing.
+- **Confidence:** High — every new git operation was verified against REAL on-disk git state
+  (not mocked), the lock/commit-ordering bug was caught by a test asserting real filesystem/git
+  state rather than trusting the HTTP response, and the one existing `gitx.Client` test double
+  was found and fixed rather than silently left broken.
+- **Next action:** maintainer review; the byte-parity gap for the new 8th prompt mirror
+  (`internal/engine/protocol/prompts/`) against `scripts/validate-l00prite.js` remains an
+  explicitly deferred, human-review-gated follow-up (see `.l00prite/todos.md`).
+- **Do-not-retry notes:** none.
+- **Lock:** none held (no `.l00prite/lock.json` contention on this pass).
