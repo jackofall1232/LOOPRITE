@@ -4,6 +4,23 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.4.0-beta — 2026-07-12
+
+**xAI Grok and Google Gemini added as first-class providers; Venice made selectable.**
+The Add-provider dropdown now offers seven presets (Anthropic, OpenAI, Gemini, xAI, Venice,
+Zhipu, custom), each with its own default base URL and sample model, driven by a new
+unauthenticated `GET /v1/providers/catalog` endpoint so the UI never conflates "which
+preset was picked" with "which wire adapter kind gets used." Includes Grok 4.5 and the
+current `grok-build-0.1` coding model, and Gemini 3.5/3.1 with first-party-verified
+pricing.
+
+**Consent-gated full l00prite protocol scaffolding for registered repos.** Registering or
+cloning a repo previously only wrote a minimal `.l00prite/` memory subset silently. A new
+opt-in action (a checkbox at registration, or a standalone "Add l00prite" button on any
+registered repo) creates a local branch, writes the complete protocol — `AGENTS.md`, the
+six loop prompts, and all vendor adapters — and commits it, then hands back copy-paste
+push instructions. Nothing is ever pushed or opened as a PR automatically.
+
 ## v0.3.0-beta — 2026-07-11
 
 **Set a daily spending budget from the dashboard.** A new "Set budget" button and modal
