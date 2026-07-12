@@ -698,8 +698,11 @@
             wizard walks you through your vault, your first AI provider, and your first token
             — keys stay on-device, sealed by the Android Keystore.</li>
           <li><b>Import a repo &amp; run.</b> Clone from a URL or import from device storage,
-            open the Runs view, review the pre-flight, and type <code>EXECUTE</code>. Pushes,
-            merges, and anything destructive still wait for your explicit approval.</li>
+            open the Runs view, review the pre-flight, and type <code>EXECUTE</code>. Merges,
+            deploys, and anything destructive always wait for your explicit approval — pushes
+            and pull-request creation do too, unless you opt a project into the Auto-PR toggle,
+            which pre-approves just those two and shows up clearly in the pre-flight before you
+            type <code>EXECUTE</code>.</li>
         </ol>
 
         <div class="warn-note reveal">
