@@ -1893,3 +1893,110 @@ Append one entry per agent run. Do not overwrite prior runs.
   explicitly deferred, human-review-gated follow-up (see `.l00prite/todos.md`).
 - **Do-not-retry notes:** none.
 - **Lock:** none held (no `.l00prite/lock.json` contention on this pass).
+
+### Run 2026-07-12T03:20:00Z — Claude (Sonnet 5), branch claude/add-grok-gemini-providers-ou4e8k, PR #10 automated review round
+- **Goal:** Address bot review findings on PR #10 (opened from this branch to `add-grok` via the
+  Claude Code UI, then subscribed to for webhook activity). Copilot's review (3 findings) was
+  addressed first — see the prior close-out; this entry covers the Codex review round (4 findings,
+  all P2, all on the repo-scaffold feature).
+- **Triggering event:** `chatgpt-codex-connector[bot]`'s automated review, delivered as four
+  `<github-webhook-activity>` events.
+- **Investigation discipline:** did not trust any finding's claim at face value — reproduced each
+  one against real git state (a real repo, a real go-git open-source library, real HTTP calls)
+  before deciding whether/how to fix it, per this repo's established empirical-reproduction habit.
+- **Finding 1 — "Keep manifest identity when preset names are edited" (setup.html, also present in
+  dashboard.html):** confirmed real via `internal/gateway/router.go`: bare-model/auto/default
+  routing (Rules 3-4) resolves a provider by calling `adapters.ModelsFor(p.Name)`, which returns
+  nothing for a renamed manifest-backed provider (no manifest key matches the edited name) —
+  explicit `provider/model` pins (Rule 1b) are unaffected since they bypass the catalog entirely.
+  Root cause traces back to this same branch's earlier fix for Fable's finding #4 (send the
+  preset's sample_model when the model field is blank): that fix made validation succeed for a
+  renamed provider, which previously acted as an unintentional guard rail against saving exactly
+  this broken configuration. A full fix (persisting the originating preset key separately from the
+  editable display name, threaded through storeProvider/ModelsFor/router/the model picker) is a
+  real schema change — genuinely architecturally significant, not a small confident fix — so it is
+  NOT done here; instead shipped a client-side warning in both setup.html and dashboard.html (a
+  `#pnamewarn`/`#m-namewarn` div, synced on name input and preset change) explaining the routing
+  implication the moment a manifest-backed preset's name diverges from its key, verified live in a
+  real browser (warns on rename, clears when restored to the exact key, never fires for the
+  "custom" preset). The deeper fix is flagged to the maintainer as a question, not assumed.
+- **Finding 2 — "Avoid dirtying lock.json before the go-git checkout" (repo_scaffold.go):**
+  REPRODUCED, not assumed: a standalone test acquiring/dirtying a TRACKED `.l00prite/lock.json`
+  then calling `gogitClient{}.CheckoutNewBranch` at the SAME commit failed with "worktree contains
+  unstaged changes" — while the identical setup under `execClient{}.CheckoutNewBranch` succeeded
+  (real git's `checkout -B` tolerates a same-commit dirty tracked file; go-git's `Worktree.Checkout`
+  does not). This meant the handler's original order (AcquireLock's write, THEN EnsureRunBranch's
+  checkout) would hard-fail on the Android/gogit backend on every call after the first (once
+  `lock.json` is tracked from a prior commit) — precisely the ordering class this repo's own PR
+  #6/#7 rounds already fixed twice, and precisely what `engine.go`'s `StartRun` already does
+  correctly (checkout, THEN acquire) — this handler just built it backwards. Fixed by reordering:
+  peek the lock (read-only, `Files.ReadLock` + `engine.LockAvailability`) BEFORE the checkout so a
+  genuinely foreign lock still 409s without creating a pointless branch, then checkout, THEN the
+  real acquire (a write), THEN scaffold, THEN release (still before the commit, per the earlier
+  fix), THEN commit. Pinned the underlying go-git characteristic with a permanent regression test
+  (`TestGogitCheckoutNewBranchFailsOnDirtyTrackedFile`, both backends) and added a server-level test
+  proving a foreign lock still refuses without creating a branch.
+- **Finding 3 — "Force-add scaffold files that match .gitignore" (repo_scaffold.go):** REPRODUCED:
+  a server-level test registering a repo whose `.gitignore` excludes `.l00prite/` showed
+  `CommitUnit`'s `git add -A` (respects .gitignore) silently dropped those files from the commit
+  while the response still reported them as created. Researched go-git v5.18.0's actual source
+  (`worktree_status.go`) rather than guessing: `Worktree.Add(path)` for a single explicit path
+  passes an EMPTY ignore-pattern list to `doAdd` (unlike `AddWithOptions{All:true}`, which passes
+  the real excludes) — so it already behaves as a force-add with no lower-level API needed. Added
+  `AddPaths(repo, paths) error` to `gitx.Client` (both backends: `git add -f --` for exec,
+  looped `Worktree.Add` for gogit — both verified against a real `.gitignore` in
+  `TestAddPathsBypassesGitignore`), plus a NEW exported `Files.FullProtocolPaths()` (the complete
+  canonical path set — baseline + full-protocol extras + CLAUDE.md) used instead of just
+  `ScaffoldFull`'s `created` return value, because a file already sitting on disk uncommitted from
+  an EARLIER partial scaffold (the auto-scaffold on register, which always runs before this
+  action) is just as gitignorable and was still silently dropped by the first, narrower version of
+  this fix — caught by the same regression test before it could ship incomplete.
+- **Finding 4 — "Include baseline memory files in gap detection" (protocol_embed.go):**
+  confirmed real: `FullProtocolGaps()` only checked ScaffoldFull's own additions, so a repo missing
+  the baseline `Scaffold()` files (e.g. the auto-scaffold was skipped by a foreign lock at register
+  time, or failed on a read-only filesystem) but carrying some leftover full-protocol file would be
+  misreported `already_complete` and never repaired. Fixed by adding `baselineScaffoldPaths` (kept
+  in sync by hand with `Scaffold()`'s own list, documented as such) to the gap check.
+- **Changed files:** `cli-os/internal/gitx/{gitx.go,exec.go,gogit.go,gitx_test.go}`;
+  `cli-os/internal/engine/protocol_embed.go`; `cli-os/internal/gateway/repo_scaffold.go`;
+  `cli-os/internal/engine/{l00pfiles_test.go,preflight_test.go}`;
+  `cli-os/internal/server/repo_scaffold_branch_test.go`; `cli-os/public/{setup.html,dashboard.html}`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` · `summary: clean`.
+  - `command: cd cli-os && gofmt -l <every changed .go file>` · `exit_code: 0` · `summary: clean
+    (chattools.go/config.go remain the same pre-existing drift noted twice already, untouched)`.
+  - `command: cd cli-os && go test -race ./... -count=1` · `exit_code: 0` · `summary: all packages
+    green, incl. new TestGogitCheckoutNewBranchFailsOnDirtyTrackedFile (both backends, pins the
+    reproduced go-git characteristic), TestAddPathsBypassesGitignore/TestAddPathsEmptyIsNoop (both
+    backends), TestFullProtocolGapsCatchesMissingBaselineFiles,
+    TestRepoScaffoldBranchCommitsGitignoredProtocolFiles (failed against the first, narrower fix
+    before the FullProtocolPaths broadening — confirmed catching a real gap, not a tautology),
+    TestRepoScaffoldBranchForeignLockRefusesWithoutCreatingABranch`.
+  - `command: node scripts/validate-l00prite.js` (from repo root) · `exit_code: 0` · `summary:
+    519 PASS, 0 FAIL (unchanged)`.
+  - `command: live gateway smoke + Playwright (Chromium) against the real built binary` ·
+    `summary: the rename warning fires exactly on a manifest-backed preset's name diverging from
+    its key, clears when restored, never fires for "custom" — in both setup.html and
+    dashboard.html`.
+- **Response drafted/sent:** progress updates sent in-session per finding as webhook events
+  arrived; a summary question to the maintainer about Finding 1's deeper fix is pending at
+  turn-close (not yet answered).
+- **Event status:** the Codex review round is addressed; Gemini Code Assist's review had no
+  actionable feedback (a bot deprecation notice only); Vercel's preview-deployment comments are
+  routine, no action taken.
+- **Failures:** none outstanding from this round. The first (narrower) version of the Finding-3
+  fix was itself caught as incomplete by its own regression test before being shipped — recorded
+  as a real self-correction, not a silent iteration.
+- **Decisions:** Finding 1 gets a UI warning now, not a schema change, pending maintainer input —
+  the warning is strictly additive/non-breaking and doesn't foreclose whichever direction is
+  chosen later.
+- **Confidence:** High — all three git/lock/gitignore findings were reproduced empirically (a
+  failing test first, a real fix confirmed to flip it green) rather than pattern-matched from the
+  bot's prose; Finding 1's severity (bare/default routing broken, explicit pins unaffected) was
+  independently traced through router.go, not assumed from the review comment alone.
+- **Next action:** awaiting maintainer input on Finding 1's deeper fix (persist the originating
+  preset key separately from the editable provider name so routing survives a rename) versus
+  leaving the warning as the permanent mitigation; continuing to watch PR #10 for further activity
+  and CI results, with a standing ~1-hour self check-in armed.
+- **Do-not-retry notes:** none.
+- **Lock:** none held.
