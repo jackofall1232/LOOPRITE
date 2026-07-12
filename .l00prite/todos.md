@@ -108,10 +108,16 @@ previously queued dashboard Runs view (moved to Next, below).
 
 Deferred to Phase 3+ (see android-architecture.md §8): real-device smoke test (no emulator
 ABI possible in this container), clone-from-URL e2e coverage (needs network egress),
-venice/gemini capability confirmation from an unblocked network, making the internal `mock`
-test adapter selectable in the setup wizard (currently only reachable by direct API/DB
-injection, and must be named after a real manifest like `anthropic` to be routable —
-recorded in failures.md), a committed reusable Playwright harness for future UI regressions,
+~~venice/gemini capability confirmation from an unblocked network~~ — **done, 2026-07-12**:
+Gemini pricing/model-lineup (incl. confirming Gemini 3.5 is real) was re-verified first-party
+this pass (cloud.google.com was reachable), and Venice was re-checked with zero drift; see the
+"xAI Grok + Gemini providers, Venice made selectable" ledger entry. Still deferred: making the
+internal `mock` test adapter selectable in the setup wizard (currently only reachable by direct
+API/DB injection, and must be named after a real manifest like `anthropic` to be routable —
+recorded in failures.md; the new provider-presets dropdown from that same 2026-07-12 pass
+deliberately keeps `mock` excluded, enforced by a whitelist + a test), a committed reusable
+Playwright harness for future UI regressions (a scratchpad-only script was used again this pass,
+per the standing convention below),
 ssh clone support once a key-provisioning UI exists, the Termux/remote-verifier bridge
 (needs its own design pass), SAF export, split ABIs/app bundle, release signing ceremony,
 battery/doze tuning, F-Droid-style reproducible build recipe, on-device model
@@ -195,6 +201,27 @@ fresh from the new `main` (squash-merge, so no commits were orphaned) for the ne
 - [ ] Playwright end-to-end of the Runs UI against the real binary once the view exists.
 
 ## Next
+- [ ] **Consent-gated full-protocol scaffold on repo register/clone** (maintainer request,
+      2026-07-12): today's auto-scaffold (`engine.Files.Scaffold`, `internal/gateway/repos.go`)
+      silently writes only a minimal `.l00prite/` memory-file subset with no branch/commit and
+      no user consent step — it does NOT ship `AGENTS.md`, the `CLAUDE.md` protocol section,
+      `.l00prite/prompts/` (the six canonical loop prompts execute-loop needs), or the vendor
+      adapters, so a registered repo does not get "the full benefit of the l00prite methodology"
+      per the maintainer's own words. Agreed design: (1) full-protocol scope (everything
+      `/build-loop` produces, not just the memory folder); (2) local branch + commit only, no
+      push/PR automation — instead surface clear copyable instructions telling the user to push
+      and open a PR themselves to get the full benefit; (3) offered BOTH as a checkbox at
+      registration/clone time AND as a standalone later action for already-registered repos.
+      Key open design question for whoever implements this: cli-os is a standalone portable
+      binary (must run against arbitrary repos, including from the Android APK, with no access
+      to this meta-repo's `templates/` folder at runtime) — the full scaffold needs its own
+      embedded copy of `AGENTS.md.template`/the six prompts/vendor adapters, mirroring the
+      existing pattern of separate template copies elsewhere in this repo, but NOT yet wired
+      into the validator's byte-parity enforcement (that would mean editing the review-gated
+      `scripts/validate-l00prite.js` — flag as a follow-up needing maintainer review rather
+      than doing it unreviewed). Deliberately sequenced to start only after the Grok/Gemini/
+      Venice provider-presets change (same session) is committed, since both touch
+      `dashboard.html`/`server.go`.
 - [ ] Maintainer decisions on l00prite CLI-OS design (branch `claude/looprite-cli-os-jntwqi`,
       `cli-os/`): answer `cli-os/docs/open-questions.md` — esp. Q1 (which providers in v1),
       Q2 ("quality" in routing), Q3 (runtime language), Q7 (authoritative pricing). Bless

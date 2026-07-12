@@ -1673,3 +1673,102 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** none new.
 - **Lock:** lock-20260711-213500-claude-budget-execute-lock-help acquired for this append;
   released at end of run.
+
+### Run 2026-07-12T00:15:00Z — Claude (Sonnet 5 orchestrator + researchers, Fable 5 architect/verifier, Opus 4.8 implementer), branch claude/add-grok-gemini-providers-ou4e8k
+- **Goal:** Maintainer request — add xAI Grok and Google Gemini as first-class "Add provider"
+  options and make Venice AI selectable too (today only Anthropic-native + a generic
+  OpenAI-compatible option exist in the dropdown), with sensible default endpoints per provider
+  and a custom-entry fallback, orchestrated via a Workflow pipeline (Sonnet research → Fable
+  design spec → Opus implementation → Fable adversarial verify).
+- **Triggering event:** Direct maintainer request, explicit role assignment (Fable
+  advisor/senior-dev/verifier, Sonnet research, Opus implementation) and explicit instruction to
+  use the l00prite method to reach done.
+- **Research (Sonnet, parallel):** xAI's own domains (docs.x.ai/x.ai/console.x.ai) were egress-
+  blocked; fell back to xAI's official GitHub SDK/cookbook (xai-org) and confirmed **Grok 4.5**
+  is real (announced 2026-07-08) and that the retired `grok-code-fast-1` (retired 2026-05-15,
+  silently redirects to `grok-4.3` at its billing rate) has been superseded by **`grok-build-0.1`**
+  as xAI's current coding-specialized model — the correct answer to "add Grok's coding model."
+  Gemini research WAS first-party-reachable this session (cloud.google.com), upgrading
+  gemini.json's pricing from null/unconfirmed to first-party-verified and confirming
+  **Gemini 3.5** (`gemini-3.5-flash`) is real and GA, plus `gemini-3.1-pro-preview`/
+  `gemini-3.1-flash-lite`. Venice freshness check: zero drift against the 2026-07-05 baseline.
+- **Design (Fable):** decoupled "which provider preset the user picked" from "which wire adapter
+  kind is POSTed" (today's dropdown conflates the two, which only worked with exactly one
+  provider per adapter kind) — new `adapters.Presets()` + unauthenticated `GET
+  /v1/providers/catalog` (same non-secret class as `/v1/setup/status`) drives both `setup.html`
+  and `dashboard.html`'s Add-provider dropdowns from the embedded manifests, with a client-side
+  "custom" fallback and a fetch-failure degrade to today's two-option behavior.
+- **Implementation (Opus):** new `manifests/xai.json` (grok-4.3 first as the validation probe —
+  the only id with verbatim first-party SDK confirmation — plus grok-4.5/grok-build-0.1/grok-4;
+  all pricing null/unconfirmed, `grok-code-fast-1` deliberately absent); `gemini.json` upgraded
+  to first-party pricing + the confirmed 3.x models; `venice.json` verification-date refresh
+  only (zero catalog drift); `"grok"→"xai"` alias; `Presets()`/`Preset` in registry.go; new
+  `internal/gateway/presets.go` (`HandleProviderPresets`) + route; both HTML twins rewritten to
+  fetch the catalog and resolve the POSTed `adapter` from the selected preset, not the dropdown
+  value; new/updated Go tests; docs (`provider-adapters.md`, manifests `README.md`) updated.
+- **Verify (Fable, adversarial):** zero blocking findings. Traced the preset→adapter resolution
+  through `body()/formBody()` → `resolveAdapterKind` → `storeProvider` → `AdapterFor` and proved
+  it non-tautological via mutation testing. Four non-blocking findings, all fixed in-session by
+  the orchestrator (not deferred): (1) an unguarded stale-async-render race in both HTML files if
+  the user navigates/reopens a modal while the catalog fetch is in flight — fixed with a
+  `renderGen`/`modalGen` token guard, style-matched to the file's existing `epoch` pattern; (2)
+  `gofmt` flagging two pre-existing-dirty files untouched by this diff — correctly left alone,
+  confirmed via `git diff` that neither file appears in this change; (3) a tautological dead
+  assertion in `TestPresets` (`p.Key=="mock"` inside a loop that already asserts exact order,
+  and `mock` is never in `wantKeys`) — moved to a real assertion on `presetOrder` directly
+  (same package); (4) renaming a provider away from its preset key while leaving the model field
+  blank made server-side `pickValidationModel` miss the manifest (it looks up by POSTed name) —
+  fixed by falling back client-side to the preset's `sample_model` whenever the model field is
+  empty, verified end-to-end at the network-request level (see Tests).
+- **Changed files:** `cli-os/internal/gateway/adapters/manifests/{xai.json (new),gemini.json,
+  venice.json,README.md}`; `cli-os/internal/gateway/adapters/registry.go`;
+  `cli-os/internal/gateway/presets.go` (new); `cli-os/internal/server/server.go`;
+  `cli-os/internal/gateway/adapters/adapters_test.go`;
+  `cli-os/internal/server/provider_mgmt_test.go`; `cli-os/public/{setup.html,dashboard.html}`;
+  `cli-os/docs/provider-adapters.md`.
+- **Tests run / Verification:**
+  - `command: cd cli-os && gofmt -l <diff files>` · `exit_code: 0` · `summary: clean` ·
+    2026-07-12T00:40Z.
+  - `command: cd cli-os && go build ./... && go vet ./...` · `exit_code: 0` · `summary: clean` ·
+    2026-07-12T00:41Z.
+  - `command: cd cli-os && go test ./... -count=1` · `exit_code: 0` · `summary: all packages
+    green, uncached, incl. new TestXaiManifest/TestGrokAliasResolvesToXai/TestPresets/
+    TestProviderCatalogUnauthenticated` · 2026-07-12T00:55Z (final run, after all four fixes).
+  - `command: node scripts/validate-l00prite.js` · `exit_code: 0` · `summary: 519 PASS, 0 FAIL
+    (unchanged — this feature touches nothing the protocol validator scopes)` ·
+    2026-07-12T00:56Z.
+  - `command: live gateway smoke (built binary, isolated data dir) + Playwright (Chromium,
+    pre-installed) against setup.html and dashboard.html` · `summary: all 7 dropdown options
+    render with correct labels/order in both files; per-preset defaults populate correctly
+    (xai/venice/gemini/custom); a real Add-provider POST for a RENAMED "xai" provider
+    (my-xai-key) correctly resolved wire adapter openai-compat + base_url api.x.ai/v1 end-to-end;
+    a real /v1/providers/test request for a RENAMED "gemini" provider with the model field left
+    blank confirmed the client now sends model:"gemini-2.5-pro" (the fix for finding #4);
+    modal close/reopen exercised the modalGen race-guard with no console errors; the one
+    console error observed (a 404) was independently confirmed via curl to be a pre-existing,
+    unrelated `/favicon.ico` 404 (no favicon route exists anywhere in this app)` ·
+    2026-07-12T00:50Z.
+- **Response drafted/sent:** progress updates sent in-session; final summary pending at close.
+- **Event status:** not applicable.
+- **Failures:** none outstanding.
+- **Decisions:** Gemini pricing shipped `price_confidence:"high"` despite a Vertex-vs-Developer-
+  API channel caveat (recorded in the manifest's `pricing_note`) because the page is genuine
+  Google first-party and third-party citations of the Developer API's own displayed price matched
+  exactly — the alternative (leaving it unconfirmed) would waste the first real Gemini pricing
+  this repo has had. xAI's fast/legacy tiers (`grok-4-fast`, `grok-4-1-fast`, `grok-3-latest`)
+  were deliberately excluded: their suffixed siblings were retired with silent redirect billing
+  and the bare ids' post-retirement status is unconfirmed — users can still hand-enter any model
+  id for a named provider; this can be revisited after a live docs.x.ai check.
+- **Confidence:** High on shape/UI-decoupling correctness (traced and mutation-tested); high on
+  Gemini pricing (first-party fetched and independently re-confirmed); explicitly unconfirmed on
+  all xAI pricing (every first-party xAI domain was egress-blocked this session — recorded
+  verbatim in `xai.json`'s `pricing_note`, matching this repo's existing openai.json/zhipu.json
+  discipline rather than backfilling from training-data memory).
+- **Next action:** maintainer review; re-check xAI pricing from a network where docs.x.ai is
+  reachable before treating any xai model as cost-routable; a maintainer-requested follow-up
+  (branch/consent-gated full-protocol scaffolding on repo registration) is queued next, to start
+  only after this change is committed to avoid concurrent edits to the same shared files
+  (`dashboard.html`, `server.go`).
+- **Do-not-retry notes:** none.
+- **Lock:** none held (no `.l00prite/lock.json` contention on this pass — single-agent-orchestrated
+  Workflow, not a multi-session race).
