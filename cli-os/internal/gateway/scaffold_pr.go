@@ -1,9 +1,15 @@
 // scaffold_pr.go is the auto-push + PR-creation half of the "Add l00prite" action
-// (repo_scaffold.go's HandleRepoScaffoldBranch). It uses ONLY ambient host git/gh credentials —
-// whatever the gateway host's own git remote config, SSH agent, and `gh auth login` state already
-// provide — exactly the same trust model the model-facing git_command/run_command engine tools
-// already rely on (see internal/engine/tools.go). There is no credential vault here and none is
-// added: if the host can't already push and open a PR from a terminal, this file can't either.
+// (repo_scaffold.go's HandleRepoScaffoldBranch). It has two transports, chosen per request by
+// whether a *gitx.PushAuth was passed:
+//   - auth == nil (no "Connect GitHub"): ambient host git/gh credentials ONLY — whatever the
+//     gateway host's own git remote config, SSH agent, and `gh auth login` state provide, the same
+//     trust model the model-facing git_command/run_command engine tools rely on. This is the
+//     original, unchanged path; if the host can't already push and open a PR from a terminal, this
+//     path can't either.
+//   - auth != nil (a GitHub connection exists for the project): the vault-sealed token pushes over
+//     HTTPS via gitx.Push and opens the PR via the REST API (ghapi.go), so this works on a bare
+//     Android host with no git binary and no gh. gitx.Push host-scopes the token to github.com, so
+//     it is never sent to a non-GitHub origin.
 //
 // Every check and action here is fail-closed: probePushPRCapability never mutates anything, so a
 // gap is detected BEFORE any push is attempted, and a failure partway through (push succeeds, PR
@@ -14,6 +20,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,6 +29,31 @@ import (
 	"github.com/jackofall1232/l00prite/cli-os/internal/gitx"
 	"github.com/jackofall1232/l00prite/cli-os/internal/util"
 )
+
+// ghRepoFromRemote resolves the repo's origin URL and parses it to (owner, repo). ok=false when
+// origin is missing or is not a github.com repository — the caller then treats the repo as not
+// token-pushable and falls back to the ambient git/gh path (or reports the capability gap).
+func ghRepoFromRemote(git gitx.Client, root string) (owner, repo string, ok bool) {
+	url, err := git.RemoteURL(root, "origin")
+	if err != nil {
+		return "", "", false
+	}
+	return ownerRepoFromURL(url)
+}
+
+// tokenUsableForOrigin reports whether a connected token can actually serve as the push transport
+// for this repo's origin — only an https github.com remote (git.Push injects the token over HTTPS
+// and ghCreatePR opens the PR via REST). For an ssh github remote or ANY non-github remote it
+// returns false, so the caller nils the auth and every scaffold path (probe/push/PR-lookup) falls
+// back uniformly to the ambient git/gh path instead of one path taking the token route and another
+// hard-failing. Mirrors exactly what gitx.Push itself would do for the same remote.
+func tokenUsableForOrigin(git gitx.Client, root string, auth *gitx.PushAuth) bool {
+	url, err := git.RemoteURL(root, "origin")
+	if err != nil {
+		return false
+	}
+	return gitx.TokenUsableFor(url, auth)
+}
 
 // ghExecTimeout bounds every gh/git-push exec in this file. gh and git can both try to prompt
 // interactively for credentials (a device-flow login nudge, a credential-helper popup); with the
@@ -36,12 +68,16 @@ const ghExecTimeout = 20 * time.Second
 // credentials in them, or other operational detail nobody outside the gateway host needs to see.
 // The raw error always goes to app.auditAs instead (see HandleRepoScaffoldBranch).
 const (
-	gapNoGitBinary = "This gateway host has no git binary — the built-in pure-Go git can run on a bare Android app, but it can't push to a real remote. Push this branch and open the pull request yourself using the command below."
+	gapNoGitBinary = "This device has no git binary and no GitHub connection, so l00prite can't push to a real remote. Connect GitHub in the dashboard to push from this device, or push this branch and open the pull request yourself using the command below."
 	gapNoGH        = "The GitHub CLI (gh) isn't installed on the gateway host, so l00prite can't open a pull request automatically. Push this branch and open the pull request yourself using the command below."
 	gapGHNotAuthed = "gh isn't signed in on the gateway host — run `gh auth login` there, then try again. Push this branch and open the pull request yourself using the command below."
 	gapPushDryRun  = "Pushing to origin isn't possible from this host — check the remote URL and credentials, then try again. Push this branch and open the pull request yourself using the command below."
 	gapPushFailed  = "Pushing this branch to origin failed even though a dry run of the same push just succeeded (a race, or a rejected hook) — nothing else was attempted. Push this branch and open the pull request yourself using the command below."
-	gapPRCreate    = "The branch was pushed to origin, but opening the pull request failed. Open it yourself with the command below."
+	// gapTokenPushFailed is the token-path counterpart to gapPushFailed: the connected-GitHub push
+	// path runs no dry run, so it must NOT claim one succeeded. The most common real cause is a
+	// fine-grained token that authenticated (GET /user passed) but lacks Contents:write on THIS repo.
+	gapTokenPushFailed = "Pushing this branch to origin with the connected GitHub token failed. Check that the token has Contents: Read and write permission on this repository — a fine-grained token is scoped to specific repositories. Push this branch and open the pull request yourself using the command below."
+	gapPRCreate        = "The branch was pushed to origin, but opening the pull request failed. Open it yourself with the command below."
 	// gapPRURLUnknown is distinct from gapPRCreate: `gh pr create` here exited 0 -- the pull
 	// request really was opened -- but parsePRURL found no URL-looking line in its output (a
 	// future gh version printing extra text, or a differently-shaped success message). Saying
@@ -91,10 +127,21 @@ func ghPRViewCommand(branch string) string {
 // nothing. ok=false always comes paired with a fixed gapMsg safe to show a client; rawErr (nil for
 // the two purely structural checks, which have no underlying process error) is for app.auditAs
 // only — the caller must never send it to the client.
-func probePushPRCapability(ctx context.Context, git gitx.Client, root, branch string) (ok bool, gapMsg string, rawErr error) {
+func probePushPRCapability(ctx context.Context, git gitx.Client, root, branch string, auth *gitx.PushAuth) (ok bool, gapMsg string, rawErr error) {
+	// Token path: a stored GitHub connection ("Connect GitHub") pushes and opens the PR over HTTPS
+	// on BOTH backends — including a bare Android host with no git binary and no gh — so the
+	// no-git-binary gap below does not apply when connected to a github.com origin. gitx.Push and
+	// ghCreatePR carry the credential; nothing here needs gh or an ambient credential helper.
+	if auth != nil {
+		if _, _, isGH := ghRepoFromRemote(git, root); isGH {
+			return true, "", nil
+		}
+		// Connected, but origin isn't a github.com repo (e.g. an ssh remote or a non-GitHub host):
+		// fall through to the ambient git/gh path, which handles those exactly as before.
+	}
 	// The gogit backend (Android, or any host with no git binary) has no push/ssh transport at
 	// all — Client.Raw unconditionally returns ErrRawUnsupported there (see gitx.Client's doc
-	// comment on Raw), so there is nothing further to probe.
+	// comment on Raw), so with no GitHub connection there is nothing further to probe.
 	if git.Kind() != "exec" {
 		return false, gapNoGitBinary, nil
 	}
@@ -122,7 +169,32 @@ func probePushPRCapability(ctx context.Context, git gitx.Client, root, branch st
 // predict), which is why pushed is reported independently of prURL/err: a caller that sees
 // pushed=true with a non-nil err knows the consented push already landed and must NEVER attempt to
 // undo it, only report that PR creation itself needs to be done by hand.
-func openScaffoldPR(ctx context.Context, git gitx.Client, root, branch, title, body string) (pushed bool, prURL string, rawErr error) {
+func openScaffoldPR(ctx context.Context, git gitx.Client, root, branch, title, body string, auth *gitx.PushAuth) (pushed bool, prURL string, rawErr error) {
+	// Token path: push via gitx (works on both backends), then open the PR via the REST API — no gh
+	// binary needed. Like the ambient path below, `pushed` is reported independently of prURL/err so
+	// a caller that sees pushed=true with a non-nil err knows the consented push already landed and
+	// must never undo it. Never merges (ghCreatePR has no merge; there is no merge endpoint here).
+	if auth != nil {
+		owner, repo, isGH := ghRepoFromRemote(git, root)
+		if !isGH {
+			return false, "", errors.New("origin is not a github.com repository")
+		}
+		pushCtx, pushCancel := context.WithTimeout(ctx, ghExecTimeout)
+		defer pushCancel()
+		if err := git.Push(pushCtx, root, "origin", branch, auth); err != nil {
+			return false, "", err
+		}
+		base, berr := ghDefaultBranch(ctx, auth.Token, owner, repo)
+		if berr != nil {
+			return true, "", berr // pushed, but couldn't determine the base branch to open against
+		}
+		url, cerr := ghCreatePR(ctx, auth.Token, owner, repo, branch, base, title, body)
+		if cerr != nil {
+			return true, "", cerr
+		}
+		return true, url, nil
+	}
+
 	pushCtx, pushCancel := context.WithTimeout(ctx, ghExecTimeout)
 	defer pushCancel()
 	if _, err := git.Raw(pushCtx, root, "push", "-u", "origin", branch); err != nil {
@@ -145,9 +217,12 @@ func openScaffoldPR(ctx context.Context, git gitx.Client, root, branch, title, b
 // already real on GitHub — a failure here just means the remote branch is one local commit behind
 // until the next push, not a half-done or misleading state, so the caller logs this error rather
 // than failing the whole request over it.
-func pushLedgerUpdate(ctx context.Context, git gitx.Client, root, branch string) error {
+func pushLedgerUpdate(ctx context.Context, git gitx.Client, root, branch string, auth *gitx.PushAuth) error {
 	pushCtx, cancel := context.WithTimeout(ctx, ghExecTimeout)
 	defer cancel()
+	if auth != nil {
+		return git.Push(pushCtx, root, "origin", branch, auth)
+	}
 	_, err := git.Raw(pushCtx, root, "push", "-u", "origin", branch)
 	return err
 }
@@ -166,7 +241,15 @@ func pushLedgerUpdate(ctx context.Context, git gitx.Client, root, branch string)
 // gets a genuinely new one rather than being resurfaced as if still open. The raw gh output never
 // reaches a client: only the parsed URL (or "") is returned, and every caller sends the URL, not
 // gh's stderr.
-func lookupExistingPR(ctx context.Context, root, branch string) string {
+func lookupExistingPR(ctx context.Context, git gitx.Client, root, branch string, auth *gitx.PushAuth) string {
+	// Token path: the REST twin (ghFindOpenPR) with the same fail-open-to-"" contract, so this works
+	// on a host with no gh binary.
+	if auth != nil {
+		if owner, repo, isGH := ghRepoFromRemote(git, root); isGH {
+			return ghFindOpenPR(ctx, auth.Token, owner, repo, branch)
+		}
+		return ""
+	}
 	viewCtx, cancel := context.WithTimeout(ctx, ghExecTimeout)
 	defer cancel()
 	// Arg vector, never a shell (branch is internally generated util.RID, but this is the discipline

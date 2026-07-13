@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  App theme, night (dark) variant. The framework selects this over values/styles.xml automatically
+  when the device is in dark mode (uiMode night), so AppTheme's isLightTheme tracks the device on
+  every supported API without a DayNight parent (which is API 29+; minSdk is 26). See
+  values/styles.xml for the full rationale.
+-->
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar"/>
+</resources>

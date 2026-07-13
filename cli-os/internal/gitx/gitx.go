@@ -12,8 +12,60 @@ package gitx
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os/exec"
+	"strings"
 )
+
+// redactSecrets replaces each non-empty secret with "[redacted]" in s. Defense in depth: an
+// implementation must not put a token where an error could carry it in the first place, but any
+// error text surfaced from a push is scrubbed through this before leaving the package regardless.
+func redactSecrets(s string, secrets ...string) string {
+	for _, sec := range secrets {
+		if sec != "" {
+			s = strings.ReplaceAll(s, sec, "[redacted]")
+		}
+	}
+	return s
+}
+
+// TokenUsableFor reports whether auth may serve as the push transport for a remote at remoteURL —
+// i.e. whether Push will actually attach the credential (an https URL on auth.Host). Callers outside
+// this package (scaffold_pr.go) use it to decide token-vs-ambient BEFORE calling Push, so their
+// probe/push/PR-lookup paths all agree with what Push itself does for the same remote (rather than
+// one path taking the token route while another falls back to ambient).
+func TokenUsableFor(remoteURL string, auth *PushAuth) bool {
+	_, ok := credentialScope(remoteURL, auth)
+	return ok
+}
+
+// pushRefspec is the single explicit refspec Push uses on both backends: exactly
+// refs/heads/<branch>:refs/heads/<branch> — never a bare branch (ambiguous), never a wildcard.
+func pushRefspec(branch string) string {
+	return "refs/heads/" + branch + ":refs/heads/" + branch
+}
+
+// credentialScope decides whether auth may be attached to a push whose remote is remoteURL, and
+// returns the "https://<host>/" prefix an http.<url>.extraheader key scopes to when so. A credential
+// is attached ONLY to an https URL whose host matches auth.Host (case-insensitive) — so a
+// github.com token is NEVER transmitted to any other origin: not an ssh remote, not a different
+// (or attacker-controlled) https host that happens to share a project, and not a cleartext http
+// URL. In every non-matching case Push silently falls back to ambient/unauthenticated credentials
+// rather than leaking the token or failing outright. A nil/empty auth or an empty auth.Host
+// (fail-closed) never attaches.
+func credentialScope(remoteURL string, auth *PushAuth) (string, bool) {
+	if auth == nil || auth.Token == "" || auth.Host == "" {
+		return "", false
+	}
+	u, err := url.Parse(remoteURL)
+	// Match on Hostname() (no port) so an explicit-port github URL (e.g. https://github.com:443/…)
+	// still matches auth.Host ("github.com"); the scope keeps u.Host (with any port) so the
+	// extraheader is bound to exactly the host:port git will request.
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || !strings.EqualFold(u.Hostname(), auth.Host) {
+		return "", false
+	}
+	return "https://" + u.Host + "/", true
+}
 
 // Client is the git seam the run engine drives every repository operation through. Paths ("repo")
 // are always the target repository's root; this package never assumes a global cwd.
@@ -86,7 +138,54 @@ type Client interface {
 	// when Kind()=="exec"). The gogit implementation always returns ErrRawUnsupported: go-git has
 	// no notion of "run any git subcommand", only the specific operations above.
 	Raw(ctx context.Context, repo string, args ...string) (string, error)
+
+	// RemoteURL returns the PUSH URL for remote (e.g. "origin") — where a push actually goes, which
+	// is what credential scoping and PR-target owner/repo resolution must key off. Under Kind()=="exec"
+	// that is `git remote get-url --push` (remote.<name>.pushurl if set, else the fetch URL); the
+	// gogit backend has no separate push URL, so it returns its single configured URL (which go-git
+	// uses for both fetch and push). Read-only; errors if the remote does not exist.
+	RemoteURL(repo, remote string) (string, error)
+
+	// Push uploads the single ref refs/heads/<branch> to refs/heads/<branch> on remote. It is NEVER
+	// a force push, NEVER a wildcard/other refspec, and NEVER mutates remote config. A nil auth uses
+	// ambient credentials (the host's git credential helpers / ssh agent under Kind()=="exec"; no
+	// authentication under Kind()=="gogit", which suffices only for a local-path remote and is
+	// refused by any real host like github.com). A non-nil auth carries an HTTPS token used
+	// in-memory only — see PushAuth. Returns nil when the remote is already up to date.
+	//
+	// Under Kind()=="gogit" a shallow clone cannot push reliably, so Push fails closed with
+	// ErrShallowPush (the remote is never touched) rather than corrupting it.
+	Push(ctx context.Context, repo, remote, branch string, auth *PushAuth) error
 }
+
+// PushAuth carries an HTTPS credential for Push. Token is secret and MUST NEVER appear in a
+// command's argv (/proc/*/cmdline is world-readable), be written to .git/config or any file, or be
+// echoed in an error/log — implementations inject it only as an in-memory or host-scoped,
+// env-only HTTP Authorization header, and redact it from any error text. Username is the HTTP basic
+// username paired with the token; for a GitHub personal access token it is conventionally
+// "x-access-token" (any non-empty value works — GitHub authenticates on the token).
+type PushAuth struct {
+	Username string
+	Token    string
+	// Host is the host the credential is valid for (e.g. "github.com"). Push attaches the token
+	// ONLY to an https remote whose host matches this, so a credential can never be sent to a
+	// different origin. An empty Host fail-closes: the token is never attached.
+	Host string
+}
+
+// token is a nil-safe accessor so redaction code can pass auth.token() unconditionally.
+func (a *PushAuth) token() string {
+	if a == nil {
+		return ""
+	}
+	return a.Token
+}
+
+// ErrShallowPush is returned by the gogit backend's Push when the repository is a shallow clone:
+// go-git cannot reliably push shallow history, so Push refuses rather than risk a corrupt remote.
+// The remedy is to re-clone the repo at full depth (the dashboard's clone path does this for the
+// gogit backend); the message says so.
+var ErrShallowPush = errors.New("gitx: this copy has shallow history and cannot push; re-clone it (full depth) from the dashboard to enable pushing")
 
 // defaultLogLimit is the commit count Log uses when called with limit <= 0 (see Log's doc
 // comment). Shared by both implementations so the clamp is defined in exactly one place.

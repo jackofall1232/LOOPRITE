@@ -249,6 +249,152 @@ func TestGitCommand(t *testing.T) {
 	}
 }
 
+// ---- push_branch ----
+
+func newRepoOnBranch(t *testing.T, branch string) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeFileRaw(t, filepath.Join(dir, "f.txt"), "x\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-m", "init")
+	gitRun(t, dir, "checkout", "-B", branch)
+	return dir
+}
+
+// TestPushBranchGatesOnGatePush: an unapproved push_branch on a capable (exec) backend suspends on
+// the GatePush class, naming the run's own branch — nothing is pushed until approval.
+func TestPushBranchGatesOnGatePush(t *testing.T) {
+	dir := newRepoOnBranch(t, "l00prite/run-x")
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.Detect()}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if o.Gate == nil || o.Gate.Class != GatePush {
+		t.Fatalf("push_branch should gate on GatePush, got gate=%+v result=%q", o.Gate, o.Result)
+	}
+	if o.Gate.Args["branch"] != "l00prite/run-x" || o.Gate.Args["remote"] != "origin" {
+		t.Fatalf("gate must be pinned to origin + the run branch, got %v", o.Gate.Args)
+	}
+}
+
+// TestPushBranchGogitNoCredentialIsCapabilityGap: on a host with no git binary AND no GitHub
+// connection there is no way to push, so push_branch returns a plain capability gap — NOT a gate
+// (no human approval could conjure a credential).
+func TestPushBranchGogitNoCredentialIsCapabilityGap(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.NewGogitClient()} // PushCred nil
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if o.Gate != nil {
+		t.Fatalf("a no-credential gogit push has nothing to approve; it must not gate, got %+v", o.Gate)
+	}
+	if !strings.Contains(o.Result, "Connect GitHub") {
+		t.Fatalf("expected a connect-GitHub capability gap, got %q", o.Result)
+	}
+}
+
+// TestPushBranchWithCredentialGates: a gogit backend WITH a credential AND an https github.com
+// origin (so the token is actually usable) is capable, so push_branch consults PushCred and gates.
+func TestPushBranchWithCredentialGates(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	gitRun(t, dir, "remote", "add", "origin", "https://github.com/o/r.git") // token-usable origin
+	called := false
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.NewGogitClient(),
+		PushCred: func() (*gitx.PushAuth, error) {
+			called = true
+			return &gitx.PushAuth{Username: "x", Token: "t", Host: "github.com"}, nil
+		}}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if !called {
+		t.Fatal("push_branch must consult PushCred")
+	}
+	if o.Gate == nil || o.Gate.Class != GatePush {
+		t.Fatalf("with a usable credential the push is capable and should gate, got gate=%+v result=%q", o.Gate, o.Result)
+	}
+}
+
+// TestPushBranchGogitUnusableOriginIsCapabilityGap pins Codex's fix: on the gogit backend, a token
+// that CAN'T apply to the origin (ssh/http/non-github remote) must yield an honest capability gap up
+// front — NOT a scheduled push that would fail unauthenticated after the unit commits.
+func TestPushBranchGogitUnusableOriginIsCapabilityGap(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	gitRun(t, dir, "remote", "add", "origin", "git@github.com:o/r.git") // ssh: token can't attach on gogit
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.NewGogitClient(),
+		PushCred: func() (*gitx.PushAuth, error) {
+			return &gitx.PushAuth{Username: "x", Token: "t", Host: "github.com"}, nil
+		}}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if o.Gate != nil {
+		t.Fatalf("an unusable-origin push has nothing to approve; must not gate: %+v", o.Gate)
+	}
+	if tb.PushRequested {
+		t.Fatal("must NOT schedule a push it cannot actually perform")
+	}
+	if !strings.Contains(o.Result, "https github.com origin") {
+		t.Fatalf("expected an origin-capability gap, got %q", o.Result)
+	}
+}
+
+// TestPushBranchLocksMutationsAfterScheduled pins Codex's approval-window fix: once a push is
+// scheduled, mutating tools are frozen (so the pushed state == the approved state), read-only tools
+// remain, and a repeat push_branch is idempotent.
+func TestPushBranchLocksMutationsAfterScheduled(t *testing.T) {
+	dir := newRepoOnBranch(t, "l00prite/run-x")
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.Detect()}
+	if o := tb.Execute(context.Background(), "push_branch", map[string]any{}, true); !tb.PushRequested {
+		t.Fatalf("push was not scheduled: %q", o.Result)
+	}
+	for _, name := range []string{"write_file", "run_command", "git_command"} {
+		mo := tb.Execute(context.Background(), name, map[string]any{"path": "x.txt", "content": "y", "command": "true", "args": []string{"status"}}, false)
+		if !strings.Contains(mo.Result, "already scheduled") {
+			t.Fatalf("%s must be frozen after a scheduled push, got %q", name, mo.Result)
+		}
+	}
+	if ro := tb.Execute(context.Background(), "read_file", map[string]any{"path": "f.txt"}, false); strings.Contains(ro.Result, "already scheduled") {
+		t.Fatalf("read_file must remain available after a scheduled push, got %q", ro.Result)
+	}
+	r2 := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if r2.Gate != nil || !strings.Contains(r2.Result, "already_scheduled") {
+		t.Fatalf("repeat push_branch must be idempotent, got gate=%+v result=%q", r2.Gate, r2.Result)
+	}
+}
+
+// TestPushBranchApprovedSchedulesThenPushes: an approved push_branch does NOT push inline (that
+// would ship the pre-unit HEAD, before CommitUnit) — it SCHEDULES the push, and PerformPendingPush
+// (which the engine calls after committing the unit) is what actually lands the branch on origin.
+func TestPushBranchApprovedSchedulesThenPushes(t *testing.T) {
+	dir := newRepoOnBranch(t, "l00prite/run-x")
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+	gitRun(t, dir, "remote", "add", "origin", bare)
+
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.Detect()}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, true) // approved
+	if o.Gate != nil {
+		t.Fatalf("approved push should not gate, got %+v", o.Gate)
+	}
+	if !strings.Contains(o.Result, `"status":"push_scheduled"`) || !tb.PushRequested {
+		t.Fatalf("approved push_branch must SCHEDULE (not push inline): result=%q PushRequested=%v", o.Result, tb.PushRequested)
+	}
+	// Nothing on origin yet — the push is deferred until the engine commits the unit.
+	if out := gitRun(t, bare, "branch", "--list", "l00prite/run-x"); strings.TrimSpace(out) != "" {
+		t.Fatalf("branch must not be on origin before the deferred push: %q", out)
+	}
+	// The engine's post-commit step performs the pending push.
+	pushed, err := tb.PerformPendingPush(context.Background())
+	if err != nil || !pushed {
+		t.Fatalf("PerformPendingPush: pushed=%v err=%v", pushed, err)
+	}
+	if got := strings.TrimSpace(gitRun(t, bare, "rev-parse", "refs/heads/l00prite/run-x")); len(got) != 40 {
+		t.Fatalf("run branch did not land on the bare origin after the deferred push: %q", got)
+	}
+	// A second PerformPendingPush with the flag still set is idempotent (already up to date -> nil).
+	if _, err := tb.PerformPendingPush(context.Background()); err != nil {
+		t.Fatalf("second PerformPendingPush should be a no-op/nil, got %v", err)
+	}
+}
+
 // ---- git_command under the gogit fallback (Kind()!="exec") ----
 
 // gogitRefusal is the exact, unchanged hard-refusal message any out-of-contract git_command call

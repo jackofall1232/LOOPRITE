@@ -143,6 +143,15 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleAutoPRGet(w, r)
 		case r.Method == http.MethodPost && p == "/v1/auto-pr":
 			app.HandleAutoPRSet(w, r)
+		// Authenticated "Connect GitHub" credential (dashboard GitHub card). The token is verified
+		// live, vault-sealed, and never returned; a model can never reach these (no HTTP client in
+		// the engine/chat toolboxes).
+		case r.Method == http.MethodGet && p == "/v1/github/status":
+			app.HandleGitHubStatus(w, r)
+		case r.Method == http.MethodPost && p == "/v1/github/connect":
+			app.HandleGitHubConnect(w, r)
+		case r.Method == http.MethodPost && p == "/v1/github/disconnect":
+			app.HandleGitHubDisconnect(w, r)
 		// Authenticated provider lifecycle management (Part E) — flat POST actions, name in the body.
 		case r.Method == http.MethodPost && p == "/v1/providers":
 			app.HandleProviderAdd(w, r)
@@ -263,6 +272,9 @@ func Start(ov Overrides) {
 	// reconcile any run left "running" by a crash: the engine store marks it interrupted, and the
 	// next pre-flight for that repo performs repo-side stale-run recovery per execute-loop.md.
 	eng := engine.New(&engine.Store{DB: db}, gateway.NewEngineCaller(app))
+	// The push_branch tool's credential source: decrypt the project's stored GitHub token at call
+	// time. Injected here so the engine package never imports the vault (security/state).
+	eng.PushCred = app.GitHubAuthFor
 	if n, _ := eng.Store.ReconcileOrphans(); n > 0 {
 		fmt.Printf("  • reconciled %d interrupted run(s) from a previous boot\n", n)
 	}

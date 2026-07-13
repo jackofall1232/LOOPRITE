@@ -8,9 +8,12 @@ package gitx
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,4 +228,109 @@ func (c execClient) Raw(ctx context.Context, repo string, args ...string) (strin
 		return out, fmt.Errorf("%v: %s", err, strings.TrimSpace(out))
 	}
 	return out, nil
+}
+
+// gitConfigCount returns the current GIT_CONFIG_COUNT in env (0 if absent or unparseable). Push
+// APPENDS its extraheader as the next index rather than clobbering GIT_CONFIG_* the host already set
+// (a proxy, a credential helper, prompt config, ...). env is last-value-wins, so appending a higher
+// GIT_CONFIG_COUNT is what git reads while the host's existing entries survive at their own indices.
+func gitConfigCount(env []string) int {
+	n := 0
+	for _, e := range env {
+		if v, ok := strings.CutPrefix(e, "GIT_CONFIG_COUNT="); ok {
+			if p, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && p >= 0 {
+				n = p
+			}
+		}
+	}
+	return n
+}
+
+// buildPushEnv returns env with the credential extraheader appended at the next free GIT_CONFIG
+// index, having FIRST removed any existing GIT_CONFIG_COUNT entry. That removal is load-bearing:
+// Go's exec passes duplicate env keys through verbatim, and git (C getenv) reads the FIRST match,
+// so a leftover host GIT_CONFIG_COUNT would win over an appended one and git would ignore the
+// injected header entirely. Existing GIT_CONFIG_KEY_*/VALUE_* entries are preserved (the header is
+// added at index = old count), so host-set git-config-env still applies.
+func buildPushEnv(env []string, scope, username, token string) ([]string, string) {
+	kv, b64 := extraHeaderEnv(gitConfigCount(env), scope, username, token)
+	out := make([]string, 0, len(env)+len(kv))
+	for _, e := range env {
+		if !strings.HasPrefix(e, "GIT_CONFIG_COUNT=") {
+			out = append(out, e)
+		}
+	}
+	return append(out, kv...), b64
+}
+
+// extraHeaderEnv builds the env-only git config (git >= 2.31) that injects an HTTP Authorization
+// header scoped to exactly `scope` (a "<scheme>://<host>/" prefix), placed at GIT_CONFIG index
+// startIndex (so it appends after any host-set entries — see gitConfigCount). The token is base64'd
+// into the header VALUE and never appears as cleartext, in argv, or on disk. Returned separately
+// (rather than inlined) so a test can assert the exact shape and that the raw token is nowhere in it.
+func extraHeaderEnv(startIndex int, scope, username, token string) (env []string, b64 string) {
+	b64 = base64.StdEncoding.EncodeToString([]byte(username + ":" + token))
+	idx := strconv.Itoa(startIndex)
+	return []string{
+		"GIT_CONFIG_COUNT=" + strconv.Itoa(startIndex+1),
+		"GIT_CONFIG_KEY_" + idx + "=http." + scope + ".extraheader",
+		"GIT_CONFIG_VALUE_" + idx + "=AUTHORIZATION: basic " + b64,
+	}, b64
+}
+
+// RemoteURL returns the PUSH URL for remote via `git remote get-url --push` (remote.<name>.pushurl
+// if configured, else the fetch URL). Every caller uses this to decide credential scoping and to
+// resolve the PR-target owner/repo — all of which must key off where a push actually GOES, not the
+// (possibly different) fetch URL.
+func (c execClient) RemoteURL(repo, remote string) (string, error) {
+	out, err := c.runTimed(repo, "remote", "get-url", "--push", remote)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// Push runs `git push -u <remote> refs/heads/<branch>:refs/heads/<branch>` with a fixed argument
+// vector — the token, when supplied, is NEVER in argv. A non-nil auth is injected only as a
+// host-scoped extra HTTP Authorization header via env-only git config (GIT_CONFIG_*, git >= 2.31):
+// nothing is written to .git/config, nothing lands in argv, and the header is scoped to exactly the
+// scheme://host the remote points at, so it can never leak to another origin. GIT_TERMINAL_PROMPT=0
+// keeps a credential-less push failing fast instead of blocking on a prompt no TTY can answer. Any
+// error text is scrubbed of the token (and its base64 form) before it leaves the package.
+func (c execClient) Push(ctx context.Context, repo, remote, branch string, auth *PushAuth) error {
+	cctx, cancel := context.WithTimeout(ctx, gitTimeoutSec*time.Second)
+	defer cancel()
+
+	args := []string{"-C", repo, "push", "-u", remote, pushRefspec(branch)}
+	cmd := exec.CommandContext(cctx, "git", args...)
+	env := append(util.ScrubSecretEnv(os.Environ()),
+		"LC_ALL=C",
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15",
+	)
+
+	var b64 string
+	if auth != nil && auth.Token != "" {
+		remoteURL, err := c.RemoteURL(repo, remote)
+		if err != nil {
+			// Defensive: a remote-URL lookup failure shouldn't carry the token (the token is never
+			// passed to `git remote get-url`), but scrub it before surfacing regardless.
+			return errors.New(redactSecrets(err.Error(), auth.token()))
+		}
+		// Attach the token ONLY to an https remote on the credential's own host. For any other
+		// remote (an ssh remote, a different/foreign https host, a cleartext http URL) the token is
+		// NOT attached — the push falls back to ambient credentials instead of leaking the token or
+		// failing just because one was supplied. See credentialScope.
+		if scope, ok := credentialScope(remoteURL, auth); ok {
+			env, b64 = buildPushEnv(env, scope, auth.Username, auth.Token)
+		}
+	}
+	cmd.Env = env
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := redactSecrets(strings.TrimSpace(string(out)), auth.token(), b64)
+		return fmt.Errorf("%v: %s", err, msg)
+	}
+	return nil
 }

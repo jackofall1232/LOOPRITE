@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  App theme, day (light) variant. Paired with values-night/styles.xml, this makes the whole app —
+  the native "Starting…" screen, the Import-repo button, AlertDialogs, and (crucially) the WebView's
+  isLightTheme signal — follow the DEVICE's light/dark setting. Before this the app declared no theme
+  at all, so the framework pinned the light DeviceDefault theme (isLightTheme=true) even on a dark
+  device, which is one half of why the dashboard rendered black-on-black (see MainActivity's
+  force-dark opt-out and dashboard.html's data-theme handling for the other halves).
+
+  Not DeviceDefault.DayNight: that parent is API 29+, but minSdk is 26 — a values/values-night split
+  is the portable way to get day/night on every supported API. NoActionBar because the activity is a
+  full-bleed WebView.
+-->
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar"/>
+</resources>

@@ -93,6 +93,21 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 	// so the pending-attempt / retry logic can read the current branch before we decide to no-op.
 	git := gitx.Detect()
 
+	// A stored GitHub connection (dashboard "Connect GitHub") lets the push + PR-create below work
+	// on ANY backend — including a bare Android host with no git binary or gh — using a token
+	// instead of ambient credentials. Nil when nothing is connected (a decrypt failure is treated as
+	// nil too): every path below then behaves exactly as it did before this feature existed. The
+	// token is resolved once per request and never logged.
+	scaffoldAuth, _ := app.GitHubAuthFor(principal.Project)
+	// The token transport only works for an https github.com origin (git.Push over HTTPS + a REST
+	// PR). For an ssh github remote or ANY non-github remote, drop it to nil so every scaffold path
+	// (probe/push/PR-lookup) falls back UNIFORMLY to the ambient git/gh path — otherwise the probe
+	// would fall through to ambient while openScaffoldPR hard-failed on the token path, breaking
+	// "Add l00prite" for a non-GitHub repo the moment a token is connected to its project.
+	if scaffoldAuth != nil && !tokenUsableForOrigin(git, root, scaffoldAuth) {
+		scaffoldAuth = nil
+	}
+
 	// Retry tracking (repo_scaffold_state.go): a prior "Add l00prite" attempt can create+commit a
 	// branch locally and THEN hit a push/PR capability gap. The protocol files it committed make
 	// FullProtocolGaps() report the repo "complete", so BEFORE this feature a retry click no-op'd on
@@ -287,7 +302,7 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 	var existingPRFound bool
 	if attemptedPR {
 		ctx := r.Context()
-		ok, gapMsg, rawErr := probePushPRCapability(ctx, git, root, branch)
+		ok, gapMsg, rawErr := probePushPRCapability(ctx, git, root, branch, scaffoldAuth)
 		// Pure-retry only (nothing newly committed): the operator may have opened the PR by hand via
 		// the fallback command between attempts, so look it up ONCE here, after the probe passed and
 		// before any push. Exactly one call, bound to a variable: lookupExistingPR fails OPEN to ""
@@ -296,7 +311,7 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 		// decides the branch below must be the same one the response reports.
 		existingPRURL := ""
 		if ok && isRetry && len(created) == 0 {
-			existingPRURL = lookupExistingPR(ctx, root, branch)
+			existingPRURL = lookupExistingPR(ctx, git, root, branch, scaffoldAuth)
 		}
 		switch {
 		case !ok:
@@ -318,7 +333,7 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 			app.auditAs(principal, "repo.scaffold_branch.pr", prURL)
 		default:
 			var perr error
-			pushed, prURL, perr = openScaffoldPR(ctx, git, root, branch, scaffoldPRTitle, scaffoldPRBody(branch))
+			pushed, prURL, perr = openScaffoldPR(ctx, git, root, branch, scaffoldPRTitle, scaffoldPRBody(branch), scaffoldAuth)
 			switch {
 			case perr != nil && pushed:
 				// The consented push already landed on origin — never rolled back, never retried
@@ -329,7 +344,15 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 				app.markScaffoldAttemptPushed(id)
 				app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr.Error())
 			case perr != nil:
-				capabilityGap = gapPushFailed
+				// The token path runs no `git push --dry-run` pre-check (probePushPRCapability
+				// returns ok=true immediately for a connected github.com origin), so gapPushFailed's
+				// "a dry run of the same push just succeeded" would be a false claim there. Use an
+				// honest token-scoped message when the connection was in play.
+				if scaffoldAuth != nil {
+					capabilityGap = gapTokenPushFailed
+				} else {
+					capabilityGap = gapPushFailed
+				}
 				app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr.Error())
 				// No row change: the push never landed, so the pending attempt stays retryable as-is.
 			case prURL == "":
@@ -386,7 +409,7 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 					app.auditAs(principal, "repo.scaffold_branch.pr_gap", aerr.Error())
 				} else if _, cerr := engine.CommitUnit(git, root, "Record PR URL in l00prite ledger"); cerr != nil {
 					app.auditAs(principal, "repo.scaffold_branch.pr_gap", cerr.Error())
-				} else if perr2 := pushLedgerUpdate(ctx, git, root, branch); perr2 != nil {
+				} else if perr2 := pushLedgerUpdate(ctx, git, root, branch, scaffoldAuth); perr2 != nil {
 					app.auditAs(principal, "repo.scaffold_branch.pr_gap", perr2.Error())
 				}
 			}

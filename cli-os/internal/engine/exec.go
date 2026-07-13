@@ -51,7 +51,15 @@ func (e *Engine) runCoder(ctx context.Context, run *Run, f Files, tb *Toolbox, p
 		default:
 		}
 		req := map[string]any{"model": model, "messages": messages, "tools": tb.Definitions(), "max_tokens": 4096}
-		turn, err := e.callRole(ctx, run, RoleCode, req, false, plan.Bridge)
+		// Coder turns are STRUCTURALLY non-bridge, never plan.Bridge. THIS loop is the only place
+		// tb.Execute runs, and it only receives tool calls when the turn goes through runTurn
+		// (EngineCaller.Turn's non-bridge branch). A bridged turn routes through RunBridge, which
+		// answers every non-bridge tool call (write_file, git_command, push_branch, ...) with a
+		// "nobody owns this call" capability-gap string and NEVER executes it — so a bridged coder
+		// can neither edit files nor push (the 2026-07 "the only tool is l00prite_bridge / cannot
+		// git push" run). Delegation is a chat-time feature incompatible with the engine's own
+		// tool-execution loop; the coder must always run non-bridge regardless of the objective.
+		turn, err := e.callRole(ctx, run, RoleCode, req, false, false)
 		if err != nil {
 			return "coder call failed: " + err.Error(), BoundaryHumanReview
 		}

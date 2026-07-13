@@ -83,6 +83,24 @@ public class MainActivity extends Activity {
         webView = new WebView(this);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
+        // The dashboard themes itself (data-theme attribute + prefers-color-scheme). Any
+        // WebView-side "algorithmic darkening" (force-dark) then double-inverts a page that already
+        // handles dark mode — the black-on-black Add-provider / Register-repo modals the user hit.
+        // Turn it off so the page's own CSS is authoritative. SDK-guarded because these are API 29+
+        // APIs; on any device where a call here is unavailable the page-side data-theme override
+        // (driven by the &theme= param appended in onPollFinished) still wins the cascade.
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            try {
+                webView.setForceDarkAllowed(false);
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    webView.getSettings().setAlgorithmicDarkeningAllowed(false);
+                } else {
+                    webView.getSettings().setForceDark(android.webkit.WebSettings.FORCE_DARK_OFF);
+                }
+            } catch (Throwable t) {
+                // Best-effort: the page-side data-theme override still fixes the palette regardless.
+            }
+        }
         webView.setWebViewClient(new WebViewClient());
         webView.setVisibility(View.GONE);
         root.addView(webView, fill);
@@ -233,7 +251,15 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (succeeded) {
-                    webView.loadUrl(BASE_URL + "?ss=" + setupSecret);
+                    // Pass the device's night-mode setting to the page so its theme is
+                    // device-determined (data-theme), independent of what the WebView reports for
+                    // prefers-color-scheme. A device theme flip recreates this activity (no
+                    // configChanges declared) -> fresh poll -> reload with the new value.
+                    boolean night = (getResources().getConfiguration().uiMode
+                            & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                    webView.loadUrl(BASE_URL + "?ss=" + setupSecret
+                            + "&theme=" + (night ? "dark" : "light"));
                     webView.setVisibility(View.VISIBLE);
                     statusView.setVisibility(View.GONE);
                 } else {
