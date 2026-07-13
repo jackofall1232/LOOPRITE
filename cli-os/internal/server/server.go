@@ -143,6 +143,13 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleAutoPRGet(w, r)
 		case r.Method == http.MethodPost && p == "/v1/auto-pr":
 			app.HandleAutoPRSet(w, r)
+		// Authenticated per-project Playground tool-call budget (dashboard "Tool budget" modal,
+		// mirrors auto-pr). Raises the chat read-only-tool round/call caps up to a compile-time
+		// ceiling; the loop can never raise its own (see gateway/chatlimits.go).
+		case r.Method == http.MethodGet && p == "/v1/chat-limits":
+			app.HandleChatLimitsGet(w, r)
+		case r.Method == http.MethodPost && p == "/v1/chat-limits":
+			app.HandleChatLimitsSet(w, r)
 		// Authenticated "Connect GitHub" credential (dashboard GitHub card). The token is verified
 		// live, vault-sealed, and never returned; a model can never reach these (no HTTP client in
 		// the engine/chat toolboxes).

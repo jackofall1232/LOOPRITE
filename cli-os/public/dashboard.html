@@ -486,6 +486,7 @@
             <select id="play-model" class="play-select" title="Model, provider/model pin, or auto profile"><option value="auto">auto</option></select>
             <input type="text" id="play-model-custom" class="play-select hidden" placeholder="model id, e.g. glm-5.2" title="Sent as-is — for providers whose catalog isn't known">
             <select id="play-repo" class="play-select" title="Let the model browse this repo's files and inject its .l00prite memory"><option value="">no repo selected</option></select>
+            <button class="btn sm" id="play-limits" title="How much repo-browsing the assistant may do in a single reply">Tool budget</button>
             <button class="btn sm" id="play-clear">Clear</button>
           </div>
         </div>
@@ -901,6 +902,67 @@
       busy(saveBtn,"Saving…");
       const {res,data:resp}=await api("POST","/v1/auto-pr",{enabled: curMode()==="on"});
       if(!res.ok){ unbusy(saveBtn,"Save"); note.innerHTML=`<div class="note err">${esc(mErr(resp,"Could not save the Auto-PR setting."))}</div>`; return; }
+      afterMutation();
+    };
+  }
+
+  // ---- Playground tool budget (Playground → Tool budget) ----
+  // Same GET-to-prefill / validate / POST-to-save / afterMutation shape as the budget & Auto-PR
+  // modals. Raises how much repo-browsing one Playground reply may do, up to a hard server ceiling;
+  // the gateway can never raise its own limit (chatlimits.go), and the daily cost budget still applies.
+  async function openChatLimitsModal(){
+    openModal(`
+      <div class="eyebrow"><span class="tick"></span> Playground</div>
+      <h3>Playground tool budget</h3>
+      <div class="sub" id="cl-sub">Loading…</div>
+      <div class="field"><label>Tool rounds per reply</label>
+        <input type="text" id="cl-rounds" placeholder="default">
+        <div style="margin-top:6px;font-size:11.5px;color:var(--text-3)">Each round is one metered model turn; the assistant reads files between rounds. <span id="cl-rounds-def"></span></div></div>
+      <div class="field"><label>File reads per reply</label>
+        <input type="text" id="cl-calls" placeholder="default">
+        <div style="margin-top:6px;font-size:11.5px;color:var(--text-3)">Total read_file / list_dir / search_files / propose_run calls across all rounds. <span id="cl-calls-def"></span></div></div>
+      <div id="cl-warn"></div>
+      <div id="cl-note"></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="cl-save" disabled>Save</button>
+      </div>`);
+    const roundsIn=$("cl-rounds"), callsIn=$("cl-calls"), warn=$("cl-warn"), note=$("cl-note"), saveBtn=$("cl-save");
+    const project=(S.summary&&S.summary.principal&&S.summary.principal.project)||"default";
+    saveBtn.disabled=true;
+    const {res,data}=await api("GET","/v1/chat-limits");
+    if(!res.ok || !data){ note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not load the current tool budget."))}</div>`; return; }
+    saveBtn.disabled=false;
+    const def=data.defaults||{rounds:6,calls:24}, ceil=data.ceilings||{rounds:24,calls:96}, eff=data.effective||{};
+    $("cl-sub").innerHTML = `How much repo-browsing the assistant may do in a single reply, for project <span class="mono">${esc(project)}</span>. Runs have their own per-run budget (New run → Advanced). In effect now: <b>${esc(String(eff.rounds!=null?eff.rounds:def.rounds))}</b> rounds / <b>${esc(String(eff.calls!=null?eff.calls:def.calls))}</b> calls.`;
+    $("cl-rounds-def").textContent = `Default ${def.rounds}, maximum ${ceil.rounds}.`;
+    $("cl-calls-def").textContent = `Default ${def.calls}, maximum ${ceil.calls}.`;
+    // 0/unset shows blank so the placeholder ("default") communicates "leave empty to use the default".
+    roundsIn.value = data.max_tool_rounds>0 ? String(data.max_tool_rounds) : "";
+    callsIn.value  = data.max_tool_calls>0  ? String(data.max_tool_calls)  : "";
+    function syncWarn(){
+      const r=parseInt(roundsIn.value.trim(),10), c=parseInt(callsIn.value.trim(),10);
+      warn.innerHTML = ((Number.isInteger(r)&&r>def.rounds)||(Number.isInteger(c)&&c>def.calls))
+        ? `<div class="note warn">A bigger budget spends more per reply — each extra round re-sends the whole conversation. Your daily budget (Costs → Set budget) still applies and will stop a runaway reply.</div>`
+        : "";
+    }
+    roundsIn.oninput=syncWarn; callsIn.oninput=syncWarn; syncWarn();
+    // Empty means "reset to the default" (sent as 0). A present value must be a whole number within 0..ceiling.
+    function parseField(raw, ceiling, label){
+      const s=raw.trim();
+      if(s==="") return 0;
+      const n=parseInt(s,10);
+      if(!Number.isInteger(n) || String(n)!==s || n<0 || n>ceiling) throw new Error(`${label} must be a whole number between 0 (use the default) and ${ceiling}.`);
+      return n;
+    }
+    saveBtn.onclick=async()=>{
+      let payload;
+      try{ payload={max_tool_rounds:parseField(roundsIn.value,ceil.rounds,"Tool rounds"), max_tool_calls:parseField(callsIn.value,ceil.calls,"File reads")}; }
+      catch(e){ note.innerHTML=`<div class="note err">${esc(e.message)}</div>`; return; }
+      busy(saveBtn,"Saving…");
+      const {res,data:resp}=await api("POST","/v1/chat-limits",payload);
+      if(!res.ok){ unbusy(saveBtn,"Save"); note.innerHTML=`<div class="note err">${esc(mErr(resp,"Could not save the tool budget."))}</div>`; return; }
       afterMutation();
     };
   }
@@ -1560,6 +1622,7 @@
       <details style="margin-top:14px">
         <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-2)">Advanced</summary>
         <div class="field"><label>Max iterations <span class="opt">— optional, server default otherwise</span></label><input type="text" id="cr-maxiter" placeholder="server default"></div>
+        <div class="field"><label>Max tool calls per unit <span class="opt">— optional, server default (40) otherwise; raise it if a unit runs out of tool calls before finishing</span></label><input type="text" id="cr-maxtool" placeholder="server default"></div>
         <div class="field"><label>Gates <span class="opt">— per-action permission for each class</span></label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:6px">
             ${GATE_CLASSES.map(([cls,label])=>gateSelectField(cls,label)).join("")}
@@ -1633,6 +1696,8 @@
       const payload={repo:repoId, goal, objective:objSel.value, gates, command_allowlist:allowlist};
       const maxIterRaw=document.getElementById("cr-maxiter").value.trim();
       if(maxIterRaw){ const n=parseInt(maxIterRaw,10); if(Number.isInteger(n) && n>0) payload.max_iterations=n; }
+      const maxToolRaw=document.getElementById("cr-maxtool").value.trim();
+      if(maxToolRaw){ const n=parseInt(maxToolRaw,10); if(Number.isInteger(n) && n>0) payload.max_tool_calls=n; }
       busy(submitBtn,"Creating…");
       const {res,data}=await api("POST","/v1/runs",payload);
       if(!res.ok){ unbusy(submitBtn,"Create run"); note.innerHTML=`<div class="note err">${esc(mErr(data,"Could not create the run."))}</div>`; return; }
@@ -1708,6 +1773,7 @@
       <div class="field"><label>Branch</label><div class="mono">${esc(pf.branch||"—")}</div></div>
       <div class="field"><label>Command allowlist</label>${allowHtml}</div>
       <div class="field"><label>Gates</label>${gatesHtml}</div>
+      <div class="field"><label>Budgets</label><div>${esc(pf.max_iterations!=null?pf.max_iterations:"—")} iterations · ${esc(pf.max_tool_calls!=null?pf.max_tool_calls:"—")} tool calls per unit</div></div>
       <div class="field"><label>No-progress threshold</label><div>${esc(pf.no_progress_threshold!=null?pf.no_progress_threshold:"—")}</div></div>
       <div class="field"><label>Likely changed paths</label>${pathsHtml}</div>
       <div class="field"><label>Per-action permission</label>${permHtml}</div>
@@ -1927,6 +1993,9 @@
             <button class="btn sm primary" data-open-run="${esc(r.id||"")}">Review &amp; start</button>
             <span class="opt">Nothing runs until you review the pre-flight and type EXECUTE.</span>
           </div></div>`; }
+      if(m.role==="capnote"){ const c=m.cap||{};
+        return `<div class="note warn" style="text-align:left;margin:8px 0"><b>Tool budget spent for this reply</b> (${esc(String(c.rounds_used||0))} rounds / ${esc(String(c.tool_calls_used||0))} tool calls). Any Progress Notes above carry forward — say <i>continue</i> to build on them, or raise the budget.
+          <div style="margin-top:8px"><button class="btn sm" data-open-limits="1">Raise tool budget</button></div></div>`; }
       if(m.role==="error") return `<div class="msg err">${esc(m.content)}</div>`;
       const meta=m.meta?`<div class="m-meta">${esc(m.meta.model||"")}${m.meta.pt!=null?` · ${esc(String(m.meta.pt))} in / ${esc(String(m.meta.ct==null?"?":m.meta.ct))} out`:""}</div>`:"";
       return `<div class="msg ${m.role==="user"?"user":"assistant"}">${esc(m.content)}${meta}</div>`;
@@ -2067,6 +2136,11 @@
     const proposed=Array.isArray(data&&data.l00prite_proposed_runs)?data.l00prite_proposed_runs:[];
     proposed.forEach(r=>chat.push({role:"run",run:r}));
     if(proposed.length) loadRuns();
+    // Additive, non-standard field: when the reply used up its whole per-turn tool budget, surface a
+    // hint so the user can raise it (or continue from the Progress Notes) instead of silently
+    // re-sending and re-exploring. Absent on every normal reply.
+    const ct=data&&data.l00prite_chat_tools;
+    if(ct&&ct.cap_reached) chat.push({role:"capnote",cap:ct});
     renderChat();
   }
 
@@ -2124,7 +2198,11 @@
     openRunDetail(row.dataset.run);
   });
   $("play-send").onclick=playSend;
-  $("play-log").addEventListener("click", e => { const b = e.target.closest("[data-open-run]"); if (b) openRunDetail(b.dataset.openRun); });
+  $("play-limits").onclick=()=>openChatLimitsModal();
+  $("play-log").addEventListener("click", e => {
+    const r = e.target.closest("[data-open-run]"); if (r) { openRunDetail(r.dataset.openRun); return; }
+    const l = e.target.closest("[data-open-limits]"); if (l) openChatLimitsModal();
+  });
   $("play-model").onchange=()=>{ syncCustomModel(); if(readModelLock()) writeModelLock(); };
   $("play-model-custom").addEventListener("input",()=>{ if(readModelLock()) writeModelLock(); });
   $("play-lock").onclick=()=>{ if(readModelLock()) clearModelLock(); else writeModelLock(); syncLockUI(); };

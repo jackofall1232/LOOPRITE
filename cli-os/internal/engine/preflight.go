@@ -151,6 +151,7 @@ func (e *Engine) BuildPreflight(run *Run) (*Preflight, error) {
 		Goal:                run.Config.Goal,
 		Objective:           run.Config.Objective,
 		MaxIterations:       run.Config.MaxIterations,
+		MaxToolCalls:        e.effectiveMaxToolCalls(run), // display what runCoder will enforce (legacy 0-row -> default)
 		RunBoundaries:       RunBoundaries,
 		PerActionPermission: perActionPermissions,
 		NoProgressThreshold: run.Config.NoProgressThreshold,

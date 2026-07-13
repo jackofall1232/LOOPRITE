@@ -2005,3 +2005,68 @@ Append one entry per agent run. Do not overwrite prior runs.
   future session.
 - **Do-not-retry notes:** none.
 - **Lock:** none held.
+
+### Run 2026-07-13T02:40:00Z — Claude (Opus 4.8), branch claude/tool-call-limit-override-45hq8m, tool-call budget overrides
+- **Goal:** Maintainer report — "running into a tool call limit when asking it to pr; there
+  should be a way to override that because it costs tokens and it makes it start over." Fable used
+  as advisor.
+- **Diagnosis:** two hardcoded caps in `cli-os/`. The Playground chat loop (`RunChatTools`,
+  `chatloop.go`) caps at `chatMaxToolRounds=6`/`chatMaxToolCallsRun=24` per turn; on the cap it
+  forces a "send a follow-up to continue" answer, and the follow-up re-explores from scratch (the
+  dashboard replays only user/assistant text, dropping tool results) — the "start over". The
+  engine coder loop (`runCoder`, `exec.go`) caps at `Engine.MaxToolCalls=40` per unit with no
+  API/UI knob. Bridge already had a configurable, lower-only cap (`BridgeMaxHops`) — the template
+  for a safe override.
+- **Design (Fable advisor / Opus implementer):** Fable produced a verified design-of-record and
+  caught a latent `int(1e300)` float→int underflow in the `BridgeMaxHops` pattern itself. Built
+  two HUMAN-set, clamped knobs that preserve the self-modification guard: (A) per-project chat
+  budget via new `GET/POST /v1/chat-limits` (`chatlimits.go`) + `project_settings` columns —
+  `effectiveChatLimits` = default→stored(clamped to compile-time ceiling 24/96)→per-request header
+  (LOWER-only, float-space compare)→floor 1; (B) per-run coder budget `RunConfig.MaxToolCalls`
+  (default 40, clamp 1..200, frozen at creation, legacy-0-row → `Engine.MaxToolCalls`) wired
+  through the store columns/scan + pre-flight + run view + New-run modal; (C) `BridgeMaxHops`
+  overflow fix; (D) "start over" mitigation — Progress-Notes carry-forward prompt + additive
+  `l00prite_chat_tools` response field → dashboard "Raise tool budget" hint. `propose_run` gains
+  NO budget field; EXECUTE gate untouched; defaults byte-for-byte unchanged.
+- **Changed files:** `cli-os/internal/gateway/{chatlimits.go (new),chatloop.go,chattools.go,ingress.go,runs.go,bridge.go}`,
+  `cli-os/internal/gateway/adapters/mock.go` (test-only `/chattoolloop`), `cli-os/internal/engine/{types,store,exec,preflight}.go`,
+  `cli-os/internal/server/server.go`, `cli-os/internal/state/db.go`, `cli-os/public/dashboard.html`,
+  five new test files, plus the v0.7.0-beta release set (`dashboard.go` Version, `downloads/`,
+  `CHANGELOG.md`, `index.html`).
+- **Verification:** `go build/vet/test -race ./...` all green (new regression tests incl. the
+  `1e300` underflow fail-first and the coder budget honored above 40); `gofmt` clean;
+  `node scripts/validate-l00prite.js` 519 PASS / 0 FAIL; live gateway smoke (raised→9 drafts,
+  header lowers→1, `1e300` ignored, run-create 55 kept/9999→200 clamped) + Playwright dashboard
+  (zero console errors); APK rebuilt+signed v0.7.0-beta (`apksigner verify` v2+v3 true,
+  `versionName='0.7.0-beta'`, sha256 `eb1d33fd…`). A 5-lens adversarial review (per-finding
+  verify + synthesis) confirmed zero defects and all four hard invariants.
+- **Decisions:** override is human-only and clamped; a per-request header can only lower; the loop
+  can never raise its own limit. No PR opened (not requested).
+- **Do-not-retry notes:** the mock chat-tool adapter emits a tool call only ONCE per `/chattool`
+  directive (guarded by `mockHasToolResult`), so raising the round budget cannot be driven end to
+  end without the new `/chattoolloop` variant — don't expect `/chattool` to loop.
+- **Lock:** none held (solo pass; `.l00prite/lock.json` released).
+- **PR #17 review round (2026-07-13, gemini-code-assist):** one non-blocking suggestion —
+  extract the duplicated lower-only header parse/validate/float-space-compare shared by
+  `chatEffectiveOne` and `BridgeMaxHops` into a single helper (the exact divergence that caused
+  R1). Applied: new `lowerByHeader` in `chatlimits.go`, both callers routed through it,
+  `math`/`strconv` dropped from `bridge.go`. Non-behavioral — the existing `1e300`/NaN/Inf tests
+  for BOTH functions pass unchanged, so no version bump and no CHANGELOG change; APK rebuilt in
+  place at v0.7.0-beta (unshipped/in-review) to keep the branch's `downloads/` byte-consistent with
+  source (new sha `71a7b6b4…`, `apksigner` v2+v3 true). `go test -race` green, validator unaffected.
+- **PR #17 review round (2026-07-13, chatgpt-codex-connector, two P2 findings — both verified real
+  against the code, then fixed):** (1) `BuildPreflight` serialized the raw `run.Config.MaxToolCalls`,
+  so a run migrated from v0.6 (column backfilled to 0, `runCoder`'s legacy sentinel → 40 fallback)
+  would DISPLAY "0 tool calls per unit" in the EXECUTE confirmation gate while executing with 40 —
+  a pre-flight-contract mismatch. (2) `runCoder`'s loop counted model TURNS, but executed every
+  `tool_call` in a batched response, so `max_tool_calls:1` could run many mutating calls before
+  pausing — the advertised per-call cap wasn't enforced for batched responses. Fixed with a single
+  shared resolver `ResolveMaxToolCalls`/`DefaultMaxToolCalls`/`MaxToolCallsCeiling` (engine.go) used
+  by the clamp (store.go), the engine default (New), the pre-flight (`e.effectiveMaxToolCalls`), and
+  the run view (runs.go) — one source of truth, no divergence; and per-INDIVIDUAL-call budget
+  enforcement in `runCoder` (terminal `unit_done`/`unit_blocked` never charged). Regression tests:
+  `TestPreflightShowsEffectiveBudgetForLegacyRow`, `TestBatchedToolCallsCountedIndividually` (a
+  3-write batch with `max_tool_calls:1` — confirmed to FAIL against a simulated pre-fix loop, i.e.
+  b.txt/c.txt executed, then PASS after the fix), `TestResolveMaxToolCalls`. `go build/vet/test
+  -race ./...` green, validator 519/0. APK rebuilt in place at v0.7.0-beta (sha `60fecbe4…`,
+  v2+v3 true).

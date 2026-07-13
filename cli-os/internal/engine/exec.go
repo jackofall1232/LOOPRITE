@@ -44,7 +44,15 @@ func (e *Engine) runCoder(ctx context.Context, run *Run, f Files, tb *Toolbox, p
 		map[string]any{"role": "system", "content": coderSystem},
 		map[string]any{"role": "user", "content": coderUnitBrief(run, sel)},
 	}
-	for calls := 0; calls < e.MaxToolCalls; calls++ {
+	// Per-unit tool-call budget: the run's frozen config value (human-set at creation, clamped
+	// 1..200, immutable for the run's life), or the engine default for a legacy pre-v0.7 row
+	// (effectiveMaxToolCalls). It counts INDIVIDUAL tool-call executions -- enforced per call in the
+	// inner loop below, because a provider may return several tool_calls in ONE response, and
+	// max_tool_calls:1 must mean one action, not one turn. The outer loop bounds model turns as a
+	// backstop (an empty/nudge turn can't spin forever); the real cap is toolCallsUsed < budget.
+	budget := e.effectiveMaxToolCalls(run)
+	toolCallsUsed := 0
+	for turn := 0; turn < budget; turn++ {
 		select {
 		case <-ctx.Done():
 			return "stopped mid-unit", BoundaryStopSignal
@@ -98,6 +106,15 @@ func (e *Engine) runCoder(ctx context.Context, run *Run, f Files, tb *Toolbox, p
 				}
 			}
 
+			// Enforce the budget per INDIVIDUAL tool call, so a batched response carrying several
+			// tool_calls can't slip many mutating actions through on one turn's allowance. Terminal
+			// calls (unit_done/unit_blocked) returned above and are never charged.
+			if toolCallsUsed >= budget {
+				return fmt.Sprintf("coder exceeded the per-unit tool-call budget (%d) without finishing — "+
+					"create the run with a larger \"Max tool calls per unit\" to give each unit more room", budget), BoundaryHumanReview
+			}
+			toolCallsUsed++
+
 			outcome := tb.Execute(ctx, name, args, false)
 			if outcome.Gate != nil {
 				// Per-action permission: suspend this action, ask the human, resume on allow.
@@ -116,7 +133,8 @@ func (e *Engine) runCoder(ctx context.Context, run *Run, f Files, tb *Toolbox, p
 			messages = append(messages, toolMsg(id, outcome.Result))
 		}
 	}
-	return "coder exceeded the per-unit tool-call budget without finishing", BoundaryHumanReview
+	return fmt.Sprintf("coder exceeded the per-unit tool-call budget (%d) without finishing — "+
+		"create the run with a larger \"Max tool calls per unit\" to give each unit more room", budget), BoundaryHumanReview
 }
 
 // awaitApproval creates a pending approval, transitions the run to waiting_approval, and blocks

@@ -53,11 +53,37 @@ type approvalSignal struct {
 	allow      bool
 }
 
+// DefaultMaxToolCalls is the protocol default per-unit coder tool-call budget, and the fallback for
+// a legacy (pre-v0.7) run row whose migrated max_tool_calls column reads 0. MaxToolCallsCeiling is
+// the hard clamp CreateRun applies. Kept as the single definition of these two numbers so the
+// clamp, the engine default, the pre-flight display, and the run view can never drift.
+const (
+	DefaultMaxToolCalls = 40
+	MaxToolCallsCeiling = 200
+)
+
+// ResolveMaxToolCalls returns the effective per-unit coder budget: the run's frozen config value,
+// or the supplied fallback for a legacy 0-sentinel row (a pre-v0.7 run whose max_tool_calls was
+// backfilled to 0 by migration). This is the ONE place the fallback logic lives, so runCoder's
+// enforcement, the pre-flight display, and the run view all report the SAME number a run will
+// actually use — a resumed pre-v0.7 run must never show/enforce "0 tool calls".
+func ResolveMaxToolCalls(configured, fallback int) int {
+	if configured > 0 {
+		return configured
+	}
+	return fallback
+}
+
+// effectiveMaxToolCalls resolves this run's per-unit budget against the engine's default fallback.
+func (e *Engine) effectiveMaxToolCalls(run *Run) int {
+	return ResolveMaxToolCalls(run.Config.MaxToolCalls, e.MaxToolCalls)
+}
+
 // New builds an Engine with protocol-sane defaults.
 func New(store *Store, caller ModelCaller) *Engine {
 	return &Engine{
 		Store: store, Caller: caller, Git: gitx.Detect(),
-		LeaseTTLSec: 1800, IterationTimeout: 20 * time.Minute, MaxToolCalls: 40,
+		LeaseTTLSec: 1800, IterationTimeout: 20 * time.Minute, MaxToolCalls: DefaultMaxToolCalls,
 		active: map[string]*runHandle{},
 	}
 }

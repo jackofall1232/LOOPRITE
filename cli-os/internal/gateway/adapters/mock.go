@@ -142,16 +142,25 @@ func mockHadCapabilityGapToolResult(req map[string]any) bool {
 	return false
 }
 
-var chatToolDirectiveRE = regexp.MustCompile(`^/chattool\s+(\S+)\s+([\s\S]+)$`)
+// "/chattool <name> <json-args>"     -> emit the tool call ONCE, then finalize (the common case).
+// "/chattoolloop <name> <json-args>" -> emit it on EVERY round until the loop strips the tools on
+//
+//	its forced-final round -- the chat-tool analogue of
+//	/bridgeloop, used to drive the RunChatTools round/call cap
+//	(and its per-project override) end to end.
+var chatToolDirectiveRE = regexp.MustCompile(`^/chattool(loop)?\s+(\S+)\s+([\s\S]+)$`)
 
-type mockChatToolDirective struct{ name, argsJSON string }
+type mockChatToolDirective struct {
+	name, argsJSON string
+	loop           bool
+}
 
 func mockChatToolDirectiveFrom(req map[string]any) *mockChatToolDirective {
 	m := chatToolDirectiveRE.FindStringSubmatch(strings.TrimSpace(mockLastUserText(req)))
 	if m == nil {
 		return nil
 	}
-	return &mockChatToolDirective{name: m[1], argsJSON: m[2]}
+	return &mockChatToolDirective{loop: m[1] == "loop", name: m[2], argsJSON: m[3]}
 }
 
 // truncate caps s at n characters (runes), never splitting a multibyte rune — closer to JS
@@ -213,10 +222,11 @@ func (mockAdapter) DirectFull(req map[string]any, model string) FullResult {
 		return FullResult{Response: oai.Response(oai.CmplID(), model, message, "tool_calls", u), Usage: u}
 	}
 
-	// Emit a chat-tool call when the request offers one and the last user message directs it,
-	// exactly once (until its result has been folded back in).
-	if mockHasChatTool(req) && !mockHasToolResult(req) {
-		if directive := mockChatToolDirectiveFrom(req); directive != nil {
+	// Emit a chat-tool call when the request offers one and the last user message directs it:
+	// exactly once for /chattool (until its result has been folded back in), or on EVERY round for
+	// /chattoolloop until RunChatTools strips the tools on its forced-final round.
+	if mockHasChatTool(req) {
+		if directive := mockChatToolDirectiveFrom(req); directive != nil && (directive.loop || !mockHasToolResult(req)) {
 			cid := oai.CmplID()
 			callID := "call_" + cid[len(cid)-10:]
 			message := map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{

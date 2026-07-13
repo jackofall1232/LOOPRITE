@@ -48,13 +48,13 @@ type Store struct{ DB *sql.DB }
 // literal for the preflight column so list rows stay small; both keep the same column order so a
 // single scanRun handles either.
 const runCols = `id, project, repo, repo_root, goal, objective, gates, command_allowlist,
-	max_iterations, approval_timeout_s, no_progress_threshold, status, boundary,
+	max_iterations, approval_timeout_s, no_progress_threshold, max_tool_calls, status, boundary,
 	current_iteration, iterations_since_progress, last_progress_iteration, branch,
 	preflight, preflight_at, confirmed_by, confirmed_at, cost_usd, created_at, started_at,
 	ended_at, summary`
 
 const runColsList = `id, project, repo, repo_root, goal, objective, gates, command_allowlist,
-	max_iterations, approval_timeout_s, no_progress_threshold, status, boundary,
+	max_iterations, approval_timeout_s, no_progress_threshold, max_tool_calls, status, boundary,
 	current_iteration, iterations_since_progress, last_progress_iteration, branch,
 	'' AS preflight, preflight_at, confirmed_by, confirmed_at, cost_usd, created_at, started_at,
 	ended_at, summary`
@@ -88,6 +88,16 @@ func (s *Store) CreateRun(project, repoRoot string, cfg RunConfig) (*Run, error)
 	}
 	if cfg.MaxIterations > 100 {
 		cfg.MaxIterations = 100
+	}
+	// Per-unit coder tool-call budget: default 40, clamped 1..200. Same human-set-then-frozen shape
+	// as MaxIterations (the self-modification guard). 0 -> the protocol default here; the engine's
+	// own Engine.MaxToolCalls fallback (exec.go) only ever applies to legacy pre-migration rows that
+	// were persisted before this column existed and therefore read back as 0.
+	if cfg.MaxToolCalls <= 0 {
+		cfg.MaxToolCalls = DefaultMaxToolCalls
+	}
+	if cfg.MaxToolCalls > MaxToolCallsCeiling {
+		cfg.MaxToolCalls = MaxToolCallsCeiling
 	}
 	if cfg.ApprovalTimeoutSec <= 0 {
 		cfg.ApprovalTimeoutSec = 900
@@ -137,10 +147,10 @@ func (s *Store) CreateRun(project, repoRoot string, cfg RunConfig) (*Run, error)
 	_, err = state.Tx(s.DB, func(q state.Querier) (struct{}, error) {
 		_, e := q.ExecContext(state.Ctx(), `INSERT INTO runs
 			(id, project, repo, repo_root, goal, objective, gates, command_allowlist,
-			 max_iterations, approval_timeout_s, no_progress_threshold, status, created_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 max_iterations, approval_timeout_s, no_progress_threshold, max_tool_calls, status, created_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			id, project, cfg.RepoID, repoRoot, cfg.Goal, cfg.Objective, gatesJSON, allowlistJSON,
-			cfg.MaxIterations, cfg.ApprovalTimeoutSec, cfg.NoProgressThreshold, StatusDraft, now)
+			cfg.MaxIterations, cfg.ApprovalTimeoutSec, cfg.NoProgressThreshold, cfg.MaxToolCalls, StatusDraft, now)
 		return struct{}{}, e
 	})
 	if err != nil {
@@ -337,6 +347,7 @@ func scanRun(sc rowScanner) (*Run, error) {
 		&r.ID, &r.Project, &repoID, &r.RepoRoot, &r.Config.Goal, &r.Config.Objective,
 		&gatesJSON, &alJSON,
 		&r.Config.MaxIterations, &r.Config.ApprovalTimeoutSec, &r.Config.NoProgressThreshold,
+		&r.Config.MaxToolCalls,
 		&r.Status, &boundary,
 		&r.CurrentIteration, &r.IterationsSinceProgress, &lastProg, &branch,
 		&preflight, &preflightAt, &confirmedBy, &confirmedAt, &r.CostUSD,

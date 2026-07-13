@@ -336,7 +336,10 @@ func (app *App) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	// RunChatTools attaches read-only repo-browsing tools (read_file/list_dir/search_files) when
 	// repoRoot names a registered repo, and is a no-op passthrough to runTurn otherwise -- see
 	// chatloop.go's doc comment for why streaming/bridging aren't wired to it yet.
-	turn, err := RunChatTools(app, principal, requestID, project, repoID, repoRoot, openaiReq, routeHeader, clientCtx, paths)
+	// Resolve the per-turn chat tool budget: project default/override, then any lower-only request
+	// header. Human-set ceiling; the loop can never raise its own (see chatlimits.go).
+	chatLimits := app.effectiveChatLimits(project, r.Header)
+	turn, err := RunChatTools(app, principal, requestID, project, repoID, repoRoot, openaiReq, routeHeader, clientCtx, paths, chatLimits)
 	if err != nil {
 		logRouteError(app, requestID, project, repoID, err)
 		e := httpErr(err)

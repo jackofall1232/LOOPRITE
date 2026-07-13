@@ -76,6 +76,7 @@ type createRunReq struct {
 	Gates               map[string]string `json:"gates"`
 	CommandAllowlist    []string          `json:"command_allowlist"`
 	MaxIterations       int               `json:"max_iterations"`
+	MaxToolCalls        int               `json:"max_tool_calls"`
 	ApprovalTimeoutSec  int               `json:"approval_timeout_s"`
 	NoProgressThreshold int               `json:"no_progress_threshold"`
 }
@@ -106,6 +107,7 @@ func (app *App) HandleRunCreate(w http.ResponseWriter, r *http.Request) {
 		RepoID: strings.TrimSpace(body.Repo), Goal: strings.TrimSpace(body.Goal),
 		Objective: strings.TrimSpace(body.Objective), Gates: body.Gates,
 		CommandAllowlist: body.CommandAllowlist, MaxIterations: body.MaxIterations,
+		MaxToolCalls:       body.MaxToolCalls,
 		ApprovalTimeoutSec: body.ApprovalTimeoutSec, NoProgressThreshold: body.NoProgressThreshold,
 	}
 	run, pf, err := app.createDraftRun(principal.Project, root, cfg)
@@ -393,6 +395,9 @@ func runView(run *engine.Run) map[string]any {
 		"goal": run.Config.Goal, "objective": run.Config.Objective,
 		"status": run.Status, "boundary": run.Boundary,
 		"current_iteration": run.CurrentIteration, "max_iterations": run.Config.MaxIterations,
+		// Effective budget (a legacy pre-v0.7 row's 0 sentinel -> the engine default), so the API view
+		// matches what the pre-flight shows and what runCoder enforces. Same resolver, engine's default.
+		"max_tool_calls":            engine.ResolveMaxToolCalls(run.Config.MaxToolCalls, engine.DefaultMaxToolCalls),
 		"iterations_since_progress": run.IterationsSinceProgress,
 		"branch":                    run.Branch, "cost_usd": run.CostUSD,
 		"confirmed_by": run.ConfirmedBy, "confirmed_at": run.ConfirmedAt,
