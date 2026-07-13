@@ -2054,3 +2054,19 @@ Append one entry per agent run. Do not overwrite prior runs.
   for BOTH functions pass unchanged, so no version bump and no CHANGELOG change; APK rebuilt in
   place at v0.7.0-beta (unshipped/in-review) to keep the branch's `downloads/` byte-consistent with
   source (new sha `71a7b6b4…`, `apksigner` v2+v3 true). `go test -race` green, validator unaffected.
+- **PR #17 review round (2026-07-13, chatgpt-codex-connector, two P2 findings — both verified real
+  against the code, then fixed):** (1) `BuildPreflight` serialized the raw `run.Config.MaxToolCalls`,
+  so a run migrated from v0.6 (column backfilled to 0, `runCoder`'s legacy sentinel → 40 fallback)
+  would DISPLAY "0 tool calls per unit" in the EXECUTE confirmation gate while executing with 40 —
+  a pre-flight-contract mismatch. (2) `runCoder`'s loop counted model TURNS, but executed every
+  `tool_call` in a batched response, so `max_tool_calls:1` could run many mutating calls before
+  pausing — the advertised per-call cap wasn't enforced for batched responses. Fixed with a single
+  shared resolver `ResolveMaxToolCalls`/`DefaultMaxToolCalls`/`MaxToolCallsCeiling` (engine.go) used
+  by the clamp (store.go), the engine default (New), the pre-flight (`e.effectiveMaxToolCalls`), and
+  the run view (runs.go) — one source of truth, no divergence; and per-INDIVIDUAL-call budget
+  enforcement in `runCoder` (terminal `unit_done`/`unit_blocked` never charged). Regression tests:
+  `TestPreflightShowsEffectiveBudgetForLegacyRow`, `TestBatchedToolCallsCountedIndividually` (a
+  3-write batch with `max_tool_calls:1` — confirmed to FAIL against a simulated pre-fix loop, i.e.
+  b.txt/c.txt executed, then PASS after the fix), `TestResolveMaxToolCalls`. `go build/vet/test
+  -race ./...` green, validator 519/0. APK rebuilt in place at v0.7.0-beta (sha `60fecbe4…`,
+  v2+v3 true).

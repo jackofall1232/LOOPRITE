@@ -94,10 +94,10 @@ func (s *Store) CreateRun(project, repoRoot string, cfg RunConfig) (*Run, error)
 	// own Engine.MaxToolCalls fallback (exec.go) only ever applies to legacy pre-migration rows that
 	// were persisted before this column existed and therefore read back as 0.
 	if cfg.MaxToolCalls <= 0 {
-		cfg.MaxToolCalls = 40
+		cfg.MaxToolCalls = DefaultMaxToolCalls
 	}
-	if cfg.MaxToolCalls > 200 {
-		cfg.MaxToolCalls = 200
+	if cfg.MaxToolCalls > MaxToolCallsCeiling {
+		cfg.MaxToolCalls = MaxToolCallsCeiling
 	}
 	if cfg.ApprovalTimeoutSec <= 0 {
 		cfg.ApprovalTimeoutSec = 900

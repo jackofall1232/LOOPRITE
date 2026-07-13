@@ -395,7 +395,9 @@ func runView(run *engine.Run) map[string]any {
 		"goal": run.Config.Goal, "objective": run.Config.Objective,
 		"status": run.Status, "boundary": run.Boundary,
 		"current_iteration": run.CurrentIteration, "max_iterations": run.Config.MaxIterations,
-		"max_tool_calls":            run.Config.MaxToolCalls,
+		// Effective budget (a legacy pre-v0.7 row's 0 sentinel -> the engine default), so the API view
+		// matches what the pre-flight shows and what runCoder enforces. Same resolver, engine's default.
+		"max_tool_calls":            engine.ResolveMaxToolCalls(run.Config.MaxToolCalls, engine.DefaultMaxToolCalls),
 		"iterations_since_progress": run.IterationsSinceProgress,
 		"branch":                    run.Branch, "cost_usd": run.CostUSD,
 		"confirmed_by": run.ConfirmedBy, "confirmed_at": run.ConfirmedAt,
