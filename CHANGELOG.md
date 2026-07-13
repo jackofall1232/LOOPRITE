@@ -4,6 +4,31 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.7.0-beta — 2026-07-13
+
+**Override the per-reply and per-run tool-call budgets when a task needs more room.** Asking
+the app to do a PR-sized job could hit a fixed tool-call limit partway through, cutting the
+reply off with a "send a follow-up to continue" message — and the follow-up re-read everything
+from scratch, wasting tokens. Two new, optional budgets fix this, and both are yours to set:
+
+- **Playground tool budget** (Playground → Tool budget). Raises how much repo-browsing the
+  assistant may do in a single reply — tool rounds and file reads — up to a safe maximum.
+  Defaults are unchanged (6 rounds / 24 reads), and a raised budget still spends against your
+  daily cost budget, which stops a runaway reply.
+- **Max tool calls per unit** (New run → Advanced). Raises how many tool calls the coder may
+  make while finishing one unit of a Run before it pauses for you (default 40, up to 200). A
+  run that stops because a unit ran out of tool calls now tells you exactly that, and which
+  knob to raise; the pre-flight shows the budget you're arming.
+
+When a reply does spend its whole budget, it now ends with a short "Progress Notes" summary and
+the app shows a one-click "Raise tool budget" button, so you can continue from where it left
+off instead of starting over.
+
+These budgets are always set by you: the AI can never raise its own limit, a per-request
+override can only *lower* it, and a run drafted from a chat prompt always gets the default. The
+`EXECUTE` confirmation gate is unchanged. (Also fixes a latent overflow in the bridge hop-cap
+header that could make a huge value wrap negative.)
+
 ## v0.6.0-beta — 2026-07-12
 
 **Connect GitHub — the app can now push real code and open pull requests from the phone.**
