@@ -228,6 +228,14 @@ func mergeSchema(base, extra map[string]any) map[string]any {
 // Result strings. unit_done/unit_blocked are normally intercepted by the loop before Execute
 // reaches them — this keeps the safe no-op so a stray call cannot do anything.
 func (tb *Toolbox) Execute(ctx context.Context, name string, args map[string]any, approved bool) ToolOutcome {
+	// Once a push is scheduled for this unit (push_branch approved), FREEZE the working tree: reject
+	// further mutating tools so what is pushed after the unit commits is exactly the branch state the
+	// human approved pushing (the approval is granted for that state, then control returns to the
+	// coder loop). Read-only tools and unit_done/unit_blocked stay available; the coder should finish
+	// the unit. A repeat push_branch is handled idempotently inside pushBranch.
+	if tb.PushRequested && isMutatingTool(name) {
+		return ToolOutcome{Result: "ERROR: a push of this unit's branch is already scheduled — make no further changes to the working tree. Call unit_done (the branch is pushed after the unit commits), or unit_blocked if you cannot finish."}
+	}
 	switch name {
 	case "read_file":
 		return tb.readFile(args)
@@ -248,6 +256,18 @@ func (tb *Toolbox) Execute(ctx context.Context, name string, args map[string]any
 	default:
 		return ToolOutcome{Result: fmt.Sprintf("ERROR: unknown tool %q", name)}
 	}
+}
+
+// isMutatingTool reports whether a tool can change the working tree/repo. run_command and
+// git_command are treated as mutating unconditionally (their effect is not statically knowable),
+// so once a push is scheduled they are frozen out along with write_file. Read-only tools
+// (read_file/list_dir/search_files) and unit_done/unit_blocked are not mutating.
+func isMutatingTool(name string) bool {
+	switch name {
+	case "write_file", "run_command", "git_command":
+		return true
+	}
+	return false
 }
 
 // ---- path jail ----
@@ -1019,6 +1039,10 @@ func (tb *Toolbox) pushBranch(ctx context.Context, approved bool) ToolOutcome {
 	if strings.TrimSpace(tb.Branch) == "" {
 		return ToolOutcome{Result: "ERROR: this run has no branch set, so there is nothing to push"}
 	}
+	// Idempotent: a second push_branch after one is already scheduled is a no-op, not a re-gate.
+	if tb.PushRequested {
+		return ToolOutcome{Result: fmt.Sprintf(`{"status":"push_already_scheduled","remote":"origin","branch":%q}`, tb.Branch)}
+	}
 	// The credential carries its own host (PushAuth.Host); gitx.Push attaches it ONLY to an https
 	// remote on that exact host, so passing it (later, in PerformPendingPush) can never leak the
 	// token to a run whose origin is a non-GitHub (or ssh) remote — it silently falls back to ambient
@@ -1027,9 +1051,20 @@ func (tb *Toolbox) pushBranch(ctx context.Context, approved bool) ToolOutcome {
 	if err != nil {
 		return ToolOutcome{Result: "ERROR: could not load the GitHub credential from the vault: " + err.Error()}
 	}
-	if tb.gitClient().Kind() != "exec" && auth == nil {
-		return ToolOutcome{Result: "This device has no git binary and no GitHub connection, so the branch cannot be pushed. " +
-			"Connect GitHub in the dashboard to enable pushing, then retry — or call unit_blocked with kind=missing_credentials."}
+	// On a host with no git binary (gogit/Android), the ONLY push transport is a token attached over
+	// https to its OWN host (gitx.Push). No credential — or a credential that can't apply to this
+	// repo's origin (an ssh remote, a cleartext http remote, or a non-github host) — means there is
+	// genuinely no way to push: report an honest capability gap UP FRONT rather than scheduling a
+	// push that would only fail unauthenticated after the unit is committed.
+	if tb.gitClient().Kind() != "exec" {
+		if auth == nil {
+			return ToolOutcome{Result: "This device has no git binary and no GitHub connection, so the branch cannot be pushed. " +
+				"Connect GitHub in the dashboard to enable pushing, then retry — or call unit_blocked with kind=missing_credentials."}
+		}
+		originURL, uerr := tb.gitClient().RemoteURL(tb.Root, "origin")
+		if uerr != nil || !gitx.TokenUsableFor(originURL, auth) {
+			return ToolOutcome{Result: "This device has no git binary, so the branch can only be pushed via the GitHub connection over an https github.com origin — but this repo's origin is not one (it's an ssh, http, or non-GitHub remote). Push it from a machine with git installed, or re-clone it from an https github.com URL. You can call unit_blocked with kind=missing_credentials."}
+		}
 	}
 	if !approved {
 		return ToolOutcome{

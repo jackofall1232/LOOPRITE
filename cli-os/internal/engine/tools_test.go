@@ -294,19 +294,69 @@ func TestPushBranchGogitNoCredentialIsCapabilityGap(t *testing.T) {
 	}
 }
 
-// TestPushBranchWithCredentialGates: a gogit backend WITH a credential is capable, so push_branch
-// consults PushCred and then gates (rather than reporting a capability gap).
+// TestPushBranchWithCredentialGates: a gogit backend WITH a credential AND an https github.com
+// origin (so the token is actually usable) is capable, so push_branch consults PushCred and gates.
 func TestPushBranchWithCredentialGates(t *testing.T) {
 	dir := newGogitTestRepo(t)
+	gitRun(t, dir, "remote", "add", "origin", "https://github.com/o/r.git") // token-usable origin
 	called := false
 	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.NewGogitClient(),
-		PushCred: func() (*gitx.PushAuth, error) { called = true; return &gitx.PushAuth{Username: "x", Token: "t"}, nil }}
+		PushCred: func() (*gitx.PushAuth, error) {
+			called = true
+			return &gitx.PushAuth{Username: "x", Token: "t", Host: "github.com"}, nil
+		}}
 	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
 	if !called {
 		t.Fatal("push_branch must consult PushCred")
 	}
 	if o.Gate == nil || o.Gate.Class != GatePush {
-		t.Fatalf("with a credential present the push is capable and should gate, got gate=%+v result=%q", o.Gate, o.Result)
+		t.Fatalf("with a usable credential the push is capable and should gate, got gate=%+v result=%q", o.Gate, o.Result)
+	}
+}
+
+// TestPushBranchGogitUnusableOriginIsCapabilityGap pins Codex's fix: on the gogit backend, a token
+// that CAN'T apply to the origin (ssh/http/non-github remote) must yield an honest capability gap up
+// front — NOT a scheduled push that would fail unauthenticated after the unit commits.
+func TestPushBranchGogitUnusableOriginIsCapabilityGap(t *testing.T) {
+	dir := newGogitTestRepo(t)
+	gitRun(t, dir, "remote", "add", "origin", "git@github.com:o/r.git") // ssh: token can't attach on gogit
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.NewGogitClient(),
+		PushCred: func() (*gitx.PushAuth, error) {
+			return &gitx.PushAuth{Username: "x", Token: "t", Host: "github.com"}, nil
+		}}
+	o := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if o.Gate != nil {
+		t.Fatalf("an unusable-origin push has nothing to approve; must not gate: %+v", o.Gate)
+	}
+	if tb.PushRequested {
+		t.Fatal("must NOT schedule a push it cannot actually perform")
+	}
+	if !strings.Contains(o.Result, "https github.com origin") {
+		t.Fatalf("expected an origin-capability gap, got %q", o.Result)
+	}
+}
+
+// TestPushBranchLocksMutationsAfterScheduled pins Codex's approval-window fix: once a push is
+// scheduled, mutating tools are frozen (so the pushed state == the approved state), read-only tools
+// remain, and a repeat push_branch is idempotent.
+func TestPushBranchLocksMutationsAfterScheduled(t *testing.T) {
+	dir := newRepoOnBranch(t, "l00prite/run-x")
+	tb := &Toolbox{Root: dir, Branch: "l00prite/run-x", Git: gitx.Detect()}
+	if o := tb.Execute(context.Background(), "push_branch", map[string]any{}, true); !tb.PushRequested {
+		t.Fatalf("push was not scheduled: %q", o.Result)
+	}
+	for _, name := range []string{"write_file", "run_command", "git_command"} {
+		mo := tb.Execute(context.Background(), name, map[string]any{"path": "x.txt", "content": "y", "command": "true", "args": []string{"status"}}, false)
+		if !strings.Contains(mo.Result, "already scheduled") {
+			t.Fatalf("%s must be frozen after a scheduled push, got %q", name, mo.Result)
+		}
+	}
+	if ro := tb.Execute(context.Background(), "read_file", map[string]any{"path": "f.txt"}, false); strings.Contains(ro.Result, "already scheduled") {
+		t.Fatalf("read_file must remain available after a scheduled push, got %q", ro.Result)
+	}
+	r2 := tb.Execute(context.Background(), "push_branch", map[string]any{}, false)
+	if r2.Gate != nil || !strings.Contains(r2.Result, "already_scheduled") {
+		t.Fatalf("repeat push_branch must be idempotent, got gate=%+v result=%q", r2.Gate, r2.Result)
 	}
 }
 
