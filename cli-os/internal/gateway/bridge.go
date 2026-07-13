@@ -8,9 +8,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"math"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/apierr"
@@ -88,31 +86,16 @@ func IsBridgeArmed(h http.Header, cfg config.Config) bool {
 }
 
 // BridgeMaxHops is the hop cap for this request: config value, which a header may only LOWER.
+// The lower-only header handling (parse, reject non-finite/negative, float-space compare) is the
+// SHARED lowerByHeader helper (chatlimits.go) -- the same one the chat tool budget uses -- so the
+// two lower-only paths cannot drift apart again. The float-space compare is what closes the
+// int(1e300) underflow this function had before the helper existed (R1).
 func BridgeMaxHops(h http.Header, cfg config.Config) int {
 	base := cfg.Routing.Bridge.MaxHops
 	if base < 0 {
 		base = 0
 	}
-	raw := h.Get("x-l00prite-bridge-max-hops")
-	if raw == "" {
-		return base
-	}
-	n, err := strconv.ParseFloat(raw, 64)
-	// Reject non-finite values: Go's ParseFloat accepts "Infinity"/"NaN" (unlike Number(...)+isFinite),
-	// and int(+Inf) is a huge negative that would break the hop loop.
-	if err != nil || n < 0 || math.IsInf(n, 0) || math.IsNaN(n) {
-		return base
-	}
-	// Compare in FLOAT space before converting to int. A finite-but-huge value like "1e300" passes
-	// the Inf/NaN guard, yet int(1e300) is implementation-dependent (min-int on amd64) -- so the old
-	// `int(n) < base` treated it as a request to LOWER the cap to a negative, making maxTurns
-	// negative and the bridge return a null 200. `n < float64(base)` cannot: 1e300 is never < base,
-	// so the header is simply ignored (the intended "may only lower" semantics). Matches
-	// effectiveChatLimits (chatlimits.go), which was written correctly from the start.
-	if n < float64(base) {
-		return int(n)
-	}
-	return base
+	return lowerByHeader(h, "x-l00prite-bridge-max-hops", base)
 }
 
 func resolveTargetModel(target string, providers []ProviderRow) string {

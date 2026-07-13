@@ -60,9 +60,37 @@ func (app *App) effectiveChatLimits(project string, h http.Header) ChatToolLimit
 	}
 }
 
+// lowerByHeader applies a per-request "may only LOWER" numeric header to base: it returns the
+// header's value only when that value is a finite, non-negative number strictly below base;
+// otherwise base is returned unchanged (absent/blank/malformed/non-finite/negative/>=base header).
+//
+// The comparison is done in FLOAT space BEFORE the int conversion so a finite-but-huge value like
+// "1e300" (which passes the Inf/NaN guard, yet whose int() is implementation-defined and lands at
+// min-int on amd64) can never masquerade as a request to lower base below zero. That was exactly
+// the BridgeMaxHops bug (R1). Both the chat tool budget (chatEffectiveOne) and the bridge hop cap
+// (BridgeMaxHops) go through this ONE helper now, so the two lower-only paths can never drift apart
+// again -- the divergence that produced the bug in the first place.
+func lowerByHeader(h http.Header, name string, base int) int {
+	if h == nil {
+		return base
+	}
+	raw := h.Get(name)
+	if raw == "" {
+		return base
+	}
+	n, err := strconv.ParseFloat(raw, 64)
+	if err != nil || n < 0 || math.IsInf(n, 0) || math.IsNaN(n) {
+		return base
+	}
+	if n < float64(base) {
+		return int(n)
+	}
+	return base
+}
+
 // chatEffectiveOne resolves one knob. Order matters:
 //  1. base = default; a stored value > 0 replaces it, clamped DOWN to the ceiling first.
-//  2. a header value may only LOWER base (never raise it above the human-set base).
+//  2. a header value may only LOWER base (never raise it above the human-set base) -- lowerByHeader.
 //  3. floor at 1 LAST -- a 0 would make RunChatTools' round loop never run and return a null body.
 func chatEffectiveOne(def, ceiling, stored int, h http.Header, header string) int {
 	base := def
@@ -72,19 +100,7 @@ func chatEffectiveOne(def, ceiling, stored int, h http.Header, header string) in
 			base = ceiling
 		}
 	}
-	if h != nil {
-		if raw := h.Get(header); raw != "" {
-			n, err := strconv.ParseFloat(raw, 64)
-			// Reject non-finite/negative exactly as BridgeMaxHops does. Then compare in FLOAT space
-			// before converting: a finite-but-huge value like "1e300" passes the Inf/NaN guard, yet
-			// int(1e300) is implementation-dependent (min-int on amd64) -- so `int(n) < base` (the
-			// latent BridgeMaxHops bug) would treat it as a request to LOWER to a negative. `n <
-			// float64(base)` cannot: 1e300 is never < a small base, so the header is simply ignored.
-			if err == nil && n >= 0 && !math.IsInf(n, 0) && !math.IsNaN(n) && n < float64(base) {
-				base = int(n)
-			}
-		}
-	}
+	base = lowerByHeader(h, header, base)
 	if base < 1 {
 		base = 1
 	}

@@ -2046,3 +2046,11 @@ Append one entry per agent run. Do not overwrite prior runs.
   directive (guarded by `mockHasToolResult`), so raising the round budget cannot be driven end to
   end without the new `/chattoolloop` variant — don't expect `/chattool` to loop.
 - **Lock:** none held (solo pass; `.l00prite/lock.json` released).
+- **PR #17 review round (2026-07-13, gemini-code-assist):** one non-blocking suggestion —
+  extract the duplicated lower-only header parse/validate/float-space-compare shared by
+  `chatEffectiveOne` and `BridgeMaxHops` into a single helper (the exact divergence that caused
+  R1). Applied: new `lowerByHeader` in `chatlimits.go`, both callers routed through it,
+  `math`/`strconv` dropped from `bridge.go`. Non-behavioral — the existing `1e300`/NaN/Inf tests
+  for BOTH functions pass unchanged, so no version bump and no CHANGELOG change; APK rebuilt in
+  place at v0.7.0-beta (unshipped/in-review) to keep the branch's `downloads/` byte-consistent with
+  source (new sha `71a7b6b4…`, `apksigner` v2+v3 true). `go test -race` green, validator unaffected.
