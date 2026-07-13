@@ -310,9 +310,10 @@ func TestPushBranchWithCredentialGates(t *testing.T) {
 	}
 }
 
-// TestPushBranchApprovedPushesRunBranch: once approved, push_branch actually lands the run branch
-// on origin (a local bare remote here) — the real "the AI can push" guarantee.
-func TestPushBranchApprovedPushesRunBranch(t *testing.T) {
+// TestPushBranchApprovedSchedulesThenPushes: an approved push_branch does NOT push inline (that
+// would ship the pre-unit HEAD, before CommitUnit) — it SCHEDULES the push, and PerformPendingPush
+// (which the engine calls after committing the unit) is what actually lands the branch on origin.
+func TestPushBranchApprovedSchedulesThenPushes(t *testing.T) {
 	dir := newRepoOnBranch(t, "l00prite/run-x")
 	bare := t.TempDir()
 	gitRun(t, bare, "init", "--bare")
@@ -323,11 +324,24 @@ func TestPushBranchApprovedPushesRunBranch(t *testing.T) {
 	if o.Gate != nil {
 		t.Fatalf("approved push should not gate, got %+v", o.Gate)
 	}
-	if !strings.Contains(o.Result, `"status":"pushed"`) {
-		t.Fatalf("expected a pushed result, got %q", o.Result)
+	if !strings.Contains(o.Result, `"status":"push_scheduled"`) || !tb.PushRequested {
+		t.Fatalf("approved push_branch must SCHEDULE (not push inline): result=%q PushRequested=%v", o.Result, tb.PushRequested)
+	}
+	// Nothing on origin yet — the push is deferred until the engine commits the unit.
+	if out := gitRun(t, bare, "branch", "--list", "l00prite/run-x"); strings.TrimSpace(out) != "" {
+		t.Fatalf("branch must not be on origin before the deferred push: %q", out)
+	}
+	// The engine's post-commit step performs the pending push.
+	pushed, err := tb.PerformPendingPush(context.Background())
+	if err != nil || !pushed {
+		t.Fatalf("PerformPendingPush: pushed=%v err=%v", pushed, err)
 	}
 	if got := strings.TrimSpace(gitRun(t, bare, "rev-parse", "refs/heads/l00prite/run-x")); len(got) != 40 {
-		t.Fatalf("run branch did not land on the bare origin: %q", got)
+		t.Fatalf("run branch did not land on the bare origin after the deferred push: %q", got)
+	}
+	// A second PerformPendingPush with the flag still set is idempotent (already up to date -> nil).
+	if _, err := tb.PerformPendingPush(context.Background()); err != nil {
+		t.Fatalf("second PerformPendingPush should be a no-op/nil, got %v", err)
 	}
 }
 

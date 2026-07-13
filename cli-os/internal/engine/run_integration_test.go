@@ -295,6 +295,50 @@ func TestCoderTurnsNeverBridgeUnderBalanced(t *testing.T) {
 	}
 }
 
+// TestPushBranchPushesCommittedWorkNotStaleHead pins the P1 fix (Codex, PR #16): a push_branch
+// called in the SAME unit that writes a file must push the COMMITTED change, not the pre-unit HEAD.
+// The push is deferred until after CommitUnit; here the coder writes greeting.txt then pushes, with
+// GatePush pre-approved (Auto-PR), and we assert origin's run branch tip actually contains the file.
+func TestPushBranchPushesCommittedWorkNotStaleHead(t *testing.T) {
+	caller := &scriptedCaller{
+		planner: []map[string]any{
+			{"action": "unit", "description": "create and push greeting.txt", "target_paths": []string{"greeting.txt"}, "verification_command": "true"},
+			{"action": "done", "done_reason": "greeting.txt exists and was pushed"},
+		},
+		coder: [][]step{
+			{
+				{name: "write_file", args: map[string]any{"path": "greeting.txt", "content": "hello\n"}},
+				{name: "push_branch", args: map[string]any{}},
+				{name: "unit_done", args: map[string]any{"summary": "wrote and pushed greeting.txt", "files_changed": []string{"greeting.txt"}}},
+			},
+		},
+	}
+	e := newEngine(t, caller)
+	root := newRepo(t)
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+	gitRun(t, root, "remote", "add", "origin", bare)
+
+	run := startRun(t, e, root, "add and push a greeting file", func(rc *RunConfig) {
+		rc.Objective = ObjectiveBalanced
+		rc.Gates = map[string]string{GatePush: PolicyAutoApprove} // pre-approve the push (Auto-PR)
+	})
+	final := waitTerminal(t, e, run.ID)
+	if final.Status != StatusDone {
+		t.Fatalf("want done, got %s/%s (%s)", final.Status, final.Boundary, final.Summary)
+	}
+	// Origin must have the run branch, and its tip must contain the committed greeting.txt — NOT the
+	// pre-unit HEAD (which had no such file; cat-file would then fail).
+	ref := strings.TrimSpace(gitRun(t, bare, "for-each-ref", "--format=%(refname)", "refs/heads/"))
+	if ref == "" {
+		t.Fatal("nothing was pushed to origin")
+	}
+	content := strings.TrimSpace(gitRun(t, bare, "cat-file", "-p", ref+":greeting.txt"))
+	if content != "hello" {
+		t.Fatalf("origin's run branch is missing the committed unit file (got %q) — the push shipped stale HEAD", content)
+	}
+}
+
 // A denylist-protected write requires approval; a deny stops at destructive_operation_required.
 func TestRunDenylistWriteBlocksOnDeny(t *testing.T) {
 	caller := &scriptedCaller{

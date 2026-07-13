@@ -171,6 +171,8 @@ func TestOwnerRepoFromURL(t *testing.T) {
 	}{
 		{"https://github.com/octocat/hello.git", "octocat", "hello", true},
 		{"https://github.com/octocat/hello", "octocat", "hello", true},
+		{"https://github.com:443/octocat/hello.git", "octocat", "hello", true}, // explicit port
+
 		{"git@github.com:octocat/hello.git", "octocat", "hello", true},
 		{"ssh://git@github.com/octocat/hello.git", "octocat", "hello", true},
 		{"https://gitlab.com/octocat/hello.git", "", "", false},

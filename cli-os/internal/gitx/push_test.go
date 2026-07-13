@@ -180,7 +180,7 @@ func TestExecPushInjectsTokenViaEnvNeverArgv(t *testing.T) {
 		"echo \"ARGV: $*\" >> " + logf + "\n" +
 		"printf 'CFG COUNT=%s KEY0=%s VALUE0=%s\\n' \"$GIT_CONFIG_COUNT\" \"$GIT_CONFIG_KEY_0\" \"$GIT_CONFIG_VALUE_0\" >> " + logf + "\n" +
 		"case \"$*\" in\n" +
-		"  *'remote get-url origin'*) echo 'https://github.com/o/r.git' ;;\n" +
+		"  *get-url*) echo 'https://github.com/o/r.git' ;;\n" + // matches `remote get-url --push origin`
 		"esac\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
@@ -218,6 +218,42 @@ func TestExecPushInjectsTokenViaEnvNeverArgv(t *testing.T) {
 	}
 }
 
+// TestBuildPushEnvStripsDuplicateCount pins the fix for a duplicate GIT_CONFIG_COUNT: when the host
+// env already sets one, buildPushEnv must remove it and emit exactly ONE (the new value) — git (C
+// getenv) reads the FIRST match, so a leftover would win and the injected extraheader be ignored.
+// Existing GIT_CONFIG_KEY_*/VALUE_* are preserved; the header appends at the next index.
+func TestBuildPushEnvStripsDuplicateCount(t *testing.T) {
+	base := []string{
+		"PATH=/x", "GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=credential.interactive", "GIT_CONFIG_VALUE_0=false",
+		"GIT_CONFIG_KEY_1=http.proxy", "GIT_CONFIG_VALUE_1=p",
+	}
+	out, b64 := buildPushEnv(base, "https://github.com/", "x-access-token", "ghp_tok")
+	countN, countVal := 0, ""
+	for _, e := range out {
+		if strings.HasPrefix(e, "GIT_CONFIG_COUNT=") {
+			countN++
+			countVal = e
+		}
+	}
+	if countN != 1 || countVal != "GIT_CONFIG_COUNT=3" {
+		t.Fatalf("want exactly one GIT_CONFIG_COUNT=3, got %d (%q): %v", countN, countVal, out)
+	}
+	joined := strings.Join(out, "\n")
+	// host git-config-env preserved, and the header appended at the next free index (2)
+	for _, want := range []string{
+		"GIT_CONFIG_KEY_0=credential.interactive", "GIT_CONFIG_KEY_1=http.proxy",
+		"GIT_CONFIG_KEY_2=http.https://github.com/.extraheader",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in built env: %v", want, out)
+		}
+	}
+	if strings.Contains(joined, "ghp_tok") || b64 == "" {
+		t.Fatal("raw token must not appear in cleartext; b64 must be set")
+	}
+}
+
 // TestExecPushRedactsTokenInError proves redactSecrets is actually WIRED INTO Push's returned error
 // (not just unit-tested in isolation): a fake git whose push exits non-zero while echoing the token
 // (as a hostile or verbose remote might) must yield a Push error with the token scrubbed out.
@@ -229,10 +265,9 @@ func TestExecPushRedactsTokenInError(t *testing.T) {
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
-		"  *'remote get-url origin'*) echo 'https://github.com/o/r.git'; exit 0 ;;\n" +
-		"  *push*) echo 'remote: rejected (token " + token + ")'; exit 1 ;;\n" +
-		"esac\n" +
-		"exit 0\n"
+		"  *get-url*) echo 'https://github.com/o/r.git'; exit 0 ;;\n" + // remote get-url --push
+		"  *) echo 'remote: rejected (token " + token + ")'; exit 1 ;;\n" + // the actual push
+		"esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +298,7 @@ func TestCredentialScope(t *testing.T) {
 	}{
 		{"https://github.com/o/r.git", gh, true},
 		{"https://GitHub.com/o/r.git", gh, true},                     // case-insensitive host
+		{"https://github.com:443/o/r.git", gh, true},                 // explicit default port still matches
 		{"https://gitlab.com/o/r.git", gh, false},                    // foreign host — the leak vector
 		{"https://evil.example/o/r.git", gh, false},                  // attacker-controlled host
 		{"http://github.com/o/r.git", gh, false},                     // cleartext http refused
@@ -276,7 +312,7 @@ func TestCredentialScope(t *testing.T) {
 		if ok != c.ok {
 			t.Errorf("credentialScope(%q) ok=%v, want %v (scope %q)", c.url, ok, c.ok, scope)
 		}
-		if ok && !strings.HasPrefix(strings.ToLower(scope), "https://github.com/") {
+		if ok && !strings.Contains(strings.ToLower(scope), "github.com") {
 			t.Errorf("credentialScope(%q) scope=%q not host-scoped to github.com", c.url, scope)
 		}
 	}

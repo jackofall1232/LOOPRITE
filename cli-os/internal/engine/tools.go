@@ -72,6 +72,11 @@ type Toolbox struct {
 	// reports an honest capability gap on gogit. The engine package never imports the vault: this
 	// closure is injected by the gateway (see Engine.PushCred / githubAuthFor).
 	PushCred func() (*gitx.PushAuth, error)
+	// PushRequested is set true when the coder calls (and gets approval for) push_branch. The actual
+	// push is DEFERRED to after the engine commits the unit (see PerformPendingPush and
+	// engine.iterate) — the coder loop runs before CommitUnit, so pushing inline would ship the
+	// pre-unit HEAD and miss the verified change.
+	PushRequested bool
 }
 
 // gitClient returns tb.Git, defaulting to gitx.Detect() when unset.
@@ -1014,17 +1019,13 @@ func (tb *Toolbox) pushBranch(ctx context.Context, approved bool) ToolOutcome {
 	if strings.TrimSpace(tb.Branch) == "" {
 		return ToolOutcome{Result: "ERROR: this run has no branch set, so there is nothing to push"}
 	}
-	var auth *gitx.PushAuth
-	if tb.PushCred != nil {
-		a, err := tb.PushCred()
-		if err != nil {
-			return ToolOutcome{Result: "ERROR: could not load the GitHub credential from the vault: " + err.Error()}
-		}
-		// The credential carries its own host (PushAuth.Host); gitx.Push attaches it ONLY to an
-		// https remote on that exact host, so passing it here can never leak the token to a run whose
-		// origin is a non-GitHub (or ssh) remote — it silently falls back to ambient credentials
-		// there. No origin check is needed at this call site; the seam enforces host-scoping.
-		auth = a
+	// The credential carries its own host (PushAuth.Host); gitx.Push attaches it ONLY to an https
+	// remote on that exact host, so passing it (later, in PerformPendingPush) can never leak the
+	// token to a run whose origin is a non-GitHub (or ssh) remote — it silently falls back to ambient
+	// credentials there. No origin check is needed here; the seam enforces host-scoping.
+	auth, err := tb.resolvePushAuth()
+	if err != nil {
+		return ToolOutcome{Result: "ERROR: could not load the GitHub credential from the vault: " + err.Error()}
 	}
 	if tb.gitClient().Kind() != "exec" && auth == nil {
 		return ToolOutcome{Result: "This device has no git binary and no GitHub connection, so the branch cannot be pushed. " +
@@ -1040,10 +1041,38 @@ func (tb *Toolbox) pushBranch(ctx context.Context, approved bool) ToolOutcome {
 			},
 		}
 	}
-	if err := tb.gitClient().Push(ctx, tb.Root, "origin", tb.Branch, auth); err != nil {
-		return ToolOutcome{Result: "ERROR: push failed: " + err.Error()}
+	// Approved. DEFER the actual push until AFTER the engine commits this unit (engine.iterate): the
+	// coder loop runs before CommitUnit, so pushing now would ship the pre-unit HEAD and miss the
+	// verified change (and committing here would empty the reviewer's diff). Record the intent.
+	tb.PushRequested = true
+	return ToolOutcome{Result: fmt.Sprintf(`{"status":"push_scheduled","remote":"origin","branch":%q,"note":"the branch will be pushed to origin after this unit's changes are committed and verified"}`, tb.Branch)}
+}
+
+// resolvePushAuth loads the push credential (nil when none is wired or stored) — shared by
+// pushBranch's capability check and PerformPendingPush.
+func (tb *Toolbox) resolvePushAuth() (*gitx.PushAuth, error) {
+	if tb.PushCred == nil {
+		return nil, nil
 	}
-	return ToolOutcome{Result: fmt.Sprintf(`{"status":"pushed","remote":"origin","branch":%q}`, tb.Branch)}
+	return tb.PushCred()
+}
+
+// PerformPendingPush executes a push that push_branch scheduled (PushRequested), called by the
+// engine AFTER it commits the unit so origin receives the committed work rather than the pre-unit
+// HEAD. Returns (false, nil) when no push was requested. The credential is resolved at THIS call
+// time (honoring a mid-run disconnect), and host-scoped by gitx.Push.
+func (tb *Toolbox) PerformPendingPush(ctx context.Context) (bool, error) {
+	if !tb.PushRequested {
+		return false, nil
+	}
+	auth, err := tb.resolvePushAuth()
+	if err != nil {
+		return false, err
+	}
+	if err := tb.gitClient().Push(ctx, tb.Root, "origin", tb.Branch, auth); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // logNArg matches git log's bare "-<N>" shorthand for "-n <N>" (e.g. "-5"): a leading dash

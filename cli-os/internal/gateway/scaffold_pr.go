@@ -41,6 +41,20 @@ func ghRepoFromRemote(git gitx.Client, root string) (owner, repo string, ok bool
 	return ownerRepoFromURL(url)
 }
 
+// tokenUsableForOrigin reports whether a connected token can actually serve as the push transport
+// for this repo's origin — only an https github.com remote (git.Push injects the token over HTTPS
+// and ghCreatePR opens the PR via REST). For an ssh github remote or ANY non-github remote it
+// returns false, so the caller nils the auth and every scaffold path (probe/push/PR-lookup) falls
+// back uniformly to the ambient git/gh path instead of one path taking the token route and another
+// hard-failing. Mirrors exactly what gitx.Push itself would do for the same remote.
+func tokenUsableForOrigin(git gitx.Client, root string, auth *gitx.PushAuth) bool {
+	url, err := git.RemoteURL(root, "origin")
+	if err != nil {
+		return false
+	}
+	return gitx.TokenUsableFor(url, auth)
+}
+
 // ghExecTimeout bounds every gh/git-push exec in this file. gh and git can both try to prompt
 // interactively for credentials (a device-flow login nudge, a credential-helper popup); with the
 // prompt-disabling env below that should never happen, but a hard timeout is the backstop so a

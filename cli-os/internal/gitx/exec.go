@@ -9,6 +9,7 @@ package gitx
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -245,6 +246,23 @@ func gitConfigCount(env []string) int {
 	return n
 }
 
+// buildPushEnv returns env with the credential extraheader appended at the next free GIT_CONFIG
+// index, having FIRST removed any existing GIT_CONFIG_COUNT entry. That removal is load-bearing:
+// Go's exec passes duplicate env keys through verbatim, and git (C getenv) reads the FIRST match,
+// so a leftover host GIT_CONFIG_COUNT would win over an appended one and git would ignore the
+// injected header entirely. Existing GIT_CONFIG_KEY_*/VALUE_* entries are preserved (the header is
+// added at index = old count), so host-set git-config-env still applies.
+func buildPushEnv(env []string, scope, username, token string) ([]string, string) {
+	kv, b64 := extraHeaderEnv(gitConfigCount(env), scope, username, token)
+	out := make([]string, 0, len(env)+len(kv))
+	for _, e := range env {
+		if !strings.HasPrefix(e, "GIT_CONFIG_COUNT=") {
+			out = append(out, e)
+		}
+	}
+	return append(out, kv...), b64
+}
+
 // extraHeaderEnv builds the env-only git config (git >= 2.31) that injects an HTTP Authorization
 // header scoped to exactly `scope` (a "<scheme>://<host>/" prefix), placed at GIT_CONFIG index
 // startIndex (so it appends after any host-set entries — see gitConfigCount). The token is base64'd
@@ -260,9 +278,12 @@ func extraHeaderEnv(startIndex int, scope, username, token string) (env []string
 	}, b64
 }
 
-// RemoteURL returns the configured URL for remote via `git remote get-url`.
+// RemoteURL returns the PUSH URL for remote via `git remote get-url --push` (remote.<name>.pushurl
+// if configured, else the fetch URL). Every caller uses this to decide credential scoping and to
+// resolve the PR-target owner/repo — all of which must key off where a push actually GOES, not the
+// (possibly different) fetch URL.
 func (c execClient) RemoteURL(repo, remote string) (string, error) {
-	out, err := c.runTimed(repo, "remote", "get-url", remote)
+	out, err := c.runTimed(repo, "remote", "get-url", "--push", remote)
 	if err != nil {
 		return "", err
 	}
@@ -292,16 +313,16 @@ func (c execClient) Push(ctx context.Context, repo, remote, branch string, auth 
 	if auth != nil && auth.Token != "" {
 		remoteURL, err := c.RemoteURL(repo, remote)
 		if err != nil {
-			return err
+			// Defensive: a remote-URL lookup failure shouldn't carry the token (the token is never
+			// passed to `git remote get-url`), but scrub it before surfacing regardless.
+			return errors.New(redactSecrets(err.Error(), auth.token()))
 		}
 		// Attach the token ONLY to an https remote on the credential's own host. For any other
 		// remote (an ssh remote, a different/foreign https host, a cleartext http URL) the token is
 		// NOT attached — the push falls back to ambient credentials instead of leaking the token or
 		// failing just because one was supplied. See credentialScope.
 		if scope, ok := credentialScope(remoteURL, auth); ok {
-			var kv []string
-			kv, b64 = extraHeaderEnv(gitConfigCount(env), scope, auth.Username, auth.Token)
-			env = append(env, kv...)
+			env, b64 = buildPushEnv(env, scope, auth.Username, auth.Token)
 		}
 	}
 	cmd.Env = env

@@ -77,6 +77,34 @@ func TestScaffoldTokenPathPushesAndOpensPR(t *testing.T) {
 	}
 }
 
+// TestTokenUsableForOrigin pins the selection logic: the token transport is used ONLY for an https
+// github.com origin (incl. an explicit port); an ssh github remote or any non-github remote is not
+// token-usable, so the caller nils the auth and falls back to the ambient git/gh path uniformly.
+func TestTokenUsableForOrigin(t *testing.T) {
+	auth := &gitx.PushAuth{Username: "x-access-token", Token: "goodtok", Host: "github.com"}
+	cases := []struct {
+		origin string
+		want   bool
+	}{
+		{"https://github.com/o/r.git", true},
+		{"https://github.com:443/o/r.git", true}, // explicit port still usable
+		{"git@github.com:o/r.git", false},        // ssh github -> ambient
+		{"ssh://git@github.com/o/r.git", false},  // ssh github -> ambient
+		{"https://gitlab.com/o/r.git", false},    // non-github -> ambient (the regression fix)
+		{"http://github.com/o/r.git", false},     // cleartext -> not usable
+	}
+	for _, c := range cases {
+		fake := &fakeGitClient{kind: "exec", remoteURL: c.origin}
+		if got := tokenUsableForOrigin(fake, "/repo", auth); got != c.want {
+			t.Errorf("tokenUsableForOrigin(%q) = %v, want %v", c.origin, got, c.want)
+		}
+	}
+	// A nil auth is never usable.
+	if tokenUsableForOrigin(&fakeGitClient{kind: "exec", remoteURL: "https://github.com/o/r.git"}, "/repo", nil) {
+		t.Fatal("nil auth must never be token-usable")
+	}
+}
+
 // TestScaffoldTokenPathRejectsNonGitHubOrigin: a connected token must NOT be used for a non-github
 // origin — openScaffoldPR errors out (the caller then reports the honest gap) rather than pushing.
 func TestScaffoldTokenPathRejectsNonGitHubOrigin(t *testing.T) {

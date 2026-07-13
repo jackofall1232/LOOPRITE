@@ -99,6 +99,14 @@ func (app *App) HandleRepoScaffoldBranch(w http.ResponseWriter, r *http.Request)
 	// nil too): every path below then behaves exactly as it did before this feature existed. The
 	// token is resolved once per request and never logged.
 	scaffoldAuth, _ := app.GitHubAuthFor(principal.Project)
+	// The token transport only works for an https github.com origin (git.Push over HTTPS + a REST
+	// PR). For an ssh github remote or ANY non-github remote, drop it to nil so every scaffold path
+	// (probe/push/PR-lookup) falls back UNIFORMLY to the ambient git/gh path — otherwise the probe
+	// would fall through to ambient while openScaffoldPR hard-failed on the token path, breaking
+	// "Add l00prite" for a non-GitHub repo the moment a token is connected to its project.
+	if scaffoldAuth != nil && !tokenUsableForOrigin(git, root, scaffoldAuth) {
+		scaffoldAuth = nil
+	}
 
 	// Retry tracking (repo_scaffold_state.go): a prior "Add l00prite" attempt can create+commit a
 	// branch locally and THEN hit a push/PR capability gap. The protocol files it committed make

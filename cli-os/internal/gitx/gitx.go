@@ -29,6 +29,16 @@ func redactSecrets(s string, secrets ...string) string {
 	return s
 }
 
+// TokenUsableFor reports whether auth may serve as the push transport for a remote at remoteURL —
+// i.e. whether Push will actually attach the credential (an https URL on auth.Host). Callers outside
+// this package (scaffold_pr.go) use it to decide token-vs-ambient BEFORE calling Push, so their
+// probe/push/PR-lookup paths all agree with what Push itself does for the same remote (rather than
+// one path taking the token route while another falls back to ambient).
+func TokenUsableFor(remoteURL string, auth *PushAuth) bool {
+	_, ok := credentialScope(remoteURL, auth)
+	return ok
+}
+
 // pushRefspec is the single explicit refspec Push uses on both backends: exactly
 // refs/heads/<branch>:refs/heads/<branch> — never a bare branch (ambiguous), never a wildcard.
 func pushRefspec(branch string) string {
@@ -48,7 +58,10 @@ func credentialScope(remoteURL string, auth *PushAuth) (string, bool) {
 		return "", false
 	}
 	u, err := url.Parse(remoteURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || !strings.EqualFold(u.Host, auth.Host) {
+	// Match on Hostname() (no port) so an explicit-port github URL (e.g. https://github.com:443/…)
+	// still matches auth.Host ("github.com"); the scope keeps u.Host (with any port) so the
+	// extraheader is bound to exactly the host:port git will request.
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || !strings.EqualFold(u.Hostname(), auth.Host) {
 		return "", false
 	}
 	return "https://" + u.Host + "/", true
@@ -126,9 +139,11 @@ type Client interface {
 	// no notion of "run any git subcommand", only the specific operations above.
 	Raw(ctx context.Context, repo string, args ...string) (string, error)
 
-	// RemoteURL returns the fetch/push URL configured for remote (e.g. "origin") — read-only; the
-	// repo's own git config is the source of truth for where a push goes (nothing in this codebase
-	// stores a remote URL separately). Errors if the remote does not exist.
+	// RemoteURL returns the PUSH URL for remote (e.g. "origin") — where a push actually goes, which
+	// is what credential scoping and PR-target owner/repo resolution must key off. Under Kind()=="exec"
+	// that is `git remote get-url --push` (remote.<name>.pushurl if set, else the fetch URL); the
+	// gogit backend has no separate push URL, so it returns its single configured URL (which go-git
+	// uses for both fetch and push). Read-only; errors if the remote does not exist.
 	RemoteURL(repo, remote string) (string, error)
 
 	// Push uploads the single ref refs/heads/<branch> to refs/heads/<branch> on remote. It is NEVER

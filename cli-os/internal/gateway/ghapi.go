@@ -61,7 +61,7 @@ func ownerRepoFromURL(raw string) (owner, repo string, ok bool) {
 	switch {
 	case strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://"):
 		u, err := url.Parse(raw)
-		if err != nil || !strings.EqualFold(u.Host, "github.com") {
+		if err != nil || !strings.EqualFold(u.Hostname(), "github.com") { // Hostname(): ignore any explicit port
 			return "", "", false
 		}
 		path = strings.TrimPrefix(u.Path, "/")
@@ -99,6 +99,9 @@ func ghDo(ctx context.Context, method, token, path string, body any) (int, []byt
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	// GitHub's REST API REQUIRES a User-Agent and returns 403 without one — a stub server won't
+	// catch this, but production will. Identify the client by gateway version.
+	req.Header.Set("User-Agent", "l00prite-os/"+Version)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

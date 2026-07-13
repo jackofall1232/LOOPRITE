@@ -483,6 +483,17 @@ func (e *Engine) iterate(ctx context.Context, run *Run, f Files) iterOutcome {
 	if hash != "" {
 		_, _ = e.Store.AppendEvent(run.ID, EvStatus, map[string]any{"committed": hash[:min(len(hash), 12)]})
 	}
+	// A push_branch approved during the coder loop is deferred to HERE — after the unit is committed
+	// — so origin receives the committed work, not the pre-unit HEAD (and so committing never emptied
+	// the reviewer's diff above). A push failure after a successful commit is surfaced for a human;
+	// the commit itself stands.
+	if tb.PushRequested {
+		if pushed, perr := tb.PerformPendingPush(ictx); perr != nil {
+			return iterOutcome{boundary: BoundaryHumanReview, summary: fmt.Sprintf("unit %q was committed but pushing the branch to origin failed: %s", sel.Description, perr.Error())}
+		} else if pushed {
+			_, _ = e.Store.AppendEvent(run.ID, EvToolCall, map[string]any{"tool": "push_branch", "phase": "post_commit", "branch": run.Branch})
+		}
+	}
 	run.lastOutcome = "completed unit: " + sel.Description
 	return iterOutcome{progressed: true, summary: sel.Description}
 }
