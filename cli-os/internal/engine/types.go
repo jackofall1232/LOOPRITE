@@ -129,8 +129,8 @@ type TeamMember struct {
 // ---- run configuration ----
 
 // RunConfig is everything the human sets at creation and confirms at pre-flight. Immutable
-// for the life of a run (the self-modification guard): no code path may raise MaxIterations,
-// loosen Gates, or extend CommandAllowlist after Start.
+// for the life of a run (the self-modification guard): no code path may raise MaxIterations
+// or MaxToolCalls, loosen Gates, or extend CommandAllowlist after Start.
 type RunConfig struct {
 	RepoID    string `json:"repo"`
 	Goal      string `json:"goal"`
@@ -142,6 +142,13 @@ type RunConfig struct {
 	CommandAllowlist []string `json:"command_allowlist"`
 	// MaxIterations is this run's iteration budget (protocol default 25, clamped 1..100).
 	MaxIterations int `json:"max_iterations"`
+	// MaxToolCalls is this run's per-unit coder tool-call budget — how many tool calls the coder
+	// role may make while completing one unit before the unit stops at human_review_gate (default
+	// 40, clamped 1..200). A HUMAN sets it at creation; the self-modification guard in this struct's
+	// doc comment covers it — no code path may raise it after Start, and the model can never grant
+	// its own runs a bigger budget (propose_run's schema deliberately omits this field). 0 means
+	// "unset" and the engine falls back to Engine.MaxToolCalls (legacy pre-migration rows).
+	MaxToolCalls int `json:"max_tool_calls"`
 	// ApprovalTimeoutSec: how long a pending approval may wait before it expires and the run
 	// fail-closes (deny + boundary stop). Default 900.
 	ApprovalTimeoutSec int `json:"approval_timeout_s"`
@@ -257,6 +264,7 @@ type Preflight struct {
 
 	CurrentIteration    int               `json:"current_iteration"` // previous run's counter; resets on confirm
 	MaxIterations       int               `json:"max_iterations"`
+	MaxToolCalls        int               `json:"max_tool_calls"` // per-unit coder tool-call budget the human confirms
 	RunBoundaries       []string          `json:"run_boundaries"`
 	LikelyChangedPaths  []string          `json:"likely_changed_paths"`
 	PerActionPermission []string          `json:"per_action_permission"` // push/merge/deploy/... always separately gated

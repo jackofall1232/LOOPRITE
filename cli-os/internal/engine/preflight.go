@@ -151,6 +151,7 @@ func (e *Engine) BuildPreflight(run *Run) (*Preflight, error) {
 		Goal:                run.Config.Goal,
 		Objective:           run.Config.Objective,
 		MaxIterations:       run.Config.MaxIterations,
+		MaxToolCalls:        run.Config.MaxToolCalls,
 		RunBoundaries:       RunBoundaries,
 		PerActionPermission: perActionPermissions,
 		NoProgressThreshold: run.Config.NoProgressThreshold,

@@ -90,9 +90,18 @@ CREATE TABLE IF NOT EXISTS caps (
 -- every other table here), so a pre-existing DB gains this table with no separate migration step.
 -- A missing row reads as auto_pr=0 (OFF) -- see autoPREnabled -- so every existing and new project
 -- defaults to OFF with no backfill needed.
+--
+-- chat_max_tool_rounds / chat_max_tool_calls are the per-project human-set override of the
+-- Playground chat tool-call budget (gateway/chatlimits.go). 0 = unset -> the compiled default
+-- (chatDefaultMaxToolRounds / chatDefaultMaxToolCallsRun); a stored value is clamped to the
+-- compile-time ceiling on read AND on write, so neither a hand-edited row nor the model can lift
+-- the loop past a safe maximum. Added to project_settings (not caps) for the same reason auto_pr
+-- is: they are per-project settings with no budget "window".
 CREATE TABLE IF NOT EXISTS project_settings (
   project TEXT PRIMARY KEY,
-  auto_pr INTEGER NOT NULL DEFAULT 0
+  auto_pr INTEGER NOT NULL DEFAULT 0,
+  chat_max_tool_rounds INTEGER NOT NULL DEFAULT 0,
+  chat_max_tool_calls INTEGER NOT NULL DEFAULT 0
 );
 
 -- Per-project git host credential (today only github.com) for the "Connect GitHub" flow. The token
@@ -179,6 +188,7 @@ CREATE TABLE IF NOT EXISTS runs (
   gates TEXT NOT NULL, command_allowlist TEXT NOT NULL,          -- JSON
   max_iterations INTEGER NOT NULL, approval_timeout_s INTEGER NOT NULL,
   no_progress_threshold INTEGER NOT NULL,
+  max_tool_calls INTEGER NOT NULL DEFAULT 0,        -- per-unit coder tool-call budget; 0 = engine default
   status TEXT NOT NULL, boundary TEXT,
   current_iteration INTEGER NOT NULL DEFAULT 0,
   iterations_since_progress INTEGER NOT NULL DEFAULT 0,
@@ -261,6 +271,13 @@ func migrate(db *sql.DB) {
 	// via the schema const, so the duplicate-column error here is expected and ignored.
 	_, _ = db.Exec(`ALTER TABLE caps ADD COLUMN overage_pct REAL NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE caps ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0`)
+	// project_settings/runs gained per-project/per-run tool-call budget columns (v0.7 tool-call
+	// overrides). A fresh v-current DB already has them via the schema const, so these
+	// duplicate-column errors are expected and ignored; an old DB gains them here with DEFAULT 0
+	// (= unset -> compiled default), so behavior is byte-for-byte unchanged until a human sets one.
+	_, _ = db.Exec(`ALTER TABLE project_settings ADD COLUMN chat_max_tool_rounds INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE project_settings ADD COLUMN chat_max_tool_calls INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE runs ADD COLUMN max_tool_calls INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`UPDATE meta SET value = '2' WHERE key = 'schema_version' AND value = '1'`)
 }
 

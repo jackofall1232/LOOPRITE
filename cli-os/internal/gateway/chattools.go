@@ -24,15 +24,26 @@ import (
 )
 
 const (
-	chatReadCapBytes   = 32 * 1024 // read_file cap -- smaller than the engine's 256 KiB: this is
+	chatReadCapBytes = 32 * 1024 // read_file cap -- smaller than the engine's 256 KiB: this is
 	// chat context budget, not a coding agent's per-unit work budget.
-	chatListCapEntries  = 200
-	chatSearchFileCap   = 512 * 1024 // skip searching any single file bigger than this
-	chatSearchTotalCap  = 8 * 1024  // total bytes returned across all search matches
-	chatSearchDefaultN  = 30
-	chatSearchMaxN      = 100
-	chatMaxToolRounds   = 6 // bounds the tool-call loop in runChatTools (loop.go)
-	chatMaxToolCallsRun = 24
+	chatListCapEntries = 200
+	chatSearchFileCap  = 512 * 1024 // skip searching any single file bigger than this
+	chatSearchTotalCap = 8 * 1024   // total bytes returned across all search matches
+	chatSearchDefaultN = 30
+	chatSearchMaxN     = 100
+	// chatDefaultMaxToolRounds / chatDefaultMaxToolCallsRun bound the tool-call loop in RunChatTools
+	// (chatloop.go) when a project has set no override. A per-project setting may RAISE these up to
+	// the ceilings below (human-set, via POST /v1/chat-limits); a per-request header may only LOWER
+	// the effective value (never raise it) -- see effectiveChatLimits in chatlimits.go. The defaults
+	// are today's historical constants unchanged, so a gateway with no settings behaves identically.
+	chatDefaultMaxToolRounds   = 6
+	chatDefaultMaxToolCallsRun = 24
+	// chatCeilingToolRounds / chatCeilingToolCalls are the hard, compile-time maxima no runtime
+	// actor -- human or model -- can exceed: the POST handler rejects a larger value and
+	// effectiveChatLimits clamps a stored row to them on read (hand-edited-row defense). 4x the
+	// default, the same headroom ratio MaxIterations uses (25 -> 100).
+	chatCeilingToolRounds = 24
+	chatCeilingToolCalls  = 96
 )
 
 // chatSearchMaxFilesWalked bounds the total number of file entries searchFiles's WalkDir visits,

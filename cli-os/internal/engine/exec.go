@@ -44,7 +44,14 @@ func (e *Engine) runCoder(ctx context.Context, run *Run, f Files, tb *Toolbox, p
 		map[string]any{"role": "system", "content": coderSystem},
 		map[string]any{"role": "user", "content": coderUnitBrief(run, sel)},
 	}
-	for calls := 0; calls < e.MaxToolCalls; calls++ {
+	// Per-unit tool-call budget is the run's own frozen config value (human-set at creation,
+	// clamped 1..200, immutable for the life of the run). Engine.MaxToolCalls is only the fallback
+	// for legacy rows persisted before the max_tool_calls column existed (they read back as 0).
+	budget := run.Config.MaxToolCalls
+	if budget <= 0 {
+		budget = e.MaxToolCalls
+	}
+	for calls := 0; calls < budget; calls++ {
 		select {
 		case <-ctx.Done():
 			return "stopped mid-unit", BoundaryStopSignal
@@ -116,7 +123,8 @@ func (e *Engine) runCoder(ctx context.Context, run *Run, f Files, tb *Toolbox, p
 			messages = append(messages, toolMsg(id, outcome.Result))
 		}
 	}
-	return "coder exceeded the per-unit tool-call budget without finishing", BoundaryHumanReview
+	return fmt.Sprintf("coder exceeded the per-unit tool-call budget (%d) without finishing — "+
+		"create the run with a larger \"Max tool calls per unit\" to give each unit more room", budget), BoundaryHumanReview
 }
 
 // awaitApproval creates a pending approval, transitions the run to waiting_approval, and blocks

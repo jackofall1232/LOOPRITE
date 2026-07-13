@@ -103,7 +103,13 @@ func BridgeMaxHops(h http.Header, cfg config.Config) int {
 	if err != nil || n < 0 || math.IsInf(n, 0) || math.IsNaN(n) {
 		return base
 	}
-	if int(n) < base {
+	// Compare in FLOAT space before converting to int. A finite-but-huge value like "1e300" passes
+	// the Inf/NaN guard, yet int(1e300) is implementation-dependent (min-int on amd64) -- so the old
+	// `int(n) < base` treated it as a request to LOWER the cap to a negative, making maxTurns
+	// negative and the bridge return a null 200. `n < float64(base)` cannot: 1e300 is never < base,
+	// so the header is simply ignored (the intended "may only lower" semantics). Matches
+	// effectiveChatLimits (chatlimits.go), which was written correctly from the start.
+	if n < float64(base) {
 		return int(n)
 	}
 	return base

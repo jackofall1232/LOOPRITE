@@ -31,7 +31,7 @@ const chatToolPreamble = "The following is content read from the linked reposito
 
 // RunChatTools is a drop-in replacement for a single runTurn call in the ingress default path: it
 // returns the same TurnResult shape, so callers need no other changes.
-func RunChatTools(app *App, principal *security.Principal, requestID, project, repoID, repoRoot string, openaiReq map[string]any, routeHeader string, clientCtx context.Context, paths []string) (TurnResult, error) {
+func RunChatTools(app *App, principal *security.Principal, requestID, project, repoID, repoRoot string, openaiReq map[string]any, routeHeader string, clientCtx context.Context, paths []string, limits ChatToolLimits) (TurnResult, error) {
 	// activeNames is the subset of {read_file, list_dir, search_files, propose_run} this request
 	// actually attaches/intercepts: any name the CLIENT already defines its own tool for is
 	// excluded, so a client tool that happens to share one of these names is never silently
@@ -70,6 +70,12 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 
 	tb := chatToolbox{Root: repoRoot}
 	toolCallsUsed := 0
+	// capHit/roundsUsed drive the additive l00prite_chat_tools response field (finalize below), so
+	// the Playground can show a "budget spent — say continue or raise it" hint instead of the user
+	// silently re-sending and re-exploring. capHit is set ONLY when the budget forced the final
+	// answer while the model was actually using tools (not when a reply finishes naturally).
+	capHit := false
+	roundsUsed := 0
 	var last TurnResult
 
 	// Each round is a full, independently billed/ledgered runTurn call (that's the whole point of
@@ -126,10 +132,22 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 			resp["l00prite_proposed_runs"] = proposed
 			t.Response = resp
 		}
+		if capHit && t.Response != nil {
+			// Same additive-field pattern as l00prite_proposed_runs: standard OpenAI clients ignore it;
+			// the Playground renders a "used its whole tool budget" hint with a raise-budget button.
+			resp := copyMap(t.Response)
+			resp["l00prite_chat_tools"] = map[string]any{
+				"cap_reached": true,
+				"rounds_used": roundsUsed, "tool_calls_used": toolCallsUsed,
+				"max_rounds": limits.Rounds, "max_tool_calls": limits.Calls,
+			}
+			t.Response = resp
+		}
 		return t
 	}
 
-	for round := 0; round < chatMaxToolRounds; round++ {
+	for round := 0; round < limits.Rounds; round++ {
+		roundsUsed = round + 1
 		// Forcing the LAST round final (not just a call-cap round) matters: without it, a model that
 		// keeps calling chat tools right up to the round cap gets its tool calls executed locally
 		// (results appended to nextMessages) but the loop then exits WITHOUT ever sending those
@@ -137,10 +155,21 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 		// response, which still carries unresolved tool_calls naming chat tools the CLIENT doesn't
 		// own and was never asked to execute, and whose results were silently dropped. Stripping the
 		// chat tools here forces the model to answer with content instead.
-		forcedFinal := toolCallsUsed >= chatMaxToolCallsRun || round == chatMaxToolRounds-1
+		forcedFinal := toolCallsUsed >= limits.Calls || round == limits.Rounds-1
 		turnReq := convo
 		if forcedFinal {
 			turnReq = stripChatTools(convo, activeNames)
+			if toolCallsUsed > 0 {
+				// The budget is spent and this stripped round injects no new tool result -- the model
+				// just gets asked to answer. Nudge it to leave Progress Notes so a follow-up message
+				// (which sees this answer but not the raw file contents) can continue instead of
+				// re-reading everything: the direct fix for "it costs tokens and makes it start over".
+				// turnReq is already a fresh map from stripChatTools, so setting messages here does not
+				// touch convo's own slice.
+				msgs := append(append([]any{}, asArr(turnReq["messages"])...),
+					map[string]any{"role": "user", "content": chatCapWrapUpNudge})
+				turnReq["messages"] = msgs
+			}
 		}
 		turn, err := runTurn(app, TurnOpts{
 			Project: project, RepoID: repoID, RepoRoot: repoRoot, OpenaiReq: turnReq, RouteHeader: routeHeader,
@@ -193,6 +222,14 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 			// the response as-is (with accumulated cost/usage folded in). Any client tool_calls the
 			// model proposed pass through untouched -- the client executes those itself exactly as it
 			// always has, no behavior change for that case.
+			//
+			// capHit signals the budget forced this final while the model was still using tools: the
+			// per-turn call cap was reached, or we were pushed onto the last allowed round (only
+			// reached because earlier rounds kept calling tools). toolCallsUsed>0 excludes a reply
+			// that finished naturally with budget to spare (chatCalls==0, forcedFinal false).
+			if forcedFinal && toolCallsUsed > 0 {
+				capHit = true
+			}
 			return finalize(turn), nil
 		}
 
@@ -210,17 +247,18 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 				nextMessages = append(nextMessages, toolResult(id, unownedToolResult(tc, clientToolNames[name], activeNames[chatRunToolName])))
 				continue
 			}
-			if toolCallsUsed >= chatMaxToolCallsRun {
+			if toolCallsUsed >= limits.Calls {
 				nextMessages = append(nextMessages, toolResult(id, chatToolCapReached()))
 				continue
 			}
 			args := parseChatToolArgs(asStr(asMap(tc["function"])["arguments"]))
 			var result, preamble, tag string
 			if name == chatRunToolName {
-				// propose_run counts against the SAME chatMaxToolCallsRun/chatMaxToolRounds budget as
-				// the read-only tools -- no separate allowance -- and can only ever reach
-				// createDraftRun (CreateRun + BuildPreflight), never engine.StartRun: the EXECUTE
-				// confirmation gate stays exclusively with the human in the dashboard.
+				// propose_run counts against the SAME per-turn round/call budget (limits) as the
+				// read-only tools -- no separate allowance -- and can only ever reach createDraftRun
+				// (CreateRun + BuildPreflight), never engine.StartRun: the EXECUTE confirmation gate
+				// stays exclusively with the human in the dashboard. Raising the budget raises how
+				// many runs one turn can draft, but every draft still stops at the pre-flight.
 				var view *proposedRun
 				result, view = app.executeProposeRun(principal, project, repoID, repoRoot, args)
 				if view != nil {
@@ -242,7 +280,12 @@ func RunChatTools(app *App, principal *security.Principal, requestID, project, r
 	// Round cap reached without a final answer (the model kept calling tools): return whatever the
 	// last completed turn produced (with accumulated cost/usage folded in) rather than erroring --
 	// the same fallback shape RunBridge uses (its Exhausted case) when a bounded loop runs out
-	// without a clean stop.
+	// without a clean stop. In practice this is defensive: the last allowed round is always
+	// forcedFinal and returns from inside the loop above, so control reaches here only if the loop
+	// never ran (limits.Rounds floored to >=1 makes that impossible today). Mark capHit regardless.
+	if toolCallsUsed > 0 {
+		capHit = true
+	}
 	return finalize(last), nil
 }
 
@@ -274,9 +317,22 @@ func stripChatTools(req map[string]any, activeNames map[string]bool) map[string]
 	return out
 }
 
+// chatCapWrapUpNudge is injected as a user message on the forced-final (budget-spent) round, where
+// the request no longer carries tools and no new tool result is appended. It steers the model to
+// leave Progress Notes the assistant message DOES carry forward, so a follow-up turn continues from
+// them instead of re-reading every file (the "costs tokens / starts over" complaint).
+const chatCapWrapUpNudge = "You have used up this reply's tool-call budget, so no more files can be " +
+	"read this turn. Answer now with what you already gathered, and END with a short \"Progress Notes\" " +
+	"section: which files you examined, the key facts you found, and what still needs checking. A " +
+	"follow-up message will see this answer (but NOT the raw file contents), so those notes are what " +
+	"let it continue instead of re-reading everything."
+
 func chatToolCapReached() string {
 	return jsonStr(map[string]any{"status": "error", "error": "chat_tool_call_cap_reached",
-		"note": "The tool-call budget for this conversation turn is used up. Answer using what you already have; ask the user to send a follow-up message to continue browsing."})
+		"note": "This reply's tool-call budget is used up. Answer now using what you already gathered, " +
+			"and end with a short \"Progress Notes\" section (files examined, key facts, what remains) so a " +
+			"follow-up message can continue without re-reading everything. The user can raise this budget in " +
+			"the dashboard: Playground -> Tool budget."})
 }
 
 func parseChatToolArgs(raw string) map[string]any {
