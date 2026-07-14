@@ -48,6 +48,10 @@ func (app *App) HandleDashboardSummary(w http.ResponseWriter, r *http.Request) {
 		oaiError(w, 401, "Missing or invalid l00prite token", "authentication_error", "")
 		return
 	}
+	if principal.Repo != "" {
+		oaiError(w, 403, "Dashboard access requires a project-scoped gateway token; repo-scoped tokens are limited to repo work.", "permission_error", "dashboard_scope_required")
+		return
+	}
 	sendJSON(w, 200, app.buildSummary(principal))
 }
 
@@ -108,7 +112,7 @@ func (app *App) buildSummary(principal *security.Principal) map[string]any {
 	// ---- repos + real memory freshness ----
 	var repoOut []any
 	staleRepos := 0
-	for _, repo := range listRepos(db) {
+	for _, repo := range listRepos(db, principal.Project) {
 		fr := memory.RepoFreshness(repo.root)
 		if fr.StaleCount > 0 {
 			staleRepos++
@@ -129,7 +133,7 @@ func (app *App) buildSummary(principal *security.Principal) map[string]any {
 	}
 
 	// ---- tokens (never a secret) ----
-	tokens := security.ListTokens(db)
+	tokens := security.ListTokensForProject(db, principal.Project)
 	activeTok, revokedTok := 0, 0
 	var tokenList []any
 	for _, t := range tokens {
@@ -145,19 +149,19 @@ func (app *App) buildSummary(principal *security.Principal) map[string]any {
 	}
 
 	// ---- spend (real reserved/committed + caps) ----
-	spendByProject, todayCommitted, todayReserved := app.spendToday(day)
-	history := app.spendHistory(14)
+	spendByProject, todayCommitted, todayReserved := app.spendToday(day, principal.Project)
+	history := app.spendHistory(principal.Project, 14)
 
 	// ---- activity (recent ledger) + audit ----
 	var activity []any
-	for _, row := range ledger.Recent(db, 15) {
+	for _, row := range ledger.RecentForProject(db, principal.Project, 15) {
 		activity = append(activity, map[string]any{
 			"ts": row.TS, "provider": nilIfEmpty(row.Provider), "model": nilIfEmpty(row.Model),
 			"outcome": row.Outcome, "cost_usd": nullFloat(row.CostUSD), "cost_unconfirmed": row.CostUnconfirmed,
 			"request_id": nilIfEmpty(row.RequestID), "rule_id": nilIfEmpty(row.RuleID), "project": nilIfEmpty(row.Project),
 		})
 	}
-	audit := app.recentAudit(15)
+	audit := app.recentAudit(principal.TokenID, 15)
 
 	// ---- derived alerts (all real signals) ----
 	alerts := app.deriveAlerts(providers, spendByProject, staleRepos, circuitOpen)
@@ -249,6 +253,9 @@ func (app *App) providerAggToday(day string) map[string]provAgg {
 			unconfirmed: unconf.Int64 != 0, lastTS: lastTS.String,
 		}
 	}
+	if rows.Err() != nil {
+		return map[string]provAgg{}
+	}
 	return out
 }
 
@@ -262,8 +269,8 @@ func (app *App) dbPing() bool {
 
 type repoRow struct{ id, root, project, createdAt string }
 
-func listRepos(db *sql.DB) []repoRow {
-	rows, err := db.QueryContext(state.Ctx(), `SELECT id, root, project, created_at FROM repos ORDER BY created_at DESC`)
+func listRepos(db *sql.DB, project string) []repoRow {
+	rows, err := db.QueryContext(state.Ctx(), `SELECT id, root, project, created_at FROM repos WHERE project = ? ORDER BY created_at DESC`, project)
 	if err != nil {
 		return nil
 	}
@@ -275,19 +282,22 @@ func listRepos(db *sql.DB) []repoRow {
 			out = append(out, r)
 		}
 	}
+	if rows.Err() != nil {
+		return nil
+	}
 	return out
 }
 
 // spendToday returns per-project spend (reserved/committed/cap) for the day plus the day totals. It
 // unions the caps table (projects with a cap but no spend yet) with the spend table (projects that
 // have spent), so a configured cap is visible even before its first request.
-func (app *App) spendToday(day string) (byProject []any, committedTotal, reservedTotal float64) {
+func (app *App) spendToday(day, project string) (byProject []any, committedTotal, reservedTotal float64) {
 	type capRow struct {
 		limit, overage float64
 		unlimited      bool
 	}
 	caps := map[string]capRow{}
-	if rows, err := app.DB.QueryContext(state.Ctx(), `SELECT project, limit_usd, overage_pct, unlimited FROM caps WHERE window='daily'`); err == nil {
+	if rows, err := app.DB.QueryContext(state.Ctx(), `SELECT project, limit_usd, overage_pct, unlimited FROM caps WHERE window='daily' AND project = ?`, project); err == nil {
 		for rows.Next() {
 			var p string
 			var c capRow
@@ -297,11 +307,14 @@ func (app *App) spendToday(day string) (byProject []any, committedTotal, reserve
 				caps[p] = c
 			}
 		}
+		if rows.Err() != nil {
+			caps = map[string]capRow{}
+		}
 		rows.Close()
 	}
 	type sp struct{ reserved, committed float64 }
 	spends := map[string]sp{}
-	if rows, err := app.DB.QueryContext(state.Ctx(), `SELECT project, reserved_usd, committed_usd FROM spend WHERE day = ?`, day); err == nil {
+	if rows, err := app.DB.QueryContext(state.Ctx(), `SELECT project, reserved_usd, committed_usd FROM spend WHERE day = ? AND project = ?`, day, project); err == nil {
 		for rows.Next() {
 			var p string
 			var s sp
@@ -310,6 +323,11 @@ func (app *App) spendToday(day string) (byProject []any, committedTotal, reserve
 				committedTotal += s.committed
 				reservedTotal += s.reserved
 			}
+		}
+		if rows.Err() != nil {
+			spends = map[string]sp{}
+			committedTotal = 0
+			reservedTotal = 0
 		}
 		rows.Close()
 	}
@@ -344,11 +362,11 @@ func (app *App) spendToday(day string) (byProject []any, committedTotal, reserve
 }
 
 // spendHistory returns the last n UTC days of real ledger cost, oldest first.
-func (app *App) spendHistory(n int) []any {
+func (app *App) spendHistory(project string, n int) []any {
 	rows, err := app.DB.QueryContext(state.Ctx(),
 		`SELECT substr(ts,1,10) AS day, COALESCE(SUM(cost_usd),0), MAX(cost_unconfirmed), COUNT(*)
-		   FROM ledger WHERE ts IS NOT NULL
-		  GROUP BY day ORDER BY day DESC LIMIT ?`, n)
+		   FROM ledger WHERE ts IS NOT NULL AND project = ?
+		  GROUP BY day ORDER BY day DESC LIMIT ?`, project, n)
 	if err != nil {
 		return nil
 	}
@@ -363,6 +381,9 @@ func (app *App) spendHistory(n int) []any {
 		}
 		rev = append(rev, map[string]any{"day": day.String, "cost_usd": cost.Float64, "cost_unconfirmed": unconf.Int64 != 0, "requests": int(cnt.Int64)})
 	}
+	if rows.Err() != nil {
+		return nil
+	}
 	// reverse to chronological (oldest -> newest) for the chart
 	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
 		rev[i], rev[j] = rev[j], rev[i]
@@ -370,8 +391,8 @@ func (app *App) spendHistory(n int) []any {
 	return rev
 }
 
-func (app *App) recentAudit(n int) []any {
-	rows, err := app.DB.QueryContext(state.Ctx(), `SELECT ts, actor, action, detail FROM audit ORDER BY ts DESC LIMIT ?`, n)
+func (app *App) recentAudit(tokenID string, n int) []any {
+	rows, err := app.DB.QueryContext(state.Ctx(), `SELECT ts, actor, action, detail FROM audit WHERE actor = ? ORDER BY ts DESC LIMIT ?`, tokenID, n)
 	if err != nil {
 		return nil
 	}
@@ -383,6 +404,9 @@ func (app *App) recentAudit(n int) []any {
 		if rows.Scan(&ts, &actor, &action, &detail) == nil {
 			out = append(out, map[string]any{"ts": ts, "actor": actor.String, "action": action, "detail": nilIfEmpty(detail.String)})
 		}
+	}
+	if rows.Err() != nil {
+		return nil
 	}
 	return out
 }

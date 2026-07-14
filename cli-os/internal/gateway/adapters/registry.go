@@ -104,6 +104,20 @@ func DefaultBaseURL(providerName string) string {
 	return ""
 }
 
+// KnownBaseURL reports whether baseURL is one of the embedded provider manifest base URLs.
+func KnownBaseURL(baseURL string) bool {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return false
+	}
+	for _, m := range manifests {
+		if strings.TrimSpace(m.BaseURL) == baseURL {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultAdapterKind resolves the adapter kind for a provider from its manifest (openai-native maps
 // to openai-compat), defaulting to native-messages for anthropic and openai-compat otherwise.
 func DefaultAdapterKind(providerName string) string {

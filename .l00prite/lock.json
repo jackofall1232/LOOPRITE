@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "lock_id": "lock-20260714-230526-codex-looprite-review-roadmap",
+  "lock_id": "lock-20260714-235130-codex-ledger-correction",
   "owner_agent": null,
   "owner_session": null,
-  "acquired_at": "2026-07-14T23:05:26Z",
-  "expires_at": "2026-07-14T23:35:26Z",
+  "acquired_at": "2026-07-14T23:51:30Z",
+  "expires_at": "2026-07-15T00:21:30Z",
   "ttl_seconds": 1800,
   "purpose": null,
   "protected_paths": [

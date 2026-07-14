@@ -106,8 +106,7 @@ or removes every provider.
 
 - While `!SetupComplete()`: the setup mutating/action endpoints are reachable (this is unavoidable — the
   flow *creates* the first credential, so it cannot require one). Exposure is bounded by the fact that
-  the server **refuses to bind a non-loopback address without TLS**, so first-run setup runs on a safe
-  bind (loopback by default).
+  the server **refuses to bind a non-loopback address without TLS by default** (unless the operator explicitly sets `LOOPRITE_ALLOW_INSECURE_BIND=1` for a trusted private network / reverse proxy), so first-run setup runs on a safe bind (loopback by default).
 - The instant `SetupComplete()` becomes true: `setupGate` makes **every** mutating setup endpoint
   (`vault`, `provider`, `provider/test`, `token`) return `403 {code:"setup_complete"}` and perform no
   action. They are effectively disabled — there is no way to re-open them short of an explicit reset

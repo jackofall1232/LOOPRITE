@@ -76,8 +76,10 @@ func (app *App) storeProvider(p providerParams) (*providerStoreResult, *apierr.E
 		return nil, apierr.New(400, `provider name must match [a-z0-9_-]+ (lowercase letters, digits, "-" or "_")`, "invalid_request_error")
 	}
 	adapterKind := resolveAdapterKind(name, p.Adapter)
-	baseURL := p.BaseURL
-	if strings.TrimSpace(baseURL) == "" {
+	baseURL := strings.TrimSpace(p.BaseURL)
+	apiKey := strings.TrimSpace(p.APIKey)
+	model := strings.TrimSpace(p.Model)
+	if baseURL == "" {
 		baseURL = adapters.DefaultBaseURL(name)
 	}
 
@@ -91,7 +93,7 @@ func (app *App) storeProvider(p providerParams) (*providerStoreResult, *apierr.E
 	// Real key validation before we store anything — unless explicitly skipped (keyless/offline add).
 	validatedModel := ""
 	if !p.SkipValidation {
-		res := TestProviderKey(app.Cfg, adapterKind, name, baseURL, p.APIKey, p.Model)
+		res := TestProviderKey(app.Cfg, adapterKind, name, baseURL, apiKey, model)
 		if !res.OK {
 			e := apierr.New(400, "Provider validation failed: "+res.Error, "invalid_request_error")
 			e.Code = "provider_validation_failed"
@@ -103,8 +105,8 @@ func (app *App) storeProvider(p providerParams) (*providerStoreResult, *apierr.E
 
 	// Encrypt the key (keyed adapters only) and persist — identical row shape to CLI `provider add`.
 	var encVal any
-	if needsKey && strings.TrimSpace(p.APIKey) != "" {
-		enc, err := security.EncryptSecret(app.Cfg.MasterKeyPath, p.APIKey)
+	if needsKey && apiKey != "" {
+		enc, err := security.EncryptSecret(app.Cfg.MasterKeyPath, apiKey)
 		if err != nil {
 			return nil, apierr.New(500, "Failed to encrypt provider key: "+err.Error(), "configuration_error")
 		}
@@ -211,7 +213,7 @@ func (app *App) HandleProviderTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	adapterKind := resolveAdapterKind(body.Name, body.Adapter)
-	res := TestProviderKey(app.Cfg, adapterKind, body.Name, body.BaseURL, body.APIKey, body.Model)
+	res := TestProviderKey(app.Cfg, adapterKind, strings.TrimSpace(body.Name), strings.TrimSpace(body.BaseURL), strings.TrimSpace(body.APIKey), strings.TrimSpace(body.Model))
 	sendJSON(w, 200, map[string]any{"ok": res.OK, "error": nilIfEmpty(res.Error), "model_used": nilIfEmpty(res.ModelUsed)})
 }
 
@@ -287,7 +289,7 @@ func (app *App) HandleProviderRotate(w http.ResponseWriter, r *http.Request) {
 	}
 	validatedModel := ""
 	if !body.SkipValidation {
-		res := TestProviderKey(app.Cfg, prov.Adapter, name, prov.BaseURL, body.APIKey, body.Model)
+		res := TestProviderKey(app.Cfg, prov.Adapter, name, strings.TrimSpace(prov.BaseURL), strings.TrimSpace(body.APIKey), strings.TrimSpace(body.Model))
 		if !res.OK {
 			sendJSON(w, 400, map[string]any{
 				"error": map[string]any{"message": "Provider validation failed: " + res.Error, "type": "invalid_request_error", "code": "provider_validation_failed"},
@@ -297,7 +299,7 @@ func (app *App) HandleProviderRotate(w http.ResponseWriter, r *http.Request) {
 		}
 		validatedModel = res.ModelUsed
 	}
-	enc, err := security.EncryptSecret(app.Cfg.MasterKeyPath, body.APIKey)
+	enc, err := security.EncryptSecret(app.Cfg.MasterKeyPath, strings.TrimSpace(body.APIKey))
 	if err != nil {
 		oaiError(w, 500, "Failed to encrypt provider key: "+err.Error(), "configuration_error", "")
 		return
