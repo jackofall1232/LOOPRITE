@@ -223,6 +223,9 @@ func scanRows(rows *sql.Rows) []Row {
 		r.CostUnconfirmed = unconfirmed.Int64 != 0
 		out = append(out, r)
 	}
+	if rows.Err() != nil {
+		return nil
+	}
 	return out
 }
 
@@ -242,6 +245,16 @@ func Explain(db *sql.DB, requestID string) []Row {
 func Recent(db *sql.DB, limit int) []Row {
 	rows, err := db.QueryContext(state.Ctx(),
 		`SELECT `+selectCols+` FROM ledger ORDER BY ts DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil
+	}
+	return scanRows(rows)
+}
+
+// RecentForProject returns the most recent ledger rows for one project.
+func RecentForProject(db *sql.DB, project string, limit int) []Row {
+	rows, err := db.QueryContext(state.Ctx(),
+		`SELECT `+selectCols+` FROM ledger WHERE project = ? ORDER BY ts DESC LIMIT ?`, project, limit)
 	if err != nil {
 		return nil
 	}

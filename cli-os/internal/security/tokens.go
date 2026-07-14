@@ -110,6 +110,20 @@ func ListTokens(q state.Querier) []TokenRow {
 	if err != nil {
 		return nil
 	}
+	return scanTokenRows(rows)
+}
+
+// ListTokensForProject returns tokens scoped to one project newest first.
+func ListTokensForProject(q state.Querier, project string) []TokenRow {
+	rows, err := q.QueryContext(state.Ctx(),
+		`SELECT id,project,repo,revoked,expires_at,created_at FROM tokens WHERE project = ? ORDER BY created_at DESC`, project)
+	if err != nil {
+		return nil
+	}
+	return scanTokenRows(rows)
+}
+
+func scanTokenRows(rows *sql.Rows) []TokenRow {
 	defer rows.Close()
 	var out []TokenRow
 	for rows.Next() {
@@ -125,6 +139,9 @@ func ListTokens(q state.Querier) []TokenRow {
 		t.Revoked = revoked != 0
 		t.ExpiresAt = expiresAt.String
 		out = append(out, t)
+	}
+	if rows.Err() != nil {
+		return nil
 	}
 	return out
 }

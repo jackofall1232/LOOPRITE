@@ -63,7 +63,7 @@ func RepoFreshness(repoRoot string) FreshnessReport {
 				f.Present = true
 				f.SizeBytes = st.Size()
 				f.AsOf = util.ISOFromTime(st.ModTime())
-				f.Stale = time.Since(st.ModTime()).Hours()/24 > staleAfterDays
+				f.Stale = time.Since(st.ModTime()) > time.Duration(staleAfterDays)*24*time.Hour
 				rep.PresentCount++
 				if f.Stale {
 					rep.StaleCount++

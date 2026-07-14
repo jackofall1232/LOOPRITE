@@ -90,7 +90,7 @@ docker compose exec cli-os l00prite token mint --project default
 | GET  | `/v1/models` | none | List models across enabled providers (plus `auto:*` pseudo-models) |
 | GET  | `/v1/dashboard/summary` | token | Real operator state for the dashboard: providers + live health, repos + memory freshness, tokens, spend/caps, run ledger, audit log. All real; unwired values are omitted, never faked. |
 | GET  | `/healthz` | none | Provider + circuit-breaker status, bridge state, auto profiles |
-| GET  | `/` | none | Setup wizard while unconfigured; real-data dashboard once setup completes |
+| GET  | `/` | none | Setup wizard while unconfigured; real-data dashboard once setup completes; non-loopback/no-TLS binds are refused by default unless `LOOPRITE_ALLOW_INSECURE_BIND=1` is explicitly set |
 | GET  | `/v1/setup/status` | none | First-run progress (booleans/counts only, no secrets) + bind info |
 | POST | `/v1/setup/vault` | setup¹ | Initialize the vault master key (generate, or provide your own base64-32) |
 | POST | `/v1/setup/provider/test` | setup¹ | Validate a provider key with a **real** upstream call (stores nothing) |

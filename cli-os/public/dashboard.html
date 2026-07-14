@@ -605,10 +605,17 @@
     if(d>0) return d+"d "+h+"h"; if(h>0) return h+"h "+m+"m"; if(m>0) return m+"m"; return sec+"s"; }
 
   async function fetchSummary(){
-    const res = await fetch("/v1/dashboard/summary",{headers:{authorization:"Bearer "+S.token}});
-    if(res.status===401) return {unauthorized:true};
-    if(!res.ok) return {error:"HTTP "+res.status};
-    return {data: await res.json()};
+    try{
+      const res = await fetch("/v1/dashboard/summary",{headers:{authorization:"Bearer "+S.token}});
+      if(res.status===401) return {unauthorized:true};
+      let data=null;
+      try{ data = await res.json(); }catch(e){ data=null; }
+      if(!res.ok) return {error:(data&&data.error&&data.error.message)||("HTTP "+res.status)};
+      if(!data) return {error:"Invalid JSON response from gateway"};
+      return {data};
+    }catch(e){
+      return {error:"Network error — is the gateway reachable?"};
+    }
   }
 
   function showOverlay(msg){

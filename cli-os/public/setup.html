@@ -476,7 +476,7 @@
     card.innerHTML = `
       <div class="eyebrow"><span class="tick"></span> Step 3 · Network</div>
       <h1>How this gateway is reachable</h1>
-      <p>l00prite refuses to bind a public address without TLS, so you're on a safe footing already.
+      <p>l00prite refuses to bind a public address without TLS by default (unless you explicitly set LOOPRITE_ALLOW_INSECURE_BIND=1), so you're on a safe footing already.
          Here's exactly where it's listening.</p>
       <div style="margin-top:14px">
         <div class="kv"><span class="k">Bind host</span><span class="v mono">${esc(n.host||"?")}</span></div>

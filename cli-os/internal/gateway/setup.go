@@ -151,7 +151,7 @@ func (app *App) networkInfo() map[string]any {
 	}
 	base := scheme + "://" + displayHost + ":" + strconv.Itoa(port)
 	return map[string]any{
-		"host": cfg.Host, "display_host": displayHost, "port": cfg.Port, "scheme": scheme,
+		"host": cfg.Host, "display_host": displayHost, "port": port, "scheme": scheme,
 		"loopback": loopback, "tls": tls, "allow_insecure": config.AllowInsecureBind(),
 		"exposed":       !loopback && !tls,
 		"chat_url":      base + "/v1/chat/completions",
@@ -211,8 +211,8 @@ func (app *App) HandleSetupVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	generated := true
-	if strings.TrimSpace(body.MasterKey) != "" {
-		raw, ok := security.DecodeBase64Key(body.MasterKey)
+	if masterKey := strings.TrimSpace(body.MasterKey); masterKey != "" {
+		raw, ok := security.DecodeBase64Key(masterKey)
 		if !ok {
 			oaiError(w, 400, "master_key must be base64 of exactly 32 bytes", "invalid_request_error", "invalid_master_key")
 			return
@@ -260,8 +260,15 @@ func (app *App) HandleSetupProviderTest(w http.ResponseWriter, r *http.Request) 
 		oaiError(w, 400, "Invalid JSON body", "invalid_request_error", "")
 		return
 	}
-	adapterKind := resolveAdapterKind(body.Name, body.Adapter)
-	res := TestProviderKey(app.Cfg, adapterKind, body.Name, body.BaseURL, body.APIKey, body.Model)
+	name := strings.TrimSpace(body.Name)
+	baseURL := strings.TrimSpace(body.BaseURL)
+	apiKey := strings.TrimSpace(body.APIKey)
+	adapterKind := resolveAdapterKind(name, body.Adapter)
+	if errMsg := setupBaseURLProblem(name, baseURL); errMsg != "" {
+		oaiError(w, 400, errMsg, "invalid_request_error", "setup_custom_base_url_disabled")
+		return
+	}
+	res := TestProviderKey(app.Cfg, adapterKind, name, baseURL, apiKey, strings.TrimSpace(body.Model))
 	// A failed VALIDATION is still a well-formed REQUEST (HTTP 200); ok:false carries the verdict.
 	sendJSON(w, 200, map[string]any{"ok": res.OK, "error": nilIfEmpty(res.Error), "model_used": nilIfEmpty(res.ModelUsed)})
 }
@@ -291,9 +298,15 @@ func (app *App) HandleSetupProvider(w http.ResponseWriter, r *http.Request) {
 		oaiError(w, 400, "Invalid JSON body", "invalid_request_error", "")
 		return
 	}
+	name := strings.TrimSpace(body.Name)
+	baseURL := strings.TrimSpace(body.BaseURL)
+	if errMsg := setupBaseURLProblem(name, baseURL); errMsg != "" {
+		oaiError(w, 400, errMsg, "invalid_request_error", "setup_custom_base_url_disabled")
+		return
+	}
 	res, e := app.storeProvider(providerParams{
-		Name: body.Name, Adapter: body.Adapter, BaseURL: body.BaseURL, APIKey: body.APIKey,
-		Model: body.Model, Default: body.Default, SkipValidation: body.SkipValidation,
+		Name: name, Adapter: body.Adapter, BaseURL: baseURL, APIKey: strings.TrimSpace(body.APIKey),
+		Model: strings.TrimSpace(body.Model), Default: body.Default, SkipValidation: body.SkipValidation,
 	})
 	if e != nil {
 		writeProviderErr(w, e)
@@ -316,6 +329,14 @@ func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if app.setupGate(w) {
+		return
+	}
+	if !config.MasterKeyPresent(app.Cfg) {
+		oaiError(w, 409, "Initialize the vault before minting the first token.", "invalid_request_error", "setup_vault_required")
+		return
+	}
+	if app.providerCount() == 0 {
+		oaiError(w, 409, "Add at least one provider before minting the first token.", "invalid_request_error", "setup_provider_required")
 		return
 	}
 	var body tokenReq
@@ -372,6 +393,21 @@ func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
 
 // resolveAdapterKind maps a UI adapter choice to a concrete adapter kind, defaulting via the manifest
 // when unspecified (same resolution the CLI's `provider add` uses).
+func setupCustomBaseURLEnabled() bool {
+	return os.Getenv("LOOPRITE_SETUP_ALLOW_CUSTOM_BASE_URL") == "1"
+}
+
+func setupBaseURLProblem(providerName, baseURL string) string {
+	if baseURL == "" || setupCustomBaseURLEnabled() {
+		return ""
+	}
+	def := strings.TrimSpace(adapters.DefaultBaseURL(providerName))
+	if (def != "" && baseURL == def) || adapters.KnownBaseURL(baseURL) {
+		return ""
+	}
+	return "Custom setup provider base URLs are disabled by default. Choose a built-in provider default or set LOOPRITE_SETUP_ALLOW_CUSTOM_BASE_URL=1 before first-run setup if this gateway is intentionally validating against a private/custom upstream."
+}
+
 func resolveAdapterKind(name, adapter string) string {
 	adapter = strings.TrimSpace(adapter)
 	if adapter == "" {

@@ -2098,3 +2098,19 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-drift note:** Do not pull Codex execution, Responses, bridge v2, premium UI, DB
   replacement, or provider-price/model guesses into Phase 0. Preserve current compatibility and
   safety invariants.
+
+### Run 2026-07-14T23:47:04Z — Codex, branch work (PR #18 review-response follow-up)
+- **Goal:** Fix all valid PR #18 reviewer findings that remained applicable in the current codebase.
+- **Triggering event:** Human instruction to read PR #18 review comments, plan, then "Fix all" after plan approval.
+- **Reviewer/comment reference:** PR #18 review threads from gemini-code-assist[bot], chatgpt-codex-connector[bot], and Copilot snippets visible on GitHub.
+- **Decision:** Valid findings were fixed; already-resolved findings from the durable setup latch, master-key presence, stale validation flag, and ldflags-overridable version remained unchanged.
+- **Fix implemented:** Hardened setup token ordering, setup custom-base-url validation, input trimming, dashboard scope/project filtering, SQL row iteration checks, memory freshness duration comparison, dashboard fetch error handling, DB cleanup in setup tests, and docs/UI wording for explicit insecure-bind override.
+- **Tests run:**
+  - `cd cli-os && go test ./...` — exit_code=0; all cli-os Go packages passed; timestamp=2026-07-14T23:41:00Z.
+  - `node scripts/validate-l00prite.js` — exit_code=0; protocol/template validator passed; timestamp=2026-07-14T23:42:00Z; evidence_path=/tmp/validate.log.
+  - `git diff --check` — exit_code=0; no whitespace errors; timestamp=2026-07-14T23:43:00Z.
+- **Response drafted/sent:** PR metadata prepared with the make_pr tool; no GitHub review thread replies posted from this environment.
+- **Event status:** completed locally; the final commit includes the code fixes and ledger evidence.
+- **Lock:** acquired `lock-20260714-234704-codex-pr18-review-fixes` and released before stopping.
+- **Failures:** Direct `gh` review access was unavailable earlier in this environment; browser-visible PR #18 review content and current code were used for classification.
+- **Next action:** Maintainer reviews the commit/PR metadata and, if desired, posts reviewer-thread replies with the test evidence above.

@@ -34,7 +34,10 @@ func unconfigured(t *testing.T) (*httptest.Server, config.Config, *sql.DB) {
 	}
 	app := &gateway.App{DB: db, Cfg: cfg, Aliases: cfg.Aliases, StartedAt: time.Now()}
 	srv := httptest.NewServer(server.Handler(app))
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		srv.Close()
+		db.Close()
+	})
 	return srv, cfg, db
 }
 
@@ -195,6 +198,65 @@ func TestFirstRunWizardE2E(t *testing.T) {
 	}
 }
 
+func TestSetupTokenRequiresVaultAndProvider(t *testing.T) {
+	srv, _, _ := unconfigured(t)
+	base := srv.URL
+
+	if resp, m := doJSON(t, "POST", base+"/v1/setup/token", "", map[string]any{"project": "demo"}); resp.StatusCode != 409 {
+		t.Fatalf("token before vault must be 409, got %d %v", resp.StatusCode, m)
+	}
+	if resp, _ := doJSON(t, "POST", base+"/v1/setup/vault", "", map[string]any{}); resp.StatusCode != 200 {
+		t.Fatalf("vault init: %d", resp.StatusCode)
+	}
+	if resp, m := doJSON(t, "POST", base+"/v1/setup/token", "", map[string]any{"project": "demo"}); resp.StatusCode != 409 {
+		t.Fatalf("token before provider must be 409, got %d %v", resp.StatusCode, m)
+	}
+	if resp, _ := doJSON(t, "POST", base+"/v1/setup/provider", "", map[string]any{"name": "mock", "adapter": "mock", "default": true}); resp.StatusCode != 200 {
+		t.Fatalf("provider add: %d", resp.StatusCode)
+	}
+	if resp, m := doJSON(t, "POST", base+"/v1/setup/token", "", map[string]any{"project": "demo"}); resp.StatusCode != 200 || m["token"] == "" {
+		t.Fatalf("token after vault+provider should succeed, got %d %v", resp.StatusCode, m)
+	}
+}
+
+func TestSetupProviderRejectsCustomBaseURLByDefault(t *testing.T) {
+	srv, _, _ := unconfigured(t)
+	if resp, _ := doJSON(t, "POST", srv.URL+"/v1/setup/vault", "", map[string]any{}); resp.StatusCode != 200 {
+		t.Fatalf("vault init: %d", resp.StatusCode)
+	}
+	resp, m := doJSON(t, "POST", srv.URL+"/v1/setup/provider/test", "", map[string]any{
+		"name": "custom", "adapter": "openai-compat", "base_url": "http://127.0.0.1:9", "api_key": "sk-test", "model": "model",
+	})
+	if resp.StatusCode != 400 {
+		t.Fatalf("custom setup base URL must be rejected by default, got %d %v", resp.StatusCode, m)
+	}
+	if e, _ := m["error"].(map[string]any); e == nil || e["code"] != "setup_custom_base_url_disabled" {
+		t.Fatalf("expected setup_custom_base_url_disabled, got %v", m["error"])
+	}
+}
+
+func TestDashboardRejectsRepoScopedToken(t *testing.T) {
+	srv, _, db := unconfigured(t)
+	base := srv.URL
+	if resp, _ := doJSON(t, "POST", base+"/v1/setup/vault", "", map[string]any{}); resp.StatusCode != 200 {
+		t.Fatalf("vault init: %d", resp.StatusCode)
+	}
+	if resp, _ := doJSON(t, "POST", base+"/v1/setup/provider", "", map[string]any{"name": "mock", "adapter": "mock", "default": true}); resp.StatusCode != 200 {
+		t.Fatalf("provider add: %d", resp.StatusCode)
+	}
+	if _, err := db.Exec(`INSERT INTO repos(id,root,project,created_at) VALUES('repo1',?,?,?)`, t.TempDir(), "demo", time.Now().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("insert repo: %v", err)
+	}
+	resp, tk := doJSON(t, "POST", base+"/v1/setup/token", "", map[string]any{"project": "demo", "repo": "repo1"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("token mint: %d %v", resp.StatusCode, tk)
+	}
+	token, _ := tk["token"].(string)
+	if resp, m := doJSON(t, "GET", base+"/v1/dashboard/summary", token, nil); resp.StatusCode != 403 {
+		t.Fatalf("repo-scoped token must not access dashboard summary, got %d %v", resp.StatusCode, m)
+	}
+}
+
 // TestSetupLockdownIsPersistent proves the lockdown is DURABLE: once setup completes, revoking the
 // last token (or removing the last provider) must NOT re-open the unauthenticated setup endpoints.
 // Without a persistent latch this would be a full auth-bypass back door.
@@ -250,6 +312,7 @@ func TestSetupLockdownIsPersistent(t *testing.T) {
 // call before storing it: a bad key is rejected and nothing is persisted; a good key passes and is
 // stored encrypted. A fake OpenAI-compatible upstream authorizes only "Bearer goodkey".
 func TestSetupProviderRealValidation(t *testing.T) {
+	t.Setenv("LOOPRITE_SETUP_ALLOW_CUSTOM_BASE_URL", "1")
 	srv, cfg, db := unconfigured(t)
 	base := srv.URL
 
