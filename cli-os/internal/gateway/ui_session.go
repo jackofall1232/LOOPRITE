@@ -56,7 +56,8 @@ func (app *App) uiPrincipal(r *http.Request) *security.Principal {
 		return nil
 	}
 	if expires.Valid {
-		if when, err := time.Parse(time.RFC3339Nano, expires.String); err == nil && !time.Now().Before(when) {
+		when, err := time.Parse(time.RFC3339Nano, expires.String)
+		if err != nil || !time.Now().Before(when) {
 			return nil
 		}
 	}
