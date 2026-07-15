@@ -2070,3 +2070,31 @@ Append one entry per agent run. Do not overwrite prior runs.
   b.txt/c.txt executed, then PASS after the fix), `TestResolveMaxToolCalls`. `go build/vet/test
   -race ./...` green, validator 519/0. APK rebuilt in place at v0.7.0-beta (sha `60fecbe4…`,
   v2+v3 true).
+
+### Run 2026-07-14T23:05:26Z — Codex, read-only senior-staff application review and roadmap persistence
+- **Goal:** Review the private LOOPRITE Android application as an AI orchestration platform, with
+  emphasis on Codex, provider bridging/collaboration/tool sharing, UI/UX, reliability, security,
+  extensibility, and a non-implementation roadmap.
+- **Work performed:** Read the repository instructions, architecture/security/provider/bridge/
+  Android documentation, Android wrapper, gateway/provider adapters/manifests, routing, bridge,
+  tools, memory, state, policy, run engine, dashboard/setup UI, and Codex-related surfaces. Checked
+  current Codex behavior against the official Codex manual. Produced the full 1303-line review at
+  `/tmp/LOOPRITE-engineering-review.md` and presented the roadmap to the maintainer.
+- **Verification:** `go test ./...` from `cli-os/` completed successfully for every package;
+  `git status --short --branch` remained clean before this protocol-memory-only update.
+- **Executive conclusion:** LOOPRITE has a strong safety/routing/run foundation but is currently an
+  Android-hosted OpenAI Chat Completions gateway, not yet a first-class Codex runtime or durable
+  multi-agent collaboration platform. Confirmed gaps include no routable native OpenAI catalog,
+  no `/v1/responses`, `openai-native` resolving to the generic compatibility adapter, no Codex
+  thread/event/approval/auth integration, an in-memory one-level bridge, proposal-only tool
+  forwarding, ephemeral chat, overly broad project tokens, and WebView/session hardening needs.
+- **Maintainer decision:** “this plan is solid” and should be saved to TODOs to prevent scope loss
+  and drift. The ordered Phase 0–5 roadmap, exact Phase 0 boundaries, exclusions, unresolved human
+  decisions, and recommended branch/commit are now persisted at the top of `.l00prite/todos.md`.
+- **Scope boundary:** No application code changed; no implementation branch/commit/PR created.
+  Phase 0 cannot start until its listed human decisions are resolved in-session.
+- **Next action:** Maintainer answers the Phase 0 decisions; only then create
+  `feature/phase-0-security-contracts` and implement the narrow security/contracts unit.
+- **Do-not-drift note:** Do not pull Codex execution, Responses, bridge v2, premium UI, DB
+  replacement, or provider-price/model guesses into Phase 0. Preserve current compatibility and
+  safety invariants.

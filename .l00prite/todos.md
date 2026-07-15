@@ -1,5 +1,132 @@
 # Prioritized TODOs
 
+## Approved roadmap — LOOPRITE AI orchestration platform review (maintainer approval 2026-07-14)
+
+**Status:** Roadmap approved for persistence; implementation has **not** begun. Before any code
+change, resolve the human decisions below, create `feature/phase-0-security-contracts`, and keep
+Phase 0 limited to security and contracts. Preserve `/v1/chat/completions`, the PEP, provider
+vault, deterministic routing, repository containment, run engine, and current bridge compatibility.
+
+**Design record:** Senior-staff review produced 2026-07-14 as
+`/tmp/LOOPRITE-engineering-review.md` (1303 lines). The scope and sequencing below are the durable
+repository copy; `/tmp` is not a portable source of truth.
+
+### Phase 0 — security and contracts (first approved implementation unit; no implementation yet)
+
+- [ ] Decide existing-token migration: safe-scope downgrade vs temporary legacy-admin scopes with
+      forced rotation warning.
+- [ ] Decide UI authentication: Android-Keystore custody plus short-lived HttpOnly loopback session
+      is recommended; retain bearer auth for Codex/Aider/API clients.
+- [ ] Decide roles/scopes and administrative split. Recommended initial scopes:
+      `chat:invoke`, `repo:read`, `run:create`, `run:approve`, `provider:manage`,
+      `credential:manage`, `budget:manage`, `audit:read`, `admin`.
+- [ ] Add token scopes and centralized endpoint authorization; fail closed on unknown scopes;
+      expose effective scopes in principal/dashboard metadata; audit privileged denials/actions.
+- [ ] Harden the Android WebView: exact loopback navigation allowlist, external-browser handoff,
+      file/content/mixed-content restrictions, Safe Browsing, credential/logout cleanup.
+- [ ] Remove long-lived dashboard bearer storage from JavaScript `localStorage`.
+- [ ] Replace `?ss=<setup-secret>` with a one-time native-to-gateway exchange and short-lived setup
+      session; reject replay/expiry and preserve a documented non-Android bootstrap path.
+- [ ] Add browser security headers: strict CSP migration, `frame-ancestors`, `nosniff`, referrer
+      policy, permissions policy, and `no-store` for authenticated UI responses.
+- [ ] Define versioned, provider-neutral contracts (types + JSON schemas only unless separately
+      approved): `OrchestrationEvent`, `ApprovalRequest`, `CapabilityDescriptor`, `ToolGrant`,
+      `CollaborationRun`, `DelegationTask`, `TaskAttempt`, `Artifact`, `ExternalSession`.
+- [ ] Decide whether Phase 0 creates empty orchestration tables or defers tables to Phase 1.
+- [ ] Add audit schema/correlation fields; decide whether hash chaining is Phase 0 or deferred.
+- [ ] Add authorization, setup-replay, security-header, contract-validation, audit-integrity, and
+      Android WebView-policy tests. Keep `go test ./...` green.
+- [ ] Update security/Android/interface/OS architecture docs to distinguish shipped behavior from
+      target contracts.
+
+**Phase 0 exact existing-file boundary:** `cli-os/internal/state/db.go`,
+`security/tokens.go`, `gateway/ingress.go`, `server/server.go`, `gateway/setup.go`,
+`gateway/dashboard.go`, optionally `ledger/ledger.go`, `cmd/l00prite/main.go`,
+`android/{MainActivity.java,Keys.java,AndroidManifest.xml,res/xml/network_security_config.xml}`,
+`public/{dashboard.html,setup.html}`, and directly relevant docs/tests. Proposed new modules:
+`security/scopes.go`, optionally `security/websession.go`, `orchestration/{types,validate}.go`,
+and optionally `audit/chain.go`. Do not touch provider adapter or bridge algorithms in Phase 0
+except mechanical centralized HTTP authorization.
+
+### Phase 1 — durable conversation and event foundation
+
+- [ ] Add durable conversations/messages, collaboration runs, delegation tasks/attempts,
+      artifacts/provenance, external sessions, and append-only versioned events.
+- [ ] Add SSE or WebSocket event delivery with resume cursor, cancellation, deadlines,
+      idempotency, and crash recovery.
+- [ ] Persist Playground threads and expose thread list/search/resume in the UI.
+- [ ] Unify chat exploration, delegation, approvals, autonomous runs, and artifacts under shared
+      correlation identities without replacing the existing run engine.
+
+### Phase 2 — first-class Codex runtime integration
+
+- [ ] Implement a layered Codex runtime adapter, using Codex app-server first, for thread start/
+      resume, typed turn/item events, cancellation, session persistence, and approval forwarding.
+- [ ] Keep Platform API keys, ChatGPT/Codex login, and enterprise access-token authentication as
+      distinct credential/lifecycle modes; never serialize them into prompts or bridge payloads.
+- [ ] Add a verified OpenAI Responses adapter and `/v1/responses`; do not alias `openai-native` to
+      the generic Chat Completions adapter.
+- [ ] Add verified GPT-5.6 catalog/policy support: Sol for complex architecture/coding/final review,
+      Terra for read-heavy repository inspection/parallel reconnaissance, Luna for lighter-volume
+      tasks where available. Keep policy configurable and fallback explicit.
+- [ ] Map Codex sandbox/command/MCP/app/permission requests into LOOPRITE's typed approval inbox;
+      support Android notifications for background `needs input` states.
+
+### Phase 3 — bridge v2 and provider-neutral capability broker
+
+- [ ] Preserve the current `l00prite_bridge` API as a compatibility facade but back it with durable
+      collaboration/task records rather than an in-memory loop.
+- [ ] Add capability descriptors, scoped/expiring tool grants, broker-side argument/schema/policy
+      validation, and typed artifacts. Providers never exchange credentials.
+- [ ] Support policy-bounded nested delegation, parallel independent reviews, context grants,
+      deadlines/retries/cancellation, structured aggregation, and collaboration-level budgets.
+- [ ] Enforce independence constraints when requested (different provider/model/vendor family) and
+      preserve per-attempt provenance, audit history, and cost.
+
+### Phase 4 — premium application UI
+
+- [ ] Componentize the dashboard with typed API/state boundaries; remove duplicated setup/provider
+      form logic.
+- [ ] Make Conversations, Runs, Collaborations, Repositories, Approvals, Usage, and Settings the
+      primary information architecture.
+- [ ] Add streaming response/tool/provider-handoff timeline, collaboration task graph, artifact/
+      diff/Markdown viewers, approval inbox, stable run routes, native notifications, and integrated
+      repository import.
+- [ ] Complete keyboard, screen-reader, focus, contrast, motion, and text-scaling accessibility.
+
+### Phase 5 — scale, reliability, and operations
+
+- [ ] Add durable provider health/latency metrics, verified catalog/pricing refresh, strict handling
+      of unpriced models under dollar caps, backpressure/queueing, and load/chaos/live-provider tests.
+- [ ] Evolve the state store beyond its single-connection bottleneck while preserving PEP atomicity;
+      support an external DB only if multi-user/server deployment is approved.
+- [ ] Add tamper-evident audit export/anchoring, structured redacted logging, Android lifecycle/
+      background modernization, recovery notifications, and reproducible release controls.
+
+### Explicit exclusions until separately approved
+
+- [ ] Do **not** rewrite the application, replace the PEP/run engine, weaken approvals/budgets/
+      denylist/preflight, guess pricing/models, or modify canonical protocol prompts.
+- [ ] Do **not** begin Codex execution, `/v1/responses`, bridge v2, nested delegation, capability
+      execution, Compose migration, DB replacement, APK release, push, or PR as part of Phase 0.
+- [ ] Do **not** create a branch or implementation commit until the Phase 0 human decisions are
+      answered in-session.
+
+### Human decisions still required before implementation
+
+- [ ] Existing-token migration and deprecation window.
+- [ ] UI credential/session design and non-Android setup bootstrap.
+- [ ] Pure scopes vs named roles mapped to scopes; separate admin credential policy.
+- [ ] Strict-CSP asset split vs nonce/hash generation.
+- [ ] Audit hash chaining now vs later; orchestration tables now vs Phase 1.
+- [ ] Authorization to add a Gradle/Android instrumentation test harness.
+- [ ] Phase 2 Codex surface/auth modes and Sol/Terra/Luna default policy.
+- [ ] Unpriced-provider behavior under strict caps.
+- [ ] Single-device-only vs future multi-user/server product boundary.
+
+**Recommended first branch:** `feature/phase-0-security-contracts`<br>
+**Recommended first commit:** `feat(security): add scoped auth and orchestration contracts`
+
 ## Active — Android APK pass (maintainer brief 2026-07-05, branch `claude/looprite-android-apk-4mth8g`)
 
 Maintainer brief: evolve the repo into a self-contained **L00prite OS Android APK** — the
