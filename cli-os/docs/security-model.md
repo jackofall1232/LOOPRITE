@@ -25,11 +25,23 @@ content (from disk) is **untrusted input** to the model, never instructions.
 
 ## Gateway authentication
 
-- Clients present a single opaque bearer token, minted by the admin CLI, **scoped to a project
-  + policy**, revocable, optionally expiring.
+- API clients present an opaque bearer token, minted by the admin CLI, **scoped to a project,
+  optional repository, and explicit capabilities**, revocable and optionally expiring. Named roles
+  are convenience mappings; endpoint authorization is enforced against scopes. Existing pre-scope
+  tokens are marked legacy and retain temporary admin compatibility so operators can rotate them.
 - Tokens are **hashed at rest** and compared in **constant time**. A leaked token is revocable
   without touching provider keys.
 - One token → one principal → one budget/policy/repo scope (isolation between projects).
+- The browser dashboard never persists that bearer in JavaScript storage. It exchanges an
+  `audit:read`-capable bearer for an in-memory, HttpOnly, SameSite=Strict loopback session; token
+  revocation invalidates the session on its next request.
+
+## Android setup authentication
+
+When `LOOPRITE_SETUP_SECRET` is present, it is accepted only by `POST /v1/setup/session`. The
+Android wrapper performs that exchange natively and installs the returned short-lived HttpOnly
+cookie before loading the WebView. The install secret never appears in a URL, WebView history,
+JavaScript, or localStorage. A second exchange while an unexpired setup session exists is rejected.
 
 ## Least-privilege repo file access
 

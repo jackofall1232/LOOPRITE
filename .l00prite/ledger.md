@@ -2098,3 +2098,33 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-drift note:** Do not pull Codex execution, Responses, bridge v2, premium UI, DB
   replacement, or provider-price/model guesses into Phase 0. Preserve current compatibility and
   safety invariants.
+
+### Run 2026-07-15T01:04:52Z — Codex, Phase 0 security and orchestration contracts
+- **Goal:** Implement the approved Phase 0 without beginning Codex execution, Responses, bridge v2,
+  premium UI, or database replacement.
+- **Maintainer decision:** Unpriced models must remain allowed. Implemented a prominent error-level
+  warning that accurate budget enforcement cannot be determined, `$0`/unconfirmed is not free, and
+  provider charges may exceed the configured budget.
+- **Implemented:** explicit token scopes plus admin/operator/chat roles and custom scopes; legacy
+  admin compatibility marker; centralized endpoint authorization and denial audit; HttpOnly
+  SameSite loopback UI sessions with revocation checks; native one-time setup-secret exchange with
+  replay denial; removal of bearer localStorage; exact-origin WebView navigation and file/content/
+  mixed-content restrictions; MIME/frame/referrer/permissions/no-store headers and hash-authorized
+  scripts; schema-versioned hash-chained privileged audit events; provider-neutral orchestration
+  contract types/validation with no live scheduler or tables.
+- **Compatibility:** `/v1/chat/completions`, public `/v1/models`, provider routing, bridge, PEP,
+  run engine, desktop setup without `LOOPRITE_SETUP_SECRET`, and old tokens remain operational.
+- **Tests:** `go vet ./...` exit 0; `go test ./...` exit 0; protocol validator 519 PASS / 0 FAIL;
+  targeted scope/session/setup-replay/CSP/localStorage/audit-tamper/contract tests pass.
+- **Android/release verification:** hermetic APK build compiled the Java wrapper and android/arm64
+  Go payload; `apksigner verify` reports v2=true and v3=true; `aapt dump badging` reports package
+  `com.l00prite.os`, targetSdk 34 and versionName `0.8.0-beta`; published APK SHA-256
+  `1f7712c7f2bcd900afae097f173cc948adaa946e3421d7f9ce9293a6f62d5781` verified against
+  `downloads/SHA256SUMS`.
+- **Known limitation:** style attributes still require CSP `style-src 'unsafe-inline'`; executable
+  scripts are hash-authorized and do not use `unsafe-inline`. Full style extraction belongs with
+  the componentized premium UI work. Android verification is compile/sign/badging plus static
+  regression tests; no emulator/device instrumentation was available.
+- **Next action:** independent review of the Phase 0 diff, then commit/push/PR only on maintainer
+  direction. Phase 1 remains blocked until Phase 0 review is accepted.
+- **Lock:** acquired for protected memory updates and released before stopping.

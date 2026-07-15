@@ -18,6 +18,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.CookieManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.TextView;
@@ -81,8 +84,15 @@ public class MainActivity extends Activity {
         root.addView(statusView, fill);
 
         webView = new WebView(this);
+        CookieManager.getInstance().setAcceptCookie(true);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
+		webView.getSettings().setAllowFileAccess(false);
+		webView.getSettings().setAllowContentAccess(false);
+		webView.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+		if (android.os.Build.VERSION.SDK_INT >= 26) {
+			webView.getSettings().setSafeBrowsingEnabled(true);
+		}
         // The dashboard themes itself (data-theme attribute + prefers-color-scheme). Any
         // WebView-side "algorithmic darkening" (force-dark) then double-inverts a page that already
         // handles dark mode — the black-on-black Add-provider / Register-repo modals the user hit.
@@ -101,7 +111,25 @@ public class MainActivity extends Activity {
                 // Best-effort: the page-side data-theme override still fixes the palette regardless.
             }
         }
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+			private boolean isAllowed(Uri uri) {
+				return uri != null
+						&& "http".equalsIgnoreCase(uri.getScheme())
+						&& "127.0.0.1".equals(uri.getHost())
+						&& uri.getPort() == 8787;
+			}
+
+			@Override
+			public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+				return request == null || !isAllowed(request.getUrl());
+			}
+
+			@SuppressWarnings("deprecation")
+			@Override
+			public boolean shouldOverrideUrlLoading(WebView view, String url) {
+				return !isAllowed(url == null ? null : Uri.parse(url));
+			}
+		});
         webView.setVisibility(View.GONE);
         root.addView(webView, fill);
 
@@ -212,7 +240,8 @@ public class MainActivity extends Activity {
                         return;
                     }
                 }
-                onPollFinished(up, setupSecret);
+                String setupCookie = up ? exchangeSetupSecret(setupSecret) : null;
+                onPollFinished(up, setupCookie);
             }
         }, "l00prite-healthpoll");
         pollerThread.setDaemon(true);
@@ -243,7 +272,31 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    private void onPollFinished(final boolean succeeded, final String setupSecret) {
+    private String exchangeSetupSecret(String setupSecret) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(BASE_URL + "v1/setup/session");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(1500);
+            conn.setReadTimeout(1500);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("x-l00prite-setup-secret", setupSecret);
+            conn.setDoOutput(true);
+            conn.getOutputStream().close();
+            if (conn.getResponseCode() != 200) {
+                return null;
+            }
+            return conn.getHeaderField("Set-Cookie");
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    private void onPollFinished(final boolean succeeded, final String setupCookie) {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
@@ -251,6 +304,10 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (succeeded) {
+					if (setupCookie != null && !setupCookie.isEmpty()) {
+						CookieManager.getInstance().setCookie(BASE_URL, setupCookie);
+						CookieManager.getInstance().flush();
+					}
                     // Pass the device's night-mode setting to the page so its theme is
                     // device-determined (data-theme), independent of what the WebView reports for
                     // prefers-color-scheme. A device theme flip recreates this activity (no
@@ -258,8 +315,7 @@ public class MainActivity extends Activity {
                     boolean night = (getResources().getConfiguration().uiMode
                             & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
                             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                    webView.loadUrl(BASE_URL + "?ss=" + setupSecret
-                            + "&theme=" + (night ? "dark" : "light"));
+                    webView.loadUrl(BASE_URL + "?theme=" + (night ? "dark" : "light"));
                     webView.setVisibility(View.VISIBLE);
                     statusView.setVisibility(View.GONE);
                 } else {

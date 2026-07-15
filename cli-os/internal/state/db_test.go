@@ -39,8 +39,8 @@ func TestMigrationAddsCostUnconfirmed(t *testing.T) {
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&ver); err != nil {
 		t.Fatal(err)
 	}
-	if ver != "2" {
-		t.Fatalf("schema_version should be bumped to 2, got %q", ver)
+	if ver != "3" {
+		t.Fatalf("schema_version should be bumped to 3, got %q", ver)
 	}
 }
 

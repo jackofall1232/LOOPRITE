@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/apierr"
+	"github.com/jackofall1232/l00prite/cli-os/internal/audit"
 	"github.com/jackofall1232/l00prite/cli-os/internal/config"
 	"github.com/jackofall1232/l00prite/cli-os/internal/gateway/adapters"
 	"github.com/jackofall1232/l00prite/cli-os/internal/security"
@@ -163,12 +164,7 @@ func (app *App) auditAs(principal *security.Principal, action, detail string) {
 	if principal != nil && principal.TokenID != "" {
 		actor = principal.TokenID
 	}
-	var d any
-	if detail != "" {
-		d = detail
-	}
-	_, _ = app.DB.ExecContext(state.Ctx(), `INSERT INTO audit(id,ts,actor,action,detail) VALUES(?,?,?,?,?)`,
-		util.RID("aud"), util.NowISO(), actor, action, d)
+	_ = audit.Append(app.DB, actor, action, detail, "")
 }
 
 // writeProviderErr maps a storeProvider typed error to a response, preserving the wizard's richer

@@ -13,6 +13,8 @@
    reloads and the setup -> dashboard hop. Desktop browsers get no ?theme= and never store the
    key, so data-theme is never set and behavior is byte-identical to before. */
 (function(){
+  // Remove credentials persisted by pre-v0.8 dashboards. New builds use only an HttpOnly session.
+  try{ localStorage.removeItem("l00prite_token"); }catch(e){}
   var m=/[?&]theme=(dark|light)\b/.exec(location.search);
   var t=m?m[1]:null;
   try{ if(t){localStorage.setItem('l00p_theme',t);} else {t=localStorage.getItem('l00p_theme');} }catch(e){}
@@ -591,9 +593,8 @@
 <script>
 "use strict";
 (function(){
-  const TOKEN_KEY="l00prite_token";
   const LOCK_KEY="l00prite_play_model_lock";
-  const S={ token:null, summary:null, timer:null, runs:null, github:null };
+  const S={ token:null, connected:false, summary:null, timer:null, runs:null, github:null };
   const $ = id => document.getElementById(id);
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const num = n => (n==null?0:Number(n)).toLocaleString(undefined,{maximumFractionDigits:0});
@@ -605,7 +606,7 @@
     if(d>0) return d+"d "+h+"h"; if(h>0) return h+"h "+m+"m"; if(m>0) return m+"m"; return sec+"s"; }
 
   async function fetchSummary(){
-    const res = await fetch("/v1/dashboard/summary",{headers:{authorization:"Bearer "+S.token}});
+    const res = await fetch("/v1/dashboard/summary");
     if(res.status===401) return {unauthorized:true};
     if(!res.ok) return {error:"HTTP "+res.status};
     return {data: await res.json()};
@@ -619,11 +620,11 @@
   function hideOverlay(){ $("overlay").classList.add("hidden"); }
 
   async function refresh(){
-    if(!S.token){ showOverlay(); return; }
+    if(!S.connected){ showOverlay(); return; }
     const btn=$("refresh-btn"); const old=btn.innerHTML; btn.disabled=true; btn.innerHTML=`<span class="spin"></span> Loading`;
     const r = await fetchSummary();
     btn.disabled=false; btn.innerHTML=old;
-    if(r.unauthorized){ S.token=null; try{localStorage.removeItem(TOKEN_KEY);}catch(e){} showOverlay("That token was rejected. Enter a valid gateway token."); return; }
+    if(r.unauthorized){ S.connected=false; showOverlay("Your dashboard session expired. Enter a valid gateway token."); return; }
     if(r.error){ $("page-sub").textContent = "Could not load state ("+r.error+")."; return; }
     hideOverlay();
     S.summary=r.data; render();
@@ -751,8 +752,9 @@
         <div class="cost-stat"><div class="l">Committed today</div><div class="v">${usd(totalToday)}</div></div>
         <div class="cost-stat"><div class="l">Reserved (in-flight)</div><div class="v">${usd(reserved)}</div></div>
         <div class="cost-stat"><div class="l">Budget (daily)</div><div class="v">${esc(bud)}</div></div>
-        <div class="cost-stat"><div class="l">Pricing</div><div class="v" style="font-size:15px">${sp.has_pricing_gaps?`<span style="color:var(--warn)">some unpriced</span>`:"confirmed"}</div></div>
+        <div class="cost-stat"><div class="l">Pricing</div><div class="v" style="font-size:15px">${sp.has_pricing_gaps?`<span style="color:var(--err)">UNPRICED — budget accuracy unavailable</span>`:"confirmed"}</div></div>
       </div>`;
+    if(sp.has_pricing_gaps) html += `<div class="note err"><b>Budget warning:</b> One or more used models have no verified price. They remain allowed, but the displayed $0/unconfirmed amount is not free usage and LOOPRITE cannot determine or guarantee the true provider charge against your budget.</div>`;
     if(noData){ html += `<div class="empty"><b>No spend recorded yet.</b> Cost appears here after the first request through <code>/v1/chat/completions</code>.</div>`; $("cost-body").innerHTML=html; return; }
     html += `<div class="charts">
       <div class="chart-block"><div class="ct"><span class="cn">Spend over time</span><span class="cm">last ${hist.length} day${hist.length===1?"":"s"} (UTC)</span></div><div class="chart-wrap">${sparkline(hist)}</div></div>
@@ -1126,7 +1128,7 @@
   // the exact auth of every other data endpoint. A key is never sent back by the server, so it never
   // appears here; the UI only ever submits a NEW key to replace a stored one.
   async function api(method, path, body){
-    const opt = {method, headers:{authorization:"Bearer "+S.token}};
+    const opt = {method, headers:{}};
     if(body!==undefined){ opt.headers["content-type"]="application/json"; opt.body=JSON.stringify(body); }
     let res, data=null;
     try{ res = await fetch(path, opt); }catch(e){ return {res:{ok:false,status:0}, data:{error:{message:"Network error — is the gateway reachable?"}}}; }
@@ -2097,7 +2099,7 @@
     syncCustomModel(); syncLockUI();
   }
   async function playSend(){
-    if(sending || !S.token) return;
+    if(sending || !S.connected) return;
     const inp=$("play-input"); const text=inp.value.trim(); if(!text) return;
     const model=playModel(), repo=$("play-repo").value;
     // CLI-registered repo ids aren't charset-restricted; a non-ASCII id would make fetch() itself
@@ -2109,7 +2111,7 @@
     chat.push({role:"user",content:text}); renderChat(); inp.value="";
     sending=true; const btn=$("play-send"); busy(btn,"Sending…");
     const gen=chatGen; // if the user clears the conversation mid-flight, drop this reply
-    const headers={authorization:"Bearer "+S.token,"content-type":"application/json"};
+    const headers={"content-type":"application/json"};
     if(repo) headers["x-l00prite-repo"]=repo;
     let res=null, data=null;
     try{ res=await fetch("/v1/chat/completions",{method:"POST",headers,body:JSON.stringify({model, messages:chatMessages()})}); }catch(e){}
@@ -2213,8 +2215,12 @@
   syncLockUI();
   $("modal").addEventListener("click",e=>{ if(e.target===$("modal") || (e.target.closest&&e.target.closest("[data-close]"))) closeModal(); });
   document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("modal").classList.contains("hidden")) closeModal(); });
-  $("disconnect-btn").onclick=()=>{ S.token=null; try{localStorage.removeItem(TOKEN_KEY);}catch(e){} $("disconnect-btn").style.display="none"; showOverlay(); };
-  $("token-save").onclick=()=>{ const v=$("token-input").value.trim(); if(!v){ showOverlay("Enter a token."); return; } S.token=v; try{localStorage.setItem(TOKEN_KEY,v);}catch(e){} refresh(); };
+  $("disconnect-btn").onclick=async()=>{ await fetch("/v1/ui/logout",{method:"POST"}); S.connected=false; $("disconnect-btn").style.display="none"; showOverlay(); };
+  $("token-save").onclick=async()=>{ const v=$("token-input").value.trim(); if(!v){ showOverlay("Enter a token."); return; }
+    const res=await fetch("/v1/ui/session",{method:"POST",headers:{authorization:"Bearer "+v}}).catch(()=>null);
+    $("token-input").value="";
+    if(!res||!res.ok){ showOverlay("That token was rejected or lacks dashboard access."); return; }
+    S.connected=true; refresh(); };
   $("token-input").addEventListener("keydown",e=>{ if(e.key==="Enter") $("token-save").click(); });
   function closeNavDrawer(){ $("sidebar").classList.remove("open"); $("nav-backdrop").classList.add("hidden"); }
   $("nav-toggle").onclick=()=>{ $("sidebar").classList.toggle("open"); $("nav-backdrop").classList.toggle("hidden"); };
@@ -2222,11 +2228,10 @@
   document.querySelectorAll("[data-goto]").forEach(a=>a.onclick=()=>{ const el=$(a.dataset.goto); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); closeNavDrawer(); });
 
   // auto-refresh every 20s while a token is set and the tab is visible
-  setInterval(()=>{ if(S.token && S.summary && document.visibilityState==="visible") refresh(); }, 20000);
+  setInterval(()=>{ if(S.connected && S.summary && document.visibilityState==="visible") refresh(); }, 20000);
 
   // ---- boot ----
-  try{ S.token = localStorage.getItem(TOKEN_KEY); }catch(e){}
-  if(S.token) refresh(); else showOverlay();
+  fetchSummary().then(r=>{ if(r.data){ S.connected=true; S.summary=r.data; hideOverlay(); render(); loadModels(); loadRuns(); loadGitHub(); } else showOverlay(); });
 })();
 </script>
 </body>

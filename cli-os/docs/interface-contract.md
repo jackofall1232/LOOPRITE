@@ -75,3 +75,10 @@ explicit and auditable.
 tracks; changes bump the version and are additive within a major. This is the single most
 important thing to get right — it is what prevents Track 2 from becoming a bottleneck or a
 hard dependency of Track 1.
+
+## Phase 0 orchestration contracts
+
+Provider-neutral future orchestration types live in `internal/orchestration`. They define versioned
+events, approvals, capability descriptors, scoped tool grants, collaborations, delegation tasks,
+attempts, artifacts, and external runtime sessions. Phase 0 deliberately does not persist, schedule,
+or route live work through these types; they are the reviewed contract boundary for later phases.

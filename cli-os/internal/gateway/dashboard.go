@@ -27,7 +27,7 @@ import (
 //	-ldflags "-X 'github.com/jackofall1232/l00prite/cli-os/internal/gateway.Version=<version>'"
 //
 // A plain `go build` / `go test` keeps this in-source default.
-var Version = "0.7.0-beta"
+var Version = "0.8.0-beta"
 
 // provAgg is one provider's real, ledger-derived activity for the current UTC day.
 type provAgg struct {
@@ -160,7 +160,7 @@ func (app *App) buildSummary(principal *security.Principal) map[string]any {
 	audit := app.recentAudit(15)
 
 	// ---- derived alerts (all real signals) ----
-	alerts := app.deriveAlerts(providers, spendByProject, staleRepos, circuitOpen)
+	alerts := app.deriveAlerts(providers, spendByProject, staleRepos, circuitOpen, anyPricingGap)
 
 	// ---- uptime (real process start) ----
 	var uptime map[string]any
@@ -190,8 +190,12 @@ func (app *App) buildSummary(principal *security.Principal) map[string]any {
 		"object":       "l00prite.dashboard_summary",
 		"version":      Version,
 		"generated_at": util.NowISO(),
-		"principal":    map[string]any{"token_id": principal.TokenID, "project": principal.Project, "repo": nilIfEmpty(principal.Repo)},
-		"uptime":       uptime,
+		"principal": map[string]any{
+			"token_id": principal.TokenID, "project": principal.Project, "repo": nilIfEmpty(principal.Repo),
+			"scopes": principal.Scopes, "legacy": principal.Legacy,
+			"role": principal.Role,
+		},
+		"uptime": uptime,
 		"system": map[string]any{
 			"status": sysStatus, "status_label": statusLabel,
 			"providers_total": provTotal, "providers_enabled": provEnabled,
@@ -388,9 +392,12 @@ func (app *App) recentAudit(n int) []any {
 }
 
 // deriveAlerts turns real state into operator alerts — no invented notifications.
-func (app *App) deriveAlerts(providers []ProviderRow, spendByProject []any, staleRepos, circuitOpen int) []any {
+func (app *App) deriveAlerts(providers []ProviderRow, spendByProject []any, staleRepos, circuitOpen int, pricingGap bool) []any {
 	var alerts []any
 	add := func(level, msg string) { alerts = append(alerts, map[string]any{"level": level, "message": msg}) }
+	if pricingGap {
+		add("error", "Accurate budget enforcement is not possible for one or more models because verified pricing is unavailable. These models remain allowed, but their displayed $0/unconfirmed cost is NOT free usage and actual provider charges may exceed the configured budget.")
+	}
 
 	if len(providers) == 0 {
 		add("warn", "No providers configured — add one to route requests.")

@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS tokens (
   repo TEXT,
   revoked INTEGER NOT NULL DEFAULT 0,
   expires_at TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  scopes TEXT NOT NULL DEFAULT 'legacy_admin',
+  legacy INTEGER NOT NULL DEFAULT 1,
+  role TEXT NOT NULL DEFAULT 'legacy_admin'
 );
 
 CREATE TABLE IF NOT EXISTS repos (
@@ -174,7 +177,11 @@ CREATE TABLE IF NOT EXISTS audit (
   ts TEXT NOT NULL,
   actor TEXT,
   action TEXT NOT NULL,
-  detail TEXT
+  detail TEXT,
+  schema_version INTEGER,
+  correlation_id TEXT,
+  prev_hash TEXT,
+  entry_hash TEXT
 );
 
 -- L00prite OS run-engine tables (see cli-os/docs/os-architecture.md §2.1). A run is one confirmed
@@ -246,7 +253,7 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	migrate(db)
-	if _, err := db.Exec(`INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version','2');`); err != nil {
+	if _, err := db.Exec(`INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version','3');`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -278,7 +285,14 @@ func migrate(db *sql.DB) {
 	_, _ = db.Exec(`ALTER TABLE project_settings ADD COLUMN chat_max_tool_rounds INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE project_settings ADD COLUMN chat_max_tool_calls INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE runs ADD COLUMN max_tool_calls INTEGER NOT NULL DEFAULT 0`)
-	_, _ = db.Exec(`UPDATE meta SET value = '2' WHERE key = 'schema_version' AND value = '1'`)
+	_, _ = db.Exec(`ALTER TABLE tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT 'legacy_admin'`)
+	_, _ = db.Exec(`ALTER TABLE tokens ADD COLUMN legacy INTEGER NOT NULL DEFAULT 1`)
+	_, _ = db.Exec(`ALTER TABLE tokens ADD COLUMN role TEXT NOT NULL DEFAULT 'legacy_admin'`)
+	_, _ = db.Exec(`ALTER TABLE audit ADD COLUMN schema_version INTEGER`)
+	_, _ = db.Exec(`ALTER TABLE audit ADD COLUMN correlation_id TEXT`)
+	_, _ = db.Exec(`ALTER TABLE audit ADD COLUMN prev_hash TEXT`)
+	_, _ = db.Exec(`ALTER TABLE audit ADD COLUMN entry_hash TEXT`)
+	_, _ = db.Exec(`UPDATE meta SET value = '3' WHERE key = 'schema_version' AND value IN ('1','2')`)
 }
 
 // Tx runs fn inside a BEGIN IMMEDIATE transaction on a pinned connection, committing on success and

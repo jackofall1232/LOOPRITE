@@ -5,6 +5,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -21,6 +23,20 @@ import (
 	"github.com/jackofall1232/l00prite/cli-os/public"
 )
 
+func inlineScriptHash(body []byte) string {
+	s := string(body)
+	start := strings.Index(s, "<script>")
+	end := strings.LastIndex(s, "</script>")
+	if start < 0 || end <= start {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(s[start+len("<script>") : end]))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
+
+var dashboardScriptHash = inlineScriptHash(public.Dashboard)
+var setupScriptHash = inlineScriptHash(public.Setup)
+
 func serveHTML(w http.ResponseWriter, body []byte, fallback string) {
 	if len(body) == 0 {
 		w.Header().Set("content-type", "text/plain")
@@ -32,6 +48,18 @@ func serveHTML(w http.ResponseWriter, body []byte, fallback string) {
 	w.Header().Set("content-length", fmt.Sprint(len(body)))
 	w.WriteHeader(200)
 	w.Write(body)
+}
+
+func setSecurityHeaders(w http.ResponseWriter, p string) {
+	w.Header().Set("x-content-type-options", "nosniff")
+	w.Header().Set("referrer-policy", "no-referrer")
+	w.Header().Set("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+	w.Header().Set("x-frame-options", "DENY")
+	w.Header().Set("content-security-policy", "default-src 'self'; script-src 'self' "+dashboardScriptHash+" "+setupScriptHash+"; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	if p == "/" || p == "/dashboard" || p == "/setup" || strings.HasPrefix(p, "/v1/") {
+		w.Header().Set("cache-control", "no-store")
+		w.Header().Set("pragma", "no-cache")
+	}
 }
 
 func serveDashboard(w http.ResponseWriter) {
@@ -85,9 +113,38 @@ func notFound(w http.ResponseWriter) {
 	w.Write([]byte(`{"error":{"message":"Not found","type":"invalid_request_error"}}`))
 }
 
+func requiredScope(method, p string) string {
+	switch {
+	case method == http.MethodGet && p == "/v1/providers/catalog":
+		return ""
+	case method == http.MethodPost && p == "/v1/chat/completions":
+		return "chat:invoke"
+	case method == http.MethodGet && p == "/v1/dashboard/summary":
+		return "audit:read"
+	case method == http.MethodPost && p == "/v1/ui/session":
+		return "audit:read"
+	case p == "/v1/budget" || p == "/v1/auto-pr" || p == "/v1/chat-limits":
+		return "budget:manage"
+	case strings.HasPrefix(p, "/v1/providers/") || p == "/v1/providers":
+		return "provider:manage"
+	case strings.HasPrefix(p, "/v1/github/"):
+		return "credential:manage"
+	case p == "/v1/repos" || p == "/v1/repos/remove" || p == "/v1/repos/clone" || p == "/v1/repos/scaffold-branch":
+		return "admin"
+	case p == "/v1/runs" || p == "/v1/runs/preflight" || p == "/v1/runs/start":
+		return "run:create"
+	case p == "/v1/runs/approve" || p == "/v1/runs/stop":
+		return "run:approve"
+	case p == "/v1/runs/list" || p == "/v1/runs/get" || p == "/v1/runs/events":
+		return "repo:read"
+	}
+	return ""
+}
+
 // Handler builds the request router with a top-level recover (any panic becomes a 500).
 func Handler(app *gateway.App) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w, r.URL.Path)
 		defer func() {
 			if rec := recover(); rec != nil {
 				// Best-effort 500 if nothing was written yet.
@@ -98,6 +155,9 @@ func Handler(app *gateway.App) http.Handler {
 			}
 		}()
 		p := r.URL.Path
+		if scope := requiredScope(r.Method, p); scope != "" && !app.AuthorizeScope(w, r, scope) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && p == "/":
 			// First-run: an unconfigured system serves the setup wizard at / until setup completes,
@@ -119,6 +179,10 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleModels(w, r)
 		case r.Method == http.MethodGet && p == "/v1/dashboard/summary":
 			app.HandleDashboardSummary(w, r)
+		case r.Method == http.MethodPost && p == "/v1/ui/session":
+			app.HandleUISession(w, r)
+		case r.Method == http.MethodPost && p == "/v1/ui/logout":
+			app.HandleUILogout(w, r)
 		case r.Method == http.MethodGet && p == "/v1/setup/status":
 			app.HandleSetupStatus(w, r)
 		// Unauthenticated read-only provider presets for the Add-provider UI (static embedded
@@ -127,6 +191,8 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleProviderPresets(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/vault":
 			app.HandleSetupVault(w, r)
+		case r.Method == http.MethodPost && p == "/v1/setup/session":
+			app.HandleSetupSession(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/provider/test":
 			app.HandleSetupProviderTest(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/provider":

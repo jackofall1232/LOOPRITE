@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackofall1232/l00prite/cli-os/internal/audit"
 	"github.com/jackofall1232/l00prite/cli-os/internal/config"
 	"github.com/jackofall1232/l00prite/cli-os/internal/gateway/adapters"
 	"github.com/jackofall1232/l00prite/cli-os/internal/security"
@@ -81,12 +82,7 @@ func (app *App) activeTokenCount() int {
 }
 
 func setupAudit(app *App, action, detail string) {
-	var d any
-	if detail != "" {
-		d = detail
-	}
-	_, _ = app.DB.ExecContext(state.Ctx(), `INSERT INTO audit(id,ts,actor,action,detail) VALUES(?,?,?,?,?)`,
-		util.RID("aud"), util.NowISO(), "setup", action, d)
+	_ = audit.Append(app.DB, "setup", action, detail, "")
 }
 
 // requireSetupSecret enforces LOOPRITE_SETUP_SECRET (G7) when the operator has set one: the caller
@@ -94,15 +90,14 @@ func setupAudit(app *App, action, detail string) {
 // time via the same primitive token verification uses (util.TimingSafeEqual) so this gate leaks no
 // timing information either. Returns true (and writes nothing) when the env var is unset — the
 // desktop default — so every existing caller of the setup wizard is completely unaffected.
-func requireSetupSecret(w http.ResponseWriter, r *http.Request) bool {
+func (app *App) requireSetupSecret(w http.ResponseWriter, r *http.Request) bool {
 	secret := os.Getenv("LOOPRITE_SETUP_SECRET")
 	if secret == "" {
 		return true
 	}
-	got := r.Header.Get("x-l00prite-setup-secret")
-	if got == "" || !util.TimingSafeEqual(got, secret) {
+	if !app.validSetupSession(r) {
 		sendJSON(w, 403, map[string]any{"error": map[string]any{
-			"message": "Missing or invalid x-l00prite-setup-secret header.",
+			"message": "Missing or expired setup session.",
 			"type":    "authentication_error", "code": "setup_secret_required"}})
 		return false
 	}
@@ -194,7 +189,7 @@ type vaultReq struct {
 
 // HandleSetupVault is POST /v1/setup/vault — initialize the vault master key.
 func (app *App) HandleSetupVault(w http.ResponseWriter, r *http.Request) {
-	if !requireSetupSecret(w, r) {
+	if !app.requireSetupSecret(w, r) {
 		return
 	}
 	if app.setupGate(w) {
@@ -249,7 +244,7 @@ type providerTestReq struct {
 // HandleSetupProviderTest is POST /v1/setup/provider/test — validate a key with a REAL upstream call
 // (stores nothing). Returns a clear pass/fail so the wizard never accepts a bad key silently.
 func (app *App) HandleSetupProviderTest(w http.ResponseWriter, r *http.Request) {
-	if !requireSetupSecret(w, r) {
+	if !app.requireSetupSecret(w, r) {
 		return
 	}
 	if app.setupGate(w) {
@@ -280,7 +275,7 @@ type providerReq struct {
 // the SAME storeProvider core the authenticated dashboard "add provider" endpoint (Part E) uses, so the
 // first-run and ongoing paths can never diverge. A bad key is rejected 400 and stored nowhere.
 func (app *App) HandleSetupProvider(w http.ResponseWriter, r *http.Request) {
-	if !requireSetupSecret(w, r) {
+	if !app.requireSetupSecret(w, r) {
 		return
 	}
 	if app.setupGate(w) {
@@ -312,7 +307,7 @@ type tokenReq struct {
 // HandleSetupToken is POST /v1/setup/token — mint the first token via the same primitive as
 // `token mint`. Returned ONCE; never stored in plaintext. Minting typically finalizes setup.
 func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
-	if !requireSetupSecret(w, r) {
+	if !app.requireSetupSecret(w, r) {
 		return
 	}
 	if app.setupGate(w) {
@@ -357,7 +352,7 @@ func (app *App) HandleSetupToken(w http.ResponseWriter, r *http.Request) {
 		}
 		repo = &r
 	}
-	id, token, err := security.MintToken(app.DB, project, repo, body.ExpiresDays)
+	id, token, err := security.MintTokenWithRole(app.DB, project, repo, body.ExpiresDays, security.RoleAdmin)
 	if err != nil {
 		oaiError(w, 500, "Failed to mint token: "+err.Error(), "configuration_error", "")
 		return

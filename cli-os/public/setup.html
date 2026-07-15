@@ -182,24 +182,6 @@
 <script>
 "use strict";
 (function(){
-  // Android G7 (docs/android-architecture.md §4): when the wrapper generates a per-install
-  // LOOPRITE_SETUP_SECRET, it hands this page the secret ONCE via a "?ss=..." query param (any
-  // co-installed app can also reach 127.0.0.1, so pre-latch setup needs its own gate). Read it
-  // once, strip it from the address bar immediately (so it never lingers in browser history or a
-  // screenshot), and keep it only in this closure — never localStorage. On a desktop install with
-  // no LOOPRITE_SETUP_SECRET set, ss is simply absent and this is a no-op.
-  let setupSecret = "";
-  try {
-    const qp = new URLSearchParams(location.search);
-    const ss = qp.get("ss");
-    if (ss) {
-      setupSecret = ss;
-      qp.delete("ss");
-      const rest = qp.toString();
-      history.replaceState(null, "", location.pathname + (rest ? "?"+rest : "") + location.hash);
-    }
-  } catch(e) {}
-
   // ---- step model ----
   const STEPS = ["welcome","vault","provider","network","token","done"];
   const LABELS = {welcome:"Welcome",vault:"Vault",provider:"Provider",network:"Network",token:"Token",done:"Done"};
@@ -214,7 +196,6 @@
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   async function api(method, path, body){
     const opt = {method, headers:{}};
-    if(setupSecret && path.startsWith("/v1/setup/")) opt.headers["x-l00prite-setup-secret"]=setupSecret;
     if(body!==undefined){ opt.headers["content-type"]="application/json"; opt.body=JSON.stringify(body); }
     const res = await fetch(path, opt);
     let data=null; try{ data = await res.json(); }catch(e){}
@@ -565,9 +546,13 @@ export OPENAI_API_KEY="${tok}"`;
         <button class="btn primary" id="dash">Open dashboard →</button></div>`;
     card.querySelectorAll(".copy").forEach(b=>b.onclick=()=>copy(document.getElementById(b.dataset.for).textContent,b));
     const ct=document.getElementById("copytok"); if(ct) ct.onclick=()=>copy(tok,ct);
-    document.getElementById("dash").onclick=()=>{
-      // Hand the freshly-minted token to the dashboard so it shows real data immediately.
-      if(state.token && state.token.token){ try{ localStorage.setItem("l00prite_token", state.token.token); }catch(e){} }
+    document.getElementById("dash").onclick=async()=>{
+      // Exchange the freshly minted bearer once for the dashboard's HttpOnly loopback session.
+      // The bearer is never written to localStorage or any other JavaScript persistence.
+      if(state.token && state.token.token){
+        const res=await fetch("/v1/ui/session",{method:"POST",headers:{authorization:"Bearer "+state.token.token}}).catch(()=>null);
+        if(!res||!res.ok){ alert("Could not start the dashboard session. Copy your token, then enter it on the dashboard."); }
+      }
       location.href="/";
     };
   }
