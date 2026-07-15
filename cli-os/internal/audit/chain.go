@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"strings"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/state"
@@ -12,6 +13,8 @@ import (
 )
 
 const SchemaVersion = 1
+
+var ErrChainIntegrity = errors.New("audit chain verification failed: hash mismatch or broken chain")
 
 func digest(prev, id, ts, actor, action, detail, correlation string) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{prev, id, ts, actor, action, detail, correlation}, "\x00")))
@@ -52,7 +55,7 @@ func Verify(db *sql.DB) error {
 			return err
 		}
 		if storedPrev != prev || digest(prev, id, ts, actor, action, detail, correlation) != hash {
-			return errors.New("audit chain verification failed: hash mismatch or broken chain")
+			return ErrChainIntegrity
 		}
 		prev = hash
 	}

@@ -119,7 +119,8 @@ func VerifyToken(q state.Querier, raw string) *Principal {
 		return nil
 	}
 	if expiresAt.Valid && expiresAt.String != "" {
-		if t, perr := parseISO(expiresAt.String); perr == nil && t.Before(time.Now()) {
+		t, perr := parseISO(expiresAt.String)
+		if perr != nil || !time.Now().Before(t) {
 			return nil
 		}
 	}

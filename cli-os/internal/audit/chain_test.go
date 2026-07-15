@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/state"
@@ -24,7 +25,7 @@ func TestAuditChainDetectsTampering(t *testing.T) {
 	if _, err := db.Exec(`UPDATE audit SET detail='daily=1000' WHERE action='budget.set'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := Verify(db); err == nil {
-		t.Fatal("tampered chain verified")
+	if err := Verify(db); !errors.Is(err, ErrChainIntegrity) {
+		t.Fatalf("tampered chain error = %v, want ErrChainIntegrity", err)
 	}
 }

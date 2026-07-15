@@ -92,6 +92,25 @@ func TestExpiresZeroNeverExpires(t *testing.T) {
 	}
 }
 
+func TestVerifyTokenRejectsMalformedExpiry(t *testing.T) {
+	cfg := setupHome(t)
+	db, err := state.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	id, token, err := MintTokenWithRole(db, "demo", nil, nil, RoleAdmin)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE tokens SET expires_at='not-a-timestamp' WHERE id=?`, id); err != nil {
+		t.Fatalf("corrupt expiry: %v", err)
+	}
+	if VerifyToken(db, token) != nil {
+		t.Fatal("token with malformed expiry must fail closed")
+	}
+}
+
 func TestVaultAcceptsBase64URLKey(t *testing.T) {
 	key := make([]byte, 32)
 	for i := range key {
