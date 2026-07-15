@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	auditlog "github.com/jackofall1232/l00prite/cli-os/internal/audit"
 	"github.com/jackofall1232/l00prite/cli-os/internal/config"
 	"github.com/jackofall1232/l00prite/cli-os/internal/gateway"
 	"github.com/jackofall1232/l00prite/cli-os/internal/gateway/adapters"
@@ -87,12 +88,7 @@ func flagStr(flags map[string]string, key string) (string, bool) {
 }
 
 func audit(db *sql.DB, action, detail string) {
-	var d any
-	if detail != "" {
-		d = detail
-	}
-	_, _ = db.ExecContext(state.Ctx(), `INSERT INTO audit(id,ts,actor,action,detail) VALUES(?,?,?,?,?)`,
-		util.RID("aud"), util.NowISO(), "cli", action, d)
+	_ = auditlog.Append(db, "cli", action, detail, "")
 }
 
 func withDB(cfg config.Config) *sql.DB {
@@ -405,7 +401,7 @@ func tokenCmd(db *sql.DB, sub, arg string, flags map[string]string) {
 	case "mint":
 		project, ok := flagStr(flags, "project")
 		if !ok {
-			fmt.Fprintln(os.Stderr, "usage: token mint --project P [--repo ID] [--expires DAYS]")
+			fmt.Fprintln(os.Stderr, "usage: token mint --project P [--repo ID] [--expires DAYS] [--role admin|operator|chat | --scopes SCOPE,...]")
 			return
 		}
 		var repo *string
@@ -418,7 +414,22 @@ func tokenCmd(db *sql.DB, sub, arg string, flags map[string]string) {
 				expires = &n
 			}
 		}
-		id, token, err := security.MintToken(db, project, repo, expires)
+		scopes := security.LegacyAdminScopes
+		legacy, role := true, "legacy_admin"
+		var id, token string
+		var err error
+		if raw, ok := flagStr(flags, "scopes"); ok {
+			scopes = strings.Split(raw, ",")
+			legacy = false
+			role = security.RoleCustom
+			id, token, err = security.MintTokenWithScopes(db, project, repo, expires, scopes, false)
+		} else if selected, ok := flagStr(flags, "role"); ok {
+			role, legacy = selected, false
+			scopes, _ = security.ScopesForRole(selected)
+			id, token, err = security.MintTokenWithRole(db, project, repo, expires, selected)
+		} else {
+			id, token, err = security.MintToken(db, project, repo, expires)
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "failed to mint token: "+err.Error())
 			return
@@ -432,7 +443,7 @@ func tokenCmd(db *sql.DB, sub, arg string, flags map[string]string) {
 		if repo != nil {
 			repoNote = " repo=" + *repo
 		}
-		fmt.Printf("  id=%s project=%s%s\n", id, project, repoNote)
+		fmt.Printf("  id=%s project=%s%s role=%s scopes=%s legacy=%v\n", id, project, repoNote, role, strings.Join(scopes, ","), legacy)
 	case "list":
 		for _, t := range security.ListTokens(db) {
 			repo := "-"
@@ -447,7 +458,7 @@ func tokenCmd(db *sql.DB, sub, arg string, flags map[string]string) {
 			if t.ExpiresAt != "" {
 				exp = "  exp=" + t.ExpiresAt
 			}
-			fmt.Printf("%s  project=%s  repo=%s  %s%s\n", t.ID, t.Project, repo, st, exp)
+			fmt.Printf("%s  project=%s  repo=%s  role=%s  scopes=%s  legacy=%v  %s%s\n", t.ID, t.Project, repo, t.Role, strings.Join(t.Scopes, ","), t.Legacy, st, exp)
 		}
 	case "revoke":
 		if security.RevokeToken(db, arg) {

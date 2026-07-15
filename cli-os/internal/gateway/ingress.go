@@ -70,10 +70,28 @@ var bearerRE = regexp.MustCompile(`(?i)^Bearer\s+(.+)$`)
 
 func principalFrom(app *App, r *http.Request) *security.Principal {
 	m := bearerRE.FindStringSubmatch(r.Header.Get("Authorization"))
-	if m == nil {
-		return nil
+	if m != nil {
+		return security.VerifyToken(app.DB, m[1])
 	}
-	return security.VerifyToken(app.DB, m[1])
+	return app.uiPrincipal(r)
+}
+
+// AuthorizeScope authenticates an API request and enforces one named capability. Admin-scoped
+// legacy tokens remain compatible, while every new least-privilege token fails closed outside its
+// explicit scope. HTTP routing calls this before dispatch; handlers retain their existing auth
+// checks as defense in depth.
+func (app *App) AuthorizeScope(w http.ResponseWriter, r *http.Request, scope string) bool {
+	principal := principalFrom(app, r)
+	if principal == nil {
+		oaiError(w, 401, "Missing or invalid l00prite token", "authentication_error", "")
+		return false
+	}
+	if !principal.HasScope(scope) {
+		app.auditAs(principal, "auth.scope_denied", scope+" "+r.Method+" "+r.URL.Path)
+		oaiError(w, 403, "Token lacks required scope: "+scope, "permission_error", "insufficient_scope")
+		return false
+	}
+	return true
 }
 
 func truthyHeader(v string) bool {

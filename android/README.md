@@ -18,7 +18,8 @@ Package: `com.l00prite.os`. `minSdkVersion` 26 (Android 8.0), `targetSdkVersion`
    servers) and execs `libl00prite.so serve` with that environment, supervising it
    (drain stdout to logcat, restart on crash with backoff).
 3. Once the gateway answers `GET /healthz`, `MainActivity` loads
-   `http://127.0.0.1:8787/?ss=<setup-secret>` in the WebView. From there it's the exact
+   a short-lived HttpOnly setup session natively, then opens `http://127.0.0.1:8787/` in the
+   WebView. The install secret never enters the URL or JavaScript. From there it's the exact
    same setup wizard → dashboard → playground → runs flow that runs on desktop —
    nothing in the gateway/dashboard changes for Android.
 
@@ -36,7 +37,7 @@ linux/darwin/windows runs here; only the wrapper around it is platform-specific.
 | `HOME` | `<filesDir>` | Android execs a process with no `HOME`; without it `os.UserHomeDir()` fails and data would land in `/` (gap G5). |
 | `LOOPRITE_PORT` | `8787` | Fixed loopback port the WebView and health poll both target. |
 | `LOOPRITE_MASTER_KEY` | Base64 of 32 random bytes | Unwrapped in memory each boot from an Android-Keystore-wrapped ciphertext (gap G6); `master.key` never exists as a file on this device. |
-| `LOOPRITE_SETUP_SECRET` | 32 random hex chars, per install | Gates the unauthenticated pre-latch `/v1/setup/*` endpoints against other apps on the same device racing first-run setup (gap G7); read once from the WebView's launch URL, never persisted client-side. |
+| `LOOPRITE_SETUP_SECRET` | 32 random hex chars, per install | Exchanged natively once for a short-lived HttpOnly setup session, gating pre-latch setup against other apps racing first run (gap G7). Never sent in the WebView URL or exposed to JavaScript. |
 | `SSL_CERT_FILE` | `<filesDir>/cacert.pem` | Android 14+ moved system CA roots out of reach of Go's `crypto/x509`; a Mozilla CA bundle ships as an APK asset and is extracted here (gap G2). |
 | `LOOPRITE_DNS` | Comma-joined IPs from `ConnectivityManager.getLinkProperties`, else `8.8.8.8,1.1.1.1` | Android apps cannot read `/etc/resolv.conf`; Go's resolver needs explicit servers or every outbound provider call fails DNS (gap G1). |
 | `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` | `l00prite-os` / `l00prite-os@localhost` | Default commit identity for on-device runs (no `git config --global` on Android). |

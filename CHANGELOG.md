@@ -4,6 +4,26 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.8.0-beta — 2026-07-15
+
+**Phase 0 security and orchestration contracts.** This release strengthens the application shell
+without changing provider routing or beginning the planned Codex/bridge redesign:
+
+- Gateway tokens now carry explicit capability scopes. Existing tokens are marked legacy-admin for
+  compatibility and can be rotated to least-privilege scopes with `token mint --scopes ...`.
+- The dashboard exchanges a bearer once for an HttpOnly, SameSite=Strict loopback session instead
+  of storing the long-lived token in JavaScript localStorage. Revoking the source token invalidates
+  its UI session.
+- Android exchanges its per-install setup secret natively for a short-lived setup session. The
+  secret no longer enters a URL, WebView history, or JavaScript, and active-session replay is denied.
+- The WebView is restricted to the exact loopback origin and disables file/content/mixed-content
+  access. Dashboard/API responses add CSP, frame, MIME, referrer, permissions, and no-store headers.
+- Privileged audit events are schema-versioned and hash-chained; new provider-neutral orchestration
+  contracts define future events, approvals, capabilities, grants, tasks, artifacts, and external
+  sessions without activating new runtime behavior.
+- Unpriced models remain usable, but the dashboard now gives a prominent warning that `$0`/
+  unconfirmed usage is not free and accurate budget enforcement cannot be guaranteed.
+
 ## v0.7.0-beta — 2026-07-13
 
 **Override the per-reply and per-run tool-call budgets when a task needs more room.** Asking

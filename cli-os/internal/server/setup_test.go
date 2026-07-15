@@ -338,10 +338,8 @@ func doJSONHeaders(t *testing.T, method, url string, headers map[string]string, 
 	return resp, bodyJSON(t, resp)
 }
 
-// TestSetupSecretGateBlocksWithoutHeader proves LOOPRITE_SETUP_SECRET (docs/android-architecture.md
-// §4 G7): when the operator sets it, every mutating setup endpoint requires a matching
-// x-l00prite-setup-secret header and rejects everything else, while GET /v1/setup/status stays
-// open regardless (it leaks only booleans/counts).
+// TestSetupSecretGateBlocksWithoutHeader proves the install secret is accepted only by the
+// one-time exchange endpoint. Mutating setup endpoints require its HttpOnly session cookie.
 func TestSetupSecretGateBlocksWithoutHeader(t *testing.T) {
 	t.Setenv("LOOPRITE_SETUP_SECRET", "s3cr3t-install-value")
 	srv, _, db := unconfigured(t)
@@ -374,8 +372,21 @@ func TestSetupSecretGateBlocksWithoutHeader(t *testing.T) {
 		t.Fatalf("a setup call rejected for a missing/wrong secret must not mutate; provider count=%d", got)
 	}
 
-	// the RIGHT header passes through to the existing logic unchanged.
-	resp, v := doJSONHeaders(t, "POST", base+"/v1/setup/vault", map[string]string{"x-l00prite-setup-secret": "s3cr3t-install-value"}, map[string]any{})
+	// Exchange the install secret once for an HttpOnly setup session.
+	exchange, xbody := doJSONHeaders(t, "POST", base+"/v1/setup/session", map[string]string{"x-l00prite-setup-secret": "s3cr3t-install-value"}, nil)
+	if exchange.StatusCode != 200 || xbody["ok"] != true {
+		t.Fatalf("setup exchange failed: %d %v", exchange.StatusCode, xbody)
+	}
+	cookie := exchange.Header.Get("Set-Cookie")
+	if cookie == "" || !strings.Contains(cookie, "HttpOnly") || !strings.Contains(cookie, "SameSite=Strict") {
+		t.Fatalf("setup exchange returned an unsafe cookie: %q", cookie)
+	}
+	replay, _ := doJSONHeaders(t, "POST", base+"/v1/setup/session", map[string]string{"x-l00prite-setup-secret": "s3cr3t-install-value"}, nil)
+	if replay.StatusCode != 409 {
+		t.Fatalf("replayed setup exchange should be rejected, got %d", replay.StatusCode)
+	}
+
+	resp, v := doJSONHeaders(t, "POST", base+"/v1/setup/vault", map[string]string{"Cookie": cookie}, map[string]any{})
 	if resp.StatusCode != 200 || v["vault_initialized"] != true {
 		t.Fatalf("vault init with the correct setup-secret header should succeed: %d %v", resp.StatusCode, v)
 	}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackofall1232/l00prite/cli-os/internal/config"
@@ -32,7 +33,11 @@ type App struct {
 	StartedAt time.Time
 	// Engine is the L00prite OS run engine (nil in tests that don't exercise runs). It drives
 	// autonomous runs through this same App via the EngineCaller seam.
-	Engine *engine.Engine
+	Engine        *engine.Engine
+	setupMu       sync.Mutex
+	setupSessions map[string]time.Time
+	uiMu          sync.Mutex
+	uiSessions    map[string]uiSession
 }
 
 // ProviderRow is a full providers-table row.
