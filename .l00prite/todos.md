@@ -5,6 +5,8 @@
 **Status:** Phase 0 implementation is active on `feature/phase-0-security-contracts`. Decisions
 were resolved using the documented defaults except that unpriced models remain allowed with a
 prominent budget-accuracy warning, per maintainer direction. Keep
+**Status:** Roadmap approved for persistence; implementation has **not** begun. Before any code
+change, resolve the human decisions below, create `feature/phase-0-security-contracts`, and keep
 Phase 0 limited to security and contracts. Preserve `/v1/chat/completions`, the PEP, provider
 vault, deterministic routing, repository containment, run engine, and current bridge compatibility.
 
@@ -39,6 +41,32 @@ repository copy; `/tmp` is not a portable source of truth.
 - [x] Add authorization, setup-replay, security-header, contract-validation, audit-integrity, and
       Android WebView-policy tests. Keep `go test ./...` green.
 - [x] Update security/Android/interface architecture docs to distinguish shipped behavior from
+### Phase 0 — security and contracts (first approved implementation unit; no implementation yet)
+
+- [ ] Decide existing-token migration: safe-scope downgrade vs temporary legacy-admin scopes with
+      forced rotation warning.
+- [ ] Decide UI authentication: Android-Keystore custody plus short-lived HttpOnly loopback session
+      is recommended; retain bearer auth for Codex/Aider/API clients.
+- [ ] Decide roles/scopes and administrative split. Recommended initial scopes:
+      `chat:invoke`, `repo:read`, `run:create`, `run:approve`, `provider:manage`,
+      `credential:manage`, `budget:manage`, `audit:read`, `admin`.
+- [ ] Add token scopes and centralized endpoint authorization; fail closed on unknown scopes;
+      expose effective scopes in principal/dashboard metadata; audit privileged denials/actions.
+- [ ] Harden the Android WebView: exact loopback navigation allowlist, external-browser handoff,
+      file/content/mixed-content restrictions, Safe Browsing, credential/logout cleanup.
+- [ ] Remove long-lived dashboard bearer storage from JavaScript `localStorage`.
+- [ ] Replace `?ss=<setup-secret>` with a one-time native-to-gateway exchange and short-lived setup
+      session; reject replay/expiry and preserve a documented non-Android bootstrap path.
+- [ ] Add browser security headers: strict CSP migration, `frame-ancestors`, `nosniff`, referrer
+      policy, permissions policy, and `no-store` for authenticated UI responses.
+- [ ] Define versioned, provider-neutral contracts (types + JSON schemas only unless separately
+      approved): `OrchestrationEvent`, `ApprovalRequest`, `CapabilityDescriptor`, `ToolGrant`,
+      `CollaborationRun`, `DelegationTask`, `TaskAttempt`, `Artifact`, `ExternalSession`.
+- [ ] Decide whether Phase 0 creates empty orchestration tables or defers tables to Phase 1.
+- [ ] Add audit schema/correlation fields; decide whether hash chaining is Phase 0 or deferred.
+- [ ] Add authorization, setup-replay, security-header, contract-validation, audit-integrity, and
+      Android WebView-policy tests. Keep `go test ./...` green.
+- [ ] Update security/Android/interface/OS architecture docs to distinguish shipped behavior from
       target contracts.
 
 **Phase 0 exact existing-file boundary:** `cli-os/internal/state/db.go`,
@@ -101,6 +129,8 @@ except mechanical centralized HTTP authorization.
 - [ ] Add durable provider health/latency metrics, verified catalog/pricing refresh, prominent
       warnings and explicit unmetered accounting for unpriced models, backpressure/queueing, and
       load/chaos/live-provider tests. Unpriced models stay allowed; never represent them as free.
+- [ ] Add durable provider health/latency metrics, verified catalog/pricing refresh, strict handling
+      of unpriced models under dollar caps, backpressure/queueing, and load/chaos/live-provider tests.
 - [ ] Evolve the state store beyond its single-connection bottleneck while preserving PEP atomicity;
       support an external DB only if multi-user/server deployment is approved.
 - [ ] Add tamper-evident audit export/anchoring, structured redacted logging, Android lifecycle/
@@ -128,6 +158,20 @@ except mechanical centralized HTTP authorization.
 - [ ] Phase 2 Codex surface/auth modes and Sol/Terra/Luna default policy.
 - [x] Unpriced models remain allowed with a stern, prominent warning that accurate budget
       enforcement cannot be determined and `$0`/unconfirmed is not free usage.
+      execution, Compose migration, DB replacement, APK release, push, or PR as part of Phase 0.
+- [ ] Do **not** create a branch or implementation commit until the Phase 0 human decisions are
+      answered in-session.
+
+### Human decisions still required before implementation
+
+- [ ] Existing-token migration and deprecation window.
+- [ ] UI credential/session design and non-Android setup bootstrap.
+- [ ] Pure scopes vs named roles mapped to scopes; separate admin credential policy.
+- [ ] Strict-CSP asset split vs nonce/hash generation.
+- [ ] Audit hash chaining now vs later; orchestration tables now vs Phase 1.
+- [ ] Authorization to add a Gradle/Android instrumentation test harness.
+- [ ] Phase 2 Codex surface/auth modes and Sol/Terra/Luna default policy.
+- [ ] Unpriced-provider behavior under strict caps.
 - [ ] Single-device-only vs future multi-user/server product boundary.
 
 **Recommended first branch:** `feature/phase-0-security-contracts`<br>
