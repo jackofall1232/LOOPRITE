@@ -52,7 +52,7 @@ func Verify(db *sql.DB) error {
 			return err
 		}
 		if storedPrev != prev || digest(prev, id, ts, actor, action, detail, correlation) != hash {
-			return sql.ErrNoRows
+			return errors.New("audit chain verification failed: hash mismatch or broken chain")
 		}
 		prev = hash
 	}
