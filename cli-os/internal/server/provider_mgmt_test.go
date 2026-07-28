@@ -463,7 +463,7 @@ func TestProviderRemovalImpactSignals(t *testing.T) {
 }
 
 // TestProviderCatalogUnauthenticated: GET /v1/providers/catalog is a pre-auth, read-only projection of
-// the embedded manifests (same non-secret class as /v1/setup/status). It must return the six UI presets
+// the embedded manifests (same non-secret class as /v1/setup/status). It must return the seven UI presets
 // with NO Authorization header, both before first-run setup completes AND after it locks down, and it
 // must never expose the internal mock adapter.
 func TestProviderCatalogUnauthenticated(t *testing.T) {
@@ -483,7 +483,7 @@ func TestProviderCatalogUnauthenticated(t *testing.T) {
 }
 
 // assertProviderCatalog hits GET /v1/providers/catalog with NO Authorization header and asserts the
-// contract the Add-provider UI depends on: 200, six presets, first key anthropic, no "mock" key.
+// contract the Add-provider UI depends on: 200, seven presets, first key anthropic, no "mock" key.
 func assertProviderCatalog(t *testing.T, base string) {
 	t.Helper()
 	resp, raw := getRaw(t, base+"/v1/providers/catalog")
@@ -502,8 +502,8 @@ func assertProviderCatalog(t *testing.T, base string) {
 	if body.Object != "l00prite.provider_presets" {
 		t.Fatalf("catalog object want l00prite.provider_presets got %q", body.Object)
 	}
-	if len(body.Presets) != 6 {
-		t.Fatalf("catalog want 6 presets got %d: %s", len(body.Presets), raw)
+	if len(body.Presets) != 7 {
+		t.Fatalf("catalog want 7 presets got %d: %s", len(body.Presets), raw)
 	}
 	if body.Presets[0].Key != "anthropic" {
 		t.Fatalf("first preset key want anthropic got %q", body.Presets[0].Key)

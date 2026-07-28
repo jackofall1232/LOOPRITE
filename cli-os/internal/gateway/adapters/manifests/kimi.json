@@ -1,0 +1,76 @@
+{
+  "provider": "kimi",
+  "display_name": "Kimi (Moonshot AI)",
+  "adapter": "openai-compat",
+  "base_url": "https://api.moonshot.ai/v1",
+  "alt_base_urls": {
+    "mainland": "https://api.moonshot.cn/v1"
+  },
+  "endpoints": { "chat": "/chat/completions" },
+  "auth": {
+    "scheme": "bearer",
+    "header": "Authorization",
+    "notes": "Bearer token is the Kimi API key (MOONSHOT_API_KEY), created on the Kimi API Platform console. Kimi's API is documented as OpenAI-format compatible, so the standard openai-compat adapter applies with no translation code."
+  },
+  "streaming": "openai-sse-chunks",
+  "tool_schema": "openai-function",
+  "notes": [
+    "First-party verified 2026-07-28 against platform.moonshot.ai (Quickstart, Create Chat Completion, List Models docs, fetched directly): base_url https://api.moonshot.ai/v1, OpenAI-compatible request/response shape, Bearer auth, OpenAI-style SSE streaming with stream_options.include_usage support, OpenAI function tools supported.",
+    "Model ids below are the ones enumerated by Moonshot's own API reference (model enum on Create Chat Completion) and Quickstart model cards as of 2026-07-28: kimi-k3 (default), kimi-k2.7-code (+ kimi-k2.7-code-highspeed variant), kimi-k2.6, kimi-k2.5, moonshot-v1.",
+    "Thinking/reasoning: kimi-k3 always reasons and takes a top-level reasoning_effort field (low|high|max, default max); kimi-k2.6/kimi-k2.7-code support a thinking switch and return reasoning_content alongside content. These extras are pass-through-safe under openai-compat and are not required for basic chat.",
+    "context figures: kimi-k3 = 1M tokens (Quickstart model card); kimi-k2.7-code / kimi-k2.6 = 256K (Quickstart model cards). The platform also exposes a List Models endpoint returning context_length per id.",
+    "moonshot-v1 is carried as the legacy family entry; per-model -8k/-32k/-128k suffixes exist upstream but the base id is the documented enum value."
+  ],
+  "verification": {
+    "shape": "high",
+    "shape_source": "platform.moonshot.ai docs — Quickstart + Create Chat Completion + List Models (first-party, fetched directly 2026-07-28)",
+    "pricing": "unconfirmed",
+    "pricing_source": "NONE fetched first-party — platform.moonshot.ai pricing page rendered no machine-readable table this pass; prices left null per fail-closed convention rather than carried from memory",
+    "pricing_checked": "2026-07-28",
+    "pricing_note": "All Kimi prices are null/unconfirmed. The cost router's PriceTierFor treats these as tier-2 (unpriced) so they can never masquerade as cheapest; the dashboard shows the existing unpriced-model warning. Re-check https://platform.moonshot.ai/docs/pricing/chat from a browser if exact figures are needed.",
+    "capabilities": "docs-stated",
+    "capabilities_note": "tools/vision flags from Moonshot's own docs: K3/K2.7-code/K2.6 accept text+image+video input and support function tools (Quickstart 'Multimodal input'/'Tool calls' sections; List Models capability flags supports_image_in/supports_video_in/supports_reasoning). Not exercised against the live API from this build environment."
+  },
+  "models": [
+    {
+      "id": "kimi-k3",
+      "context": 1000000, "max_output": 131072,
+      "capabilities": { "tools": true, "vision": true, "reasoning_effort": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Flagship (Moonshot's default and recommended model): 1M context, text/image/video input, always-on reasoning with top-level reasoning_effort low|high|max (default max). max_output = documented default max_completion_tokens for K3 (131072; settable up to 1048576)."
+    },
+    {
+      "id": "kimi-k2.7-code",
+      "context": 256000, "max_output": null,
+      "capabilities": { "tools": true, "vision": true, "reasoning_effort": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Coding-focused model: 256K context, text/image/video input, thinking mode always enabled (cannot be disabled). High-speed variant kimi-k2.7-code-highspeed exists upstream for faster output."
+    },
+    {
+      "id": "kimi-k2.6",
+      "context": 256000, "max_output": null,
+      "capabilities": { "tools": true, "vision": true, "reasoning_effort": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "General-purpose model: 256K context, text/image/video input, both thinking and non-thinking modes. Recommended for general chat, agent tasks, visual understanding, complex reasoning."
+    },
+    {
+      "id": "kimi-k2.5",
+      "context": null, "max_output": null,
+      "capabilities": { "tools": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Prior-generation id in Moonshot's current model enum; context/capability specifics not restated on the pages fetched this pass, so left null/fail-closed."
+    },
+    {
+      "id": "moonshot-v1",
+      "context": null, "max_output": null,
+      "capabilities": { "tools": true, "streaming_usage": true },
+      "price_per_mtok": { "input": null, "output": null },
+      "price_confidence": "unconfirmed",
+      "notes": "Legacy family entry; upstream also exposes -8k/-32k/-128k context variants. Carried for compatibility with the documented model enum."
+    }
+  ]
+}

@@ -295,6 +295,47 @@ func TestGrokAliasResolvesToXai(t *testing.T) {
 	}
 }
 
+// ---- kimi (Moonshot AI) manifest ----
+
+func TestKimiManifest(t *testing.T) {
+	if got := DefaultBaseURL("kimi"); got != "https://api.moonshot.ai/v1" {
+		t.Fatalf("kimi base_url want https://api.moonshot.ai/v1 got %q", got)
+	}
+	if got := DefaultAdapterKind("kimi"); got != "openai-compat" {
+		t.Fatalf("kimi adapter want openai-compat got %q", got)
+	}
+	models := ModelsFor("kimi")
+	if len(models) == 0 || models[0] != "kimi-k3" {
+		// models[0] is the validation probe (pickValidationModel); kimi-k3 is Moonshot's
+		// documented default/flagship id (platform.moonshot.ai Quickstart, 2026-07-28).
+		t.Fatalf("kimi ModelsFor[0] want kimi-k3 (validation-probe ordering) got %v", models)
+	}
+	for _, m := range models {
+		if tier := PriceTierFor("kimi", m); tier != 2 {
+			t.Fatalf("kimi/%s must be unpriced (tier 2 — all kimi prices null/unconfirmed), got %d", m, tier)
+		}
+	}
+	caps := CapabilitiesFor("kimi", "kimi-k3")
+	if b, _ := caps["tools"].(bool); !b {
+		t.Fatalf("kimi/kimi-k3 must declare tools:true, got %v", caps)
+	}
+	if b, _ := caps["vision"].(bool); !b {
+		t.Fatalf("kimi/kimi-k3 must declare vision:true, got %v", caps)
+	}
+	if got := ContextFor("kimi", "kimi-k3"); got == nil || *got != 1000000 {
+		t.Fatalf("kimi/kimi-k3 context want 1000000 (docs-stated 1M), got %v", got)
+	}
+}
+
+func TestMoonshotAliasResolvesToKimi(t *testing.T) {
+	if got := DefaultBaseURL("moonshot"); got != DefaultBaseURL("kimi") {
+		t.Fatalf(`alias "moonshot" must resolve to the kimi manifest, got base_url %q vs kimi %q`, got, DefaultBaseURL("kimi"))
+	}
+	if got := ModelsFor("moonshot"); len(got) != len(ModelsFor("kimi")) {
+		t.Fatalf(`alias "moonshot" ModelsFor must match kimi's catalog, got %v`, got)
+	}
+}
+
 // ---- Add-provider UI presets ----
 
 func TestPresets(t *testing.T) {
@@ -304,7 +345,7 @@ func TestPresets(t *testing.T) {
 		}
 	}
 	presets := Presets()
-	wantKeys := []string{"anthropic", "openai", "gemini", "xai", "venice", "zhipu"}
+	wantKeys := []string{"anthropic", "openai", "gemini", "xai", "kimi", "venice", "zhipu"}
 	if len(presets) != len(wantKeys) {
 		t.Fatalf("Presets want %d entries got %d: %+v", len(wantKeys), len(presets), presets)
 	}

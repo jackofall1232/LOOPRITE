@@ -59,7 +59,7 @@ type Candidate struct {
 	PriceTier    int
 }
 
-var aliases = map[string]string{"glm": "zhipu", "z.ai": "zhipu", "ollama": "local", "local-models": "local", "google": "gemini", "grok": "xai"}
+var aliases = map[string]string{"glm": "zhipu", "z.ai": "zhipu", "ollama": "local", "local-models": "local", "google": "gemini", "grok": "xai", "moonshot": "kimi"}
 
 var manifests = loadManifests()
 
@@ -239,7 +239,7 @@ type Preset struct {
 // preset -- exposure in the Add-provider UI is an explicit product decision, so a future or
 // internal manifest can never silently appear. The mock adapter is deliberately not here
 // (internal/test-only, per .l00prite/todos.md).
-var presetOrder = []string{"anthropic", "openai", "gemini", "xai", "venice", "zhipu"}
+var presetOrder = []string{"anthropic", "openai", "gemini", "xai", "kimi", "venice", "zhipu"}
 
 // Presets returns the Add-provider UI presets in fixed order, skipping unloaded manifests.
 func Presets() []Preset {

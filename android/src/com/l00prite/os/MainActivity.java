@@ -55,6 +55,7 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private TextView statusView;
+    private android.widget.ProgressBar spinner;
     private Button importButton;
     private Thread pollerThread;
     private Thread importThread;
@@ -77,11 +78,51 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams fill = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
 
+        // Branded splash: matches the web UI's palette (near-black + electric lime) so the
+        // native -> WebView handoff reads as one app, not a page load.
+        android.widget.LinearLayout splash = new android.widget.LinearLayout(this);
+        splash.setOrientation(android.widget.LinearLayout.VERTICAL);
+        splash.setGravity(Gravity.CENTER);
+        splash.setBackgroundColor(android.graphics.Color.parseColor("#07090D"));
+
+        TextView logoView = new TextView(this);
+        logoView.setText("∞");
+        logoView.setTextSize(56f);
+        logoView.setTextColor(android.graphics.Color.parseColor("#B9F432"));
+        logoView.setGravity(Gravity.CENTER);
+        splash.addView(logoView, new android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView nameView = new TextView(this);
+        nameView.setText("l00prite OS");
+        nameView.setTextSize(20f);
+        nameView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        nameView.setTextColor(android.graphics.Color.parseColor("#EEF2F8"));
+        nameView.setGravity(Gravity.CENTER);
+        int padPx = (int) (8 * getResources().getDisplayMetrics().density);
+        nameView.setPadding(0, padPx, 0, 0);
+        splash.addView(nameView, new android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        spinner = new android.widget.ProgressBar(this);
+        spinner.setIndeterminate(true);
+        spinner.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(
+                android.graphics.Color.parseColor("#B9F432")));
+        android.widget.LinearLayout.LayoutParams spinParams = new android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        spinParams.setMargins(0, padPx * 3, 0, 0);
+        splash.addView(spinner, spinParams);
+
         statusView = new TextView(this);
-        statusView.setText("Starting L00prite OS…");
+        statusView.setText("Starting…");
         statusView.setGravity(Gravity.CENTER);
-        statusView.setTextSize(18f);
-        root.addView(statusView, fill);
+        statusView.setTextSize(14f);
+        statusView.setTextColor(android.graphics.Color.parseColor("#9AA5B5"));
+        statusView.setPadding(0, padPx * 2, 0, 0);
+        splash.addView(statusView, new android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        root.addView(splash, fill);
 
         webView = new WebView(this);
         CookieManager.getInstance().setAcceptCookie(true);
@@ -141,6 +182,10 @@ public class MainActivity extends Activity {
         // dashboard UI it sits on top of.
         importButton = new Button(this);
         importButton.setText("Import repo...");
+        importButton.setTextSize(12f);
+        importButton.setAlpha(0.82f);
+        importButton.setMinHeight(0);
+        importButton.setMinimumHeight(0);
         FrameLayout.LayoutParams importParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         importParams.gravity = Gravity.BOTTOM | Gravity.END;
@@ -319,7 +364,10 @@ public class MainActivity extends Activity {
                     webView.setVisibility(View.VISIBLE);
                     statusView.setVisibility(View.GONE);
                 } else {
-                    statusView.setText("L00prite OS did not start in time. Please reopen the app.");
+                    if (spinner != null) {
+                        spinner.setVisibility(View.GONE);
+                    }
+                    statusView.setText("l00prite OS did not start in time. Please reopen the app.");
                 }
             }
         });

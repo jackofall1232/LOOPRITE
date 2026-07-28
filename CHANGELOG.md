@@ -4,6 +4,34 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.9.0-beta — 2026-07-28
+
+**A chat-first app, and Kimi joins the roster.** This release rebuilds the app's interface
+around the way people actually use it — pick providers, add a repo, start prompting — and adds
+Kimi (Moonshot AI) as a first-party provider:
+
+- **Kimi (Moonshot AI) provider.** First-party adapter manifest (OpenAI-compatible,
+  `https://api.moonshot.ai/v1`) with the documented model lineup — `kimi-k3` (1M context
+  flagship), `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `moonshot-v1` — verified against
+  Moonshot's own API docs. Available in the setup wizard and the Providers sheet like every
+  other preset; `moonshot` resolves as an alias. Prices are carried as unconfirmed (fail-closed)
+  until first-party pricing can be re-fetched.
+- **Redesigned, chat-first UI.** The app now opens straight into a clean conversation view:
+  model picker (defaults to `auto`), repo picker, and a composer. The dense nine-section
+  control plane (Runs, Costs, Tokens, Activity, GitHub, Budgets, Help) moves behind a single
+  Advanced drawer — same features, same endpoints, no longer in your face.
+- **Bridge toggle.** Cross-provider bridging ("Claude asks Kimi for help mid-answer") is now a
+  one-tap switch in the chat header instead of a header-only power feature. It defaults on once
+  you have two or more providers connected, and the UI tells you it's ignored while a repo is
+  selected (repo file tools take priority on that path).
+- **Seamless first run.** The setup wizard is now three calm steps: welcome (the encrypted
+  vault initializes itself), connect providers (one card per provider with live key
+  validation, add as many as you like), and done — the app token is minted and exchanged for
+  the session invisibly, so a new user never has to think about tokens.
+- **Branded native splash.** The Android shell shows a proper l00prite splash (matching the
+  app's near-black + electric-lime palette) instead of a bare "Starting…" label, and the
+  Import-repo button is quieter.
+
 ## v0.8.0-beta — 2026-07-15
 
 **Phase 0 security and orchestration contracts.** This release strengthens the application shell

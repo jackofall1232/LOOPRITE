@@ -23,19 +23,35 @@ import (
 	"github.com/jackofall1232/l00prite/cli-os/public"
 )
 
-func inlineScriptHash(body []byte) string {
+// inlineScriptHashes returns one CSP hash-source per inline <script> block in body. The browser
+// hashes each block's exact text content individually, so every block needs its own entry in
+// script-src — a single hash over the first-to-last-script span (the previous behavior) matches
+// no block and silently blocks ALL inline JavaScript on the page.
+func inlineScriptHashes(body []byte) []string {
 	s := string(body)
-	start := strings.Index(s, "<script>")
-	end := strings.LastIndex(s, "</script>")
-	if start < 0 || end <= start {
-		return ""
+	var out []string
+	for {
+		i := strings.Index(s, "<script")
+		if i < 0 {
+			return out
+		}
+		s = s[i+len("<script"):]
+		gt := strings.Index(s, ">")
+		if gt < 0 {
+			return out
+		}
+		s = s[gt+1:]
+		end := strings.Index(s, "</script>")
+		if end < 0 {
+			return out
+		}
+		sum := sha256.Sum256([]byte(s[:end]))
+		out = append(out, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+		s = s[end+len("</script>"):]
 	}
-	sum := sha256.Sum256([]byte(s[start+len("<script>") : end]))
-	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 }
 
-var dashboardScriptHash = inlineScriptHash(public.Dashboard)
-var setupScriptHash = inlineScriptHash(public.Setup)
+var pageScriptHashes = append(inlineScriptHashes(public.Dashboard), inlineScriptHashes(public.Setup)...)
 
 func serveHTML(w http.ResponseWriter, body []byte, fallback string) {
 	if len(body) == 0 {
@@ -55,7 +71,7 @@ func setSecurityHeaders(w http.ResponseWriter, p string) {
 	w.Header().Set("referrer-policy", "no-referrer")
 	w.Header().Set("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 	w.Header().Set("x-frame-options", "DENY")
-	w.Header().Set("content-security-policy", "default-src 'self'; script-src 'self' "+dashboardScriptHash+" "+setupScriptHash+"; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	w.Header().Set("content-security-policy", "default-src 'self'; script-src 'self' "+strings.Join(pageScriptHashes, " ")+"; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	if p == "/" || p == "/dashboard" || p == "/setup" || strings.HasPrefix(p, "/v1/") {
 		w.Header().Set("cache-control", "no-store")
 		w.Header().Set("pragma", "no-cache")
