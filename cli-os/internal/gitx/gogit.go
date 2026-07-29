@@ -43,12 +43,24 @@ func isLocalPath(url string) bool {
 	return !strings.Contains(url, "://") && !strings.Contains(url, "@")
 }
 
-func (c gogitClient) Clone(ctx context.Context, url, dest string, depth int) error {
+func (c gogitClient) Clone(ctx context.Context, url, dest string, depth int, auth *PushAuth) error {
 	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") && !isLocalPath(url) {
 		return fmt.Errorf("gitx/gogit: %q needs ssh, which requires the git binary (only https:// and local-path URLs work without one)", url)
 	}
-	_, err := git.PlainCloneContext(ctx, dest, false, &git.CloneOptions{URL: url, Depth: depth})
-	return err
+	opts := &git.CloneOptions{URL: url, Depth: depth}
+	// Attach the token ONLY when the clone URL is an https URL on the credential's own host (see
+	// credentialScope) — never to a foreign host. This is the on-device private-repo path: the
+	// project's connected GitHub token, held in memory only, redacted from any error text.
+	if auth != nil && auth.Token != "" {
+		if _, ok := credentialScope(url, auth); ok {
+			opts.Auth = &githttp.BasicAuth{Username: auth.Username, Password: auth.Token}
+		}
+	}
+	_, err := git.PlainCloneContext(ctx, dest, false, opts)
+	if err != nil {
+		return errors.New(redactSecrets(err.Error(), auth.token()))
+	}
+	return nil
 }
 
 func (c gogitClient) RevParseHead(repo string) (string, error) {

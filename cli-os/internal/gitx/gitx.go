@@ -77,8 +77,12 @@ type Client interface {
 
 	// Clone performs a shallow clone of url into dest (depth commits of history). Only https and
 	// local-filesystem-path URLs are guaranteed to work under every Kind(); the exec implementation
-	// also supports ssh.
-	Clone(ctx context.Context, url, dest string, depth int) error
+	// also supports ssh. A non-nil auth attaches an HTTPS credential under exactly the PushAuth
+	// host-scoping rules Push uses (see credentialScope): the token goes ONLY to an https URL on the
+	// credential's own host, never to an ssh URL, a foreign host, or a local path — those clone
+	// unauthenticated. This is what lets an on-device (gogit) install clone a PRIVATE github.com
+	// repo with the project's connected GitHub token.
+	Clone(ctx context.Context, url, dest string, depth int, auth *PushAuth) error
 
 	// RevParseHead returns the hash of HEAD. It errors if the repository has no commits yet
 	// (an "unborn" HEAD) or repo is not a git repository at all.

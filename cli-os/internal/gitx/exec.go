@@ -60,20 +60,32 @@ func (c execClient) runTimed(repo string, args ...string) (string, error) {
 }
 
 // Clone shells out exactly as gateway/repos_clone.go did before this seam existed — same flags,
-// same env — so cloning behavior never drifts by so much as a byte.
-func (c execClient) Clone(ctx context.Context, url, dest string, depth int) error {
+// same env — so cloning behavior never drifts by so much as a byte. A non-nil auth is injected
+// the same way Push does it: an env-only, host-scoped http.extraheader (GIT_CONFIG_*), never in
+// argv, never written to .git/config, and redacted from any error text (see buildPushEnv).
+func (c execClient) Clone(ctx context.Context, url, dest string, depth int, auth *PushAuth) error {
 	args := []string{"clone", "--depth", fmt.Sprint(depth), "--", url, dest}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	// Disable git's own https credential prompt and force ssh into non-interactive BatchMode with
 	// a short connect timeout: an unreachable or credential-requiring URL fails fast instead of
 	// hanging the request on a TTY nothing here can ever answer.
-	cmd.Env = append(util.ScrubSecretEnv(os.Environ()),
+	env := append(util.ScrubSecretEnv(os.Environ()),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15",
 	)
+	var b64 string
+	if auth != nil && auth.Token != "" {
+		// Attach the token ONLY to an https clone URL on the credential's own host (see
+		// credentialScope); ssh URLs, foreign hosts and local paths clone anonymously.
+		if scope, ok := credentialScope(url, auth); ok {
+			env, b64 = buildPushEnv(env, scope, auth.Username, auth.Token)
+		}
+	}
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+		msg := redactSecrets(strings.TrimSpace(string(out)), auth.token(), b64)
+		return fmt.Errorf("%v: %s", err, msg)
 	}
 	return nil
 }

@@ -50,8 +50,9 @@ func acceptableGitURL(u string) bool {
 	if strings.HasPrefix(u, "https://") {
 		// Reject a credential embedded in the URL (https://user:token@host/...): the URL is
 		// echoed back verbatim in this endpoint's response ("cloned_from") and could otherwise
-		// leak a token into client-side logs or storage. Private repos should use SSH (already
-		// supported below) or a credential helper configured on the gateway host.
+		// leak a token into client-side logs or storage. Private repos instead use the project's
+		// connected GitHub token (attached host-scoped by gitx at clone time) or, on desktop
+		// gateways, an ssh URL with a host-side key.
 		parsed, err := url.Parse(u)
 		if err != nil || parsed.User != nil {
 			return false
@@ -124,14 +125,25 @@ func (app *App) HandleRepoClone(w http.ResponseWriter, r *http.Request) {
 	if gitx.Detect().Kind() != "exec" {
 		depth = 0
 	}
-	if err := gitx.Detect().Clone(r.Context(), url, dest, depth); err != nil {
+	// Private-repo path: if this project has a connected GitHub account, hand its token to the
+	// clone. gitx attaches it ONLY to an https URL on the credential's own host (github.com) —
+	// public repos clone fine with it too (GitHub authenticates the token, then serves any repo
+	// it can read), and ssh/foreign-host URLs are untouched. On Android this is THE way private
+	// repos clone: no git/ssh binary exists there, and the token is already vault-sealed.
+	var auth *gitx.PushAuth
+	if strings.HasPrefix(url, "https://") {
+		if a, err := app.GitHubAuthFor(principal.Project); err == nil {
+			auth = a
+		}
+	}
+	if err := gitx.Detect().Clone(r.Context(), url, dest, depth, auth); err != nil {
 		_ = os.RemoveAll(dest) // don't leave a half-clone behind
 		msg := "git clone failed: " + strings.TrimSpace(lastLine(err.Error()))
 		// An auth-shaped failure sends new users hunting through GitHub permission screens; tell
 		// them what actually matters: public repos need no credentials at all, so an auth error
 		// means either a typo'd URL or a genuinely private repo.
 		if looksLikeAuthFailure(err.Error()) {
-			msg += ` — Public repositories need no GitHub permissions or login, so if this repo is public, check the URL for typos. If it's private, set up an SSH key or a git credential helper on the machine running this gateway, then use the ssh URL (git@github.com:owner/repo.git).`
+			msg += ` — Public repositories need no GitHub permissions or login, so if this repo is public, check the URL for typos. If it's private, connect GitHub in the app (Advanced → GitHub) and clone the https URL again — the connected token is used automatically. On a desktop gateway you can also use the ssh URL (git@github.com:owner/repo.git) with an SSH key on the host.`
 		}
 		oaiError(w, 400, msg, "invalid_request_error", "clone_failed")
 		return
@@ -165,6 +177,7 @@ func looksLikeAuthFailure(s string) bool {
 		"authentication failed", "authentication required", "could not read username",
 		"could not read password", "terminal prompts disabled", "permission denied (publickey)",
 		"invalid credentials", "http 401", "401 unauthorized", "403 forbidden",
+		"error: 401", "error: 403", // git's "The requested URL returned error: 40x" phrasing
 		"repository not found", "' not found",
 	} {
 		if strings.Contains(l, m) {

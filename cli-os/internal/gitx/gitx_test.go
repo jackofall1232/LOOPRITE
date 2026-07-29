@@ -335,7 +335,7 @@ func TestCloneFromLocalPath(t *testing.T) {
 			gitFixture(t, src, "commit", "-m", "init")
 
 			dest := filepath.Join(t.TempDir(), "cloned")
-			if err := cl.Clone(context.Background(), src, dest, 1); err != nil {
+			if err := cl.Clone(context.Background(), src, dest, 1, nil); err != nil {
 				t.Fatalf("Clone: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(dest, "README.md")); err != nil {
@@ -530,8 +530,50 @@ func TestGogitRawUnsupported(t *testing.T) {
 
 func TestGogitCloneRejectsSSH(t *testing.T) {
 	cl := gogitClient{}
-	if err := cl.Clone(context.Background(), "git@github.com:foo/bar.git", filepath.Join(t.TempDir(), "dest"), 1); err == nil {
+	if err := cl.Clone(context.Background(), "git@github.com:foo/bar.git", filepath.Join(t.TempDir(), "dest"), 1, nil); err == nil {
 		t.Fatal("expected gogit Clone to reject an ssh-style URL")
+	}
+}
+
+// TestCloneWithAuthFallsBackToAnonymousForNonMatchingURL proves the host-scoping discipline on
+// the clone path (mirrors TestExecPushFallsBackToAmbientForNonMatchingRemote): a github.com
+// credential must NOT be attached to a local-path clone (or any non-github URL) — the clone
+// proceeds anonymously, so carrying a connected GitHub token can never break or taint an
+// unrelated clone.
+func TestCloneWithAuthFallsBackToAnonymousForNonMatchingURL(t *testing.T) {
+	auth := &PushAuth{Username: "x-access-token", Token: "secret-token-never-attached", Host: "github.com"}
+	for name, cl := range clients(t) {
+		cl := cl
+		t.Run(name, func(t *testing.T) {
+			src := t.TempDir()
+			initGitRepo(t, src)
+			writeFile(t, src, "README.md", "hi\n")
+			gitFixture(t, src, "add", "-A")
+			gitFixture(t, src, "commit", "-m", "init")
+
+			dest := filepath.Join(t.TempDir(), "cloned")
+			if err := cl.Clone(context.Background(), src, dest, 1, auth); err != nil {
+				t.Fatalf("Clone with non-matching auth must fall back to anonymous, got: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(dest, "README.md")); err != nil {
+				t.Fatalf("cloned repo missing README.md: %v", err)
+			}
+		})
+	}
+}
+
+// TestGogitCloneRedactsTokenInError proves a failing gogit clone that was handed a token never
+// lets that token (or its basic-auth base64) escape in the returned error text.
+func TestGogitCloneRedactsTokenInError(t *testing.T) {
+	auth := &PushAuth{Username: "x-access-token", Token: "tok-leakcanary-123", Host: "github.com"}
+	err := (gogitClient{}).Clone(context.Background(),
+		"https://github.com/this-org/definitely-not-a-real-repo-zzz.git",
+		filepath.Join(t.TempDir(), "dest"), 1, auth)
+	if err == nil {
+		t.Skip("clone unexpectedly succeeded (network sandbox served the URL?) — nothing to assert redaction on")
+	}
+	if strings.Contains(err.Error(), auth.Token) {
+		t.Fatalf("clone error leaked the raw token: %v", err)
 	}
 }
 

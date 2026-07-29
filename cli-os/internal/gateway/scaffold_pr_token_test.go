@@ -28,7 +28,9 @@ func (f *fakeGitClient) Push(ctx context.Context, repo, remote, branch string, a
 	f.pushed = append(f.pushed, remote+"/"+branch)
 	return f.pushErr
 }
-func (f *fakeGitClient) Clone(ctx context.Context, url, dest string, depth int) error { return nil }
+func (f *fakeGitClient) Clone(ctx context.Context, url, dest string, depth int, auth *gitx.PushAuth) error {
+	return nil
+}
 func (f *fakeGitClient) RevParseHead(repo string) (string, error)                     { return "", nil }
 func (f *fakeGitClient) CurrentBranch(repo string) (string, error)                    { return "", nil }
 func (f *fakeGitClient) StatusPorcelain(repo string) (string, error)                  { return "", nil }

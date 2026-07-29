@@ -930,7 +930,7 @@
         <div class="dsec"><div class="sec-head"><h3>Add a repository</h3></div>
           <div style="display:flex;flex-direction:column;gap:10px">
             <button class="rowlink" data-action="repo-add-clone"><span class="rl-ic"><svg class="ico"><use href="#i-branch"/></svg></span>
-              <span>Clone from a URL<span class="rl-sub" style="display:block">Public repos need no account or permissions at all.</span></span>
+              <span>Clone from a URL<span class="rl-sub" style="display:block">Public repos need no account; private GitHub repos use your connected GitHub.</span></span>
               <svg class="ico rl-arrow" style="width:15px;height:15px"><use href="#i-chev"/></svg></button>
             <button class="rowlink" data-action="repo-add-path"><span class="rl-ic"><svg class="ico"><use href="#i-brackets"/></svg></span>
               <span>Register an existing path<span class="rl-sub" style="display:block">On Android: the app's “Import repo…” copies a folder onto the device — paste the path it shows here.</span></span>
@@ -1800,8 +1800,8 @@
         <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-clone-id" placeholder="myrepo" autocomplete="off"></div>
         <div class="field"><label>Git URL</label><input type="text" id="rp-clone-url" placeholder="https://github.com/you/myrepo.git" autocomplete="off">
           <div style="margin-top:6px;font-size:11.5px;color:var(--text-3)">Public repos clone with just the URL —
-            no GitHub account, token, or permissions needed. Private repos need an SSH key or a git credential
-            helper set up on the machine running this gateway.</div></div>
+            no GitHub account, token, or permissions needed. For a private GitHub repo, connect GitHub once
+            (Advanced → GitHub) and the https URL clones with it automatically.</div></div>
       </div>
       <div id="rp-path-group" class="hidden">
         <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="rp-id" placeholder="myrepo" autocomplete="off"></div>
@@ -1964,7 +1964,8 @@
       <div class="field"><label>Repository</label><select id="cr-repo">${repoOpts}</select></div>
       <div id="cr-clone-fields" class="hidden">
         <div class="field"><label>Repo id <span class="opt">— a short name, e.g. myrepo</span></label><input type="text" id="cr-clone-id" placeholder="myrepo" autocomplete="off"></div>
-        <div class="field"><label>Git URL</label><input type="text" id="cr-clone-url" placeholder="https://github.com/you/myrepo.git" autocomplete="off"></div>
+        <div class="field"><label>Git URL</label><input type="text" id="cr-clone-url" placeholder="https://github.com/you/myrepo.git" autocomplete="off">
+          <div style="margin-top:6px;font-size:11.5px;color:var(--text-3)">Private GitHub repo? Connect GitHub once (Advanced → GitHub) and it clones with that automatically.</div></div>
       </div>
       <div class="field"><label>Goal</label><textarea id="cr-goal" rows="3" placeholder="Describe what you want built…"></textarea></div>
       <div class="field"><label>Objective</label>

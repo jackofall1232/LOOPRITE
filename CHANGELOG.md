@@ -4,6 +4,15 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.9.1-beta — 2026-07-29
+
+**Private GitHub repos now clone in the app.** Clone-from-URL uses the project's connected
+GitHub account (Advanced → GitHub) automatically: the vault-sealed token is attached only to
+`https://github.com` clone URLs — in memory, never in argv, config, or error text — so private
+repos clone on-device with no SSH key or git credential helper (neither exists on Android).
+The auth-failure hint now points at the GitHub connect flow, the Repos sheet and clone dialogs
+say so up front, and git's `error: 401/403` phrasings are recognized as auth failures.
+
 ## v0.9.0-beta — 2026-07-28
 
 **A chat-first app, and Kimi joins the roster.** This release rebuilds the app's interface

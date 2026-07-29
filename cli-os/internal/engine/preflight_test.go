@@ -231,7 +231,7 @@ func TestSecretLikeDirtyPathDirtiedAfterPreflightStillRefusesAtStart(t *testing.
 type rawErrGit struct{ revErr, statusErr error }
 
 func (rawErrGit) Kind() string { return "fake" }
-func (rawErrGit) Clone(ctx context.Context, url, dest string, depth int) error {
+func (rawErrGit) Clone(ctx context.Context, url, dest string, depth int, auth *gitx.PushAuth) error {
 	panic("not used by checkGitReady")
 }
 func (g rawErrGit) RevParseHead(repo string) (string, error) { return "", g.revErr }
