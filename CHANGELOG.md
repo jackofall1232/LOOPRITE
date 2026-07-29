@@ -4,6 +4,29 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.10.0-beta — 2026-07-29
+
+**Never locked out again — named workspaces and a real sign-in.** Signing out (or the 8-hour
+session cookie expiring) used to strand Android users with no way back in short of reinstalling,
+because the setup wizard minted the app token invisibly. This release makes the per-install
+secret the *device-owner* credential and builds sign-in around named workspaces:
+
+- **Workspaces, not lockouts.** The wizard now names your workspace (default `default`), and the
+  sign-in card gains a "This device" section: tap a saved workspace to sign back in, or create a
+  **new workspace** — a second team on the same box, with its own repos, budget, GitHub
+  connection, and runs (its token is shown once for CLI/other devices).
+- **Always signed in at launch.** The Android shell now also exchanges the install secret for a
+  dashboard session natively at every cold start, so cookie expiry self-heals on relaunch.
+- **Security model preserved.** New `/v1/owner/*` endpoints are gated by the install secret (or
+  the setup cookie only it can mint) — never by a project name, which would be an
+  unauthenticated session oracle to any app on the phone. They fail closed on desktop gateways
+  (no install secret), where `l00prite token mint` remains the recovery path. The setup cookie
+  lifetime extends to 8h to match the UI session; the setup-mutation endpoints stay latched
+  closed after first run. See `cli-os/docs/security-model.md` § Device-owner sessions.
+- **Wizard loop fixed.** "Skip providers" used to land you back in the wizard forever (the
+  dashboard requires one configured provider); the providers step now says plainly that one
+  provider is enough to start.
+
 ## v0.9.1-beta — 2026-07-29
 
 **Private GitHub repos now clone in the app.** Clone-from-URL uses the project's connected

@@ -13,7 +13,11 @@ import (
 // Loopback is intentionally plain HTTP, so this cannot use the __Host- cookie prefix (which
 // requires Secure and would be rejected by WebView's cookie store).
 const setupSessionCookie = "l00prite_setup"
-const setupSessionTTL = 15 * time.Minute
+
+// TTL matches the UI session (8h): post-latch the setup-mutation endpoints are closed anyway,
+// and the setup cookie doubles as the device-owner credential for workspace switching
+// (see owner_session.go) — a 15-minute lifetime would make "switch workspace" die mid-day.
+const setupSessionTTL = 8 * time.Hour
 
 // HandleSetupSession exchanges the Android-only install secret for an HttpOnly loopback session.
 // Only one unexpired session may be minted at a time, so replaying the install secret while the

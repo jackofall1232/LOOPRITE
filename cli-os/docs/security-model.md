@@ -43,6 +43,27 @@ Android wrapper performs that exchange natively and installs the returned short-
 cookie before loading the WebView. The install secret never appears in a URL, WebView history,
 JavaScript, or localStorage. A second exchange while an unexpired setup session exists is rejected.
 
+## Device-owner (workspace) sessions
+
+The install secret doubles as the **device-owner credential**, gating three endpoints that keep an
+app install from ever being locked out after sign-out or UI-cookie expiry:
+`GET /v1/owner/projects` (list workspaces — projects with an active unscoped token),
+`POST /v1/owner/session` (issue the dashboard's HttpOnly UI cookie for a chosen workspace), and
+`POST /v1/owner/projects` (mint a new workspace's owner token — returned once — and sign into it).
+Rules:
+
+- The gate is the install-secret header (timing-safe) or the setup cookie it mints — never a
+  project name. A name only SELECTS which existing token's principal a session is issued for,
+  after ownership is proven; a bare "project name to sign in" flow would be an unauthenticated
+  session oracle to anything that can reach loopback (on Android: any app on the phone).
+- The endpoints sit OUTSIDE the setup latch (they are the post-setup recovery path) but fail
+  closed with 403 whenever no install secret is configured (desktop), where
+  `l00prite token mint` remains the recovery path. Nothing about the desktop auth model changes.
+- The Android wrapper also exchanges the secret for a UI session natively at every cold start,
+  so an expired 8h cookie self-heals on relaunch; "sign out" lands on a workspace switcher,
+  not a dead end.
+
+
 ## Least-privilege repo file access
 
 - Each registered repo has an explicit filesystem **root**. The Memory layer may read **only

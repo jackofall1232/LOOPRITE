@@ -102,7 +102,13 @@ Everything below `GatewayService` is the same binary that ships for linux/darwin
    returned short-lived HttpOnly cookie, then WebView loads `http://127.0.0.1:8787/` — the server serves the
    setup wizard until the setup latch flips, then always the dashboard. No client-side
    routing state exists, so a cold app start always lands correctly.
-4. Process death at any point is safe: engine boot runs `ReconcileOrphans` (interrupted
+4. The same boot also exchanges the install secret at `POST /v1/owner/session` and installs the
+   returned `l00prite_ui` cookie: the install secret doubles as the device-owner credential
+   (see `docs/security-model.md` § Device-owner sessions), so the dashboard is always signed in
+   at launch and an expired 8h UI cookie — or a deliberate sign-out — self-heals on the next
+   cold start. The sign-in card's "This device" section (list/switch/create workspaces) rides
+   the same gate via the setup cookie.
+5. Process death at any point is safe: engine boot runs `ReconcileOrphans` (interrupted
    runs are marked, stale repo state is disarmed at next pre-flight) — Android's
    process-killing behavior maps onto crash paths the engine already handles.
 

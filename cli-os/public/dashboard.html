@@ -557,6 +557,17 @@
   <div class="box card">
     <div class="brand"><div class="logo">∞</div><div><div class="name">l00prite</div><div class="sub">Self-hosted AI gateway</div></div></div>
     <h1>Sign in</h1>
+    <div id="ov-owner" class="hidden">
+      <p style="margin-bottom:6px"><b>This device</b> — pick up where you left off:</p>
+      <div id="ov-projects" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div id="ov-newwrap" style="margin-top:10px">
+        <button class="btn ghost" id="ov-newbtn" style="padding-left:0">+ New workspace…</button>
+      </div>
+      <div id="ov-owner-note"></div>
+      <div style="display:flex;align-items:center;gap:10px;margin:16px 0 4px;color:var(--text-3);font-size:11px;letter-spacing:.12em;text-transform:uppercase">
+        <div style="flex:1;height:1px;background:var(--stroke)"></div>or<div style="flex:1;height:1px;background:var(--stroke)"></div>
+      </div>
+    </div>
     <p>This app talks to the gateway on this device through an authenticated session. Paste a gateway
       token to begin — mint one with <span class="mono">l00prite token mint</span>, or finish the setup
       wizard. The token is exchanged once for a session cookie and is never stored by this page.</p>
@@ -618,12 +629,71 @@
   }
 
   // ---- sign-in (token -> POST /v1/ui/session -> HttpOnly cookie -> reload) ----
+  // On app installs (the device holds the install secret), the "This device" section also lists
+  // saved workspaces and can create new ones via the device-owner endpoints — so sign-out or an
+  // expired 8h cookie is never a lockout. On desktop gateways those endpoints fail closed (403)
+  // and the card stays token-only.
   function showSignin(msg){
     $("ov").classList.remove("hidden");
     $("ov-note").innerHTML = msg ? `<div class="note err">${esc(msg)}</div>` : "";
     const inp=$("token-input"); inp.value=""; setTimeout(()=>inp.focus(),50);
+    loadOwnerProjects();
   }
   function hideSignin(){ $("ov").classList.add("hidden"); }
+
+  async function loadOwnerProjects(){
+    const wrap=$("ov-owner"), list=$("ov-projects"), note=$("ov-owner-note");
+    const {res,data}=await api("GET","/v1/owner/projects");
+    if(!res.ok){ wrap.classList.add("hidden"); return; } // desktop or expired owner credential
+    wrap.classList.remove("hidden");
+    const projects=(data&&data.projects)||[];
+    list.innerHTML=projects.map(p=>
+      `<button class="btn" style="justify-content:flex-start" data-ws="${esc(p.project)}">∞&nbsp; <b>${esc(p.project)}</b><span class="spacer"></span><span style="color:var(--text-3);font-size:12px">Sign in →</span></button>`
+    ).join("") || `<div class="muted" style="font-size:13px">No workspaces on this device yet.</div>`;
+    list.querySelectorAll("[data-ws]").forEach(b=>b.onclick=async()=>{
+      busy(b,"Signing in…");
+      const r=await api("POST","/v1/owner/session",{project:b.dataset.ws});
+      if(!r.res.ok){ unbusy(b); note.innerHTML=`<div class="note err">${esc(mErr(r.data,"Could not switch workspace."))}</div>`; return; }
+      location.reload();
+    });
+    note.innerHTML="";
+  }
+
+  // "New workspace…" — a second (third…) team on this box: mints an owner token for the new
+  // project, signs the dashboard into it, and shows the raw token ONCE for CLI/other devices.
+  function wireOwnerNew(){
+    const btn=$("ov-newbtn");
+    btn.onclick=()=>{
+      const wrap=$("ov-newwrap");
+      wrap.innerHTML=`
+        <div class="field"><label>New workspace name <span class="opt">— letters, digits, . - _</span></label>
+        <input type="text" id="ov-newname" maxlength="40" placeholder="e.g. team-mobile" autocomplete="off"></div>
+        <div style="display:flex;gap:10px;margin-top:8px;align-items:center"><div class="spacer"></div>
+        <button class="btn primary" id="ov-create">Create &amp; sign in →</button></div>`;
+      const nameIn=$("ov-newname"); nameIn.focus();
+      nameIn.addEventListener("keydown",e=>{ if(e.key==="Enter") $("ov-create").click(); });
+      $("ov-create").onclick=async()=>{
+        const project=nameIn.value.trim();
+        if(!/^[A-Za-z0-9._-]{1,40}$/.test(project)){ $("ov-owner-note").innerHTML=`<div class="note err">1-40 chars: letters, digits, <span class="mono">. - _</span>.</div>`; return; }
+        const cb=$("ov-create"); busy(cb,"Creating…");
+        const r=await api("POST","/v1/owner/projects",{project});
+        if(!r.res.ok){ unbusy(cb,"Create & sign in →"); $("ov-owner-note").innerHTML=`<div class="note err">${esc(mErr(r.data,"Could not create the workspace."))}</div>`; return; }
+        const raw=r.data&&r.data.token&&r.data.token.token;
+        document.querySelector("#ov .box").innerHTML=`
+          <div class="brand"><div class="logo">∞</div><div><div class="name">l00prite</div><div class="sub">Workspace created</div></div></div>
+          <h1 style="font-size:20px">Welcome, <span class="mono">${esc(project)}</span></h1>
+          <p>Your new workspace is ready and you're signed in. This is its gateway token —
+            <b>shown once</b>. You only need it for the CLI or another device; on this device the
+            workspace name is enough to sign in.</p>
+          <div class="tokenbox"><input type="text" id="ov-rawtok" class="mono-in" readonly value="${esc(raw||"")}">
+            <button class="btn" id="ov-copytok">Copy</button></div>
+          <div style="display:flex;gap:10px;margin-top:18px;align-items:center"><div class="spacer"></div>
+            <button class="btn primary" id="ov-cont">Start working →</button></div>`;
+        $("ov-copytok").onclick=()=>copyText(raw||"");
+        $("ov-cont").onclick=()=>location.reload();
+      };
+    };
+  }
 
   async function refresh(){
     if(!S.connected) return;
@@ -2386,6 +2456,7 @@
     location.reload();
   };
   $("token-input").addEventListener("keydown",e=>{ if(e.key==="Enter") $("token-save").click(); });
+  wireOwnerNew();
 
   // auto-refresh every 20s while signed in and the tab is visible
   setInterval(()=>{ if(S.connected && S.summary && document.visibilityState==="visible") refresh(); }, 20000);

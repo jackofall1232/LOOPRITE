@@ -215,6 +215,15 @@ func Handler(app *gateway.App) http.Handler {
 			app.HandleSetupProvider(w, r)
 		case r.Method == http.MethodPost && p == "/v1/setup/token":
 			app.HandleSetupToken(w, r)
+		// Device-owner ("workspace") endpoints — gated by the install secret / setup cookie
+		// themselves (app installs only; fail closed on desktop), deliberately NOT under the
+		// setup latch: they are the post-setup sign-in/switch-workspace path.
+		case r.Method == http.MethodGet && p == "/v1/owner/projects":
+			app.HandleOwnerProjects(w, r)
+		case r.Method == http.MethodPost && p == "/v1/owner/session":
+			app.HandleOwnerSession(w, r)
+		case r.Method == http.MethodPost && p == "/v1/owner/projects":
+			app.HandleOwnerProjectCreate(w, r)
 		// Authenticated per-project daily budget (dashboard "Set budget" modal).
 		case r.Method == http.MethodGet && p == "/v1/budget":
 			app.HandleBudgetGet(w, r)

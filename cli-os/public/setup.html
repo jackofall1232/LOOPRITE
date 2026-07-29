@@ -312,10 +312,9 @@
       <p>Paste an API key for each provider you use. Each key is <b>validated with a real call</b> before
          it's saved — a bad key fails here, not mid-conversation. Add as many as you like.</p>
       <div class="pgrid" id="pgrid"></div>
-      <div id="skipwrap">${already||state.added.length?"":`
-        <p class="muted" style="text-align:center;margin-top:18px">No keys handy?
-          <a href="#" id="skip" style="color:var(--text-2)">Skip for now</a> — you can add providers anytime.</p>`}
-      </div>
+      <p class="muted" style="text-align:center;margin-top:18px">One provider is enough to start —
+        the rest can wait. Keys are checked once, encrypted, and never leave this device except to
+        their own provider.</p>
       <div class="actions">
         <button class="btn ghost" id="back">← Back</button>
         <div class="spacer"></div>
@@ -323,8 +322,6 @@
       </div>`;
     document.getElementById("back").onclick=()=>goto("welcome");
     document.getElementById("next").onclick=()=>goto("done");
-    const skip=document.getElementById("skip");
-    if(skip) skip.onclick=(e)=>{ e.preventDefault(); goto("done"); };
 
     const grid=document.getElementById("pgrid");
     presets.forEach(p=>{
@@ -397,7 +394,6 @@
         state.added.push(name);
         state.status.provider_count=(state.status.provider_count||0)+1;
         const next=document.getElementById("next"); if(next) next.disabled=false;
-        const sw=document.getElementById("skipwrap"); if(sw) sw.innerHTML="";
       };
     });
   }
@@ -408,37 +404,55 @@
     card.innerHTML = `
       <div class="eyebrow"><span class="tick" style="background:var(--ok)"></span> All set</div>
       <h1>You're in.</h1>
-      <p id="dstatus"><span class="spin"></span> Finishing up…</p>
+      <label for="wsname" style="margin-top:18px">Your workspace name</label>
+      <input type="text" id="wsname" class="mono-in" value="default" maxlength="40" autocomplete="off">
+      <p class="muted" style="margin-top:6px">This names your workspace on this device — it's how you
+        get back in if you sign out, and you can add more workspaces later (a team per workspace).
+        Letters, digits, <span class="mono">.</span> <span class="mono">-</span> <span class="mono">_</span> only.</p>
+      <p id="dstatus" style="margin-top:18px">Everything runs right here on this device.</p>
       <div id="dnote"></div>
       <div class="actions">
         <div class="spacer"></div>
-        <button class="btn primary big" id="start" disabled>Start chatting →</button>
-      </div>
-      <p class="muted" style="margin-top:18px">Tip: manage providers, repositories, budgets and API tokens
-        anytime from inside the app.</p>`;
+        <button class="btn primary big" id="start">Start chatting →</button>
+      </div>`;
     const status=document.getElementById("dstatus"), note=document.getElementById("dnote"),
-          start=document.getElementById("start");
-    // Mint the app's own gateway token and exchange it once for the HttpOnly UI session. The raw
-    // token is never persisted by this page — more tokens can be minted later under Advanced → Tokens.
-    const m=await api("POST","/v1/setup/token",{project:"default"});
-    if(myGen!==renderGen) return;
-    if(!m.res.ok || !m.data || !m.data.token){
-      status.innerHTML="Setup is complete, but the app session couldn't start automatically.";
-      note.innerHTML=`<div class="note err">${esc(errMsg(m.data,"Could not mint the app token."))} You can retry, or open the app and sign in with a token.</div>`;
-      const r=document.createElement("button"); r.className="btn"; r.textContent="Retry"; r.style.marginTop="12px";
-      r.onclick=()=>render(); note.appendChild(r);
-      return;
+          start=document.getElementById("start"), wsname=document.getElementById("wsname");
+    status.innerHTML="Everything runs right here on this device.";
+    let busy=false;
+    // The primary action mints the workspace's own gateway token and exchanges it once for the
+    // HttpOnly UI session. The raw token is never persisted by this page — the workspace NAME is
+    // the way back in on this device, and more workspaces can be created from the sign-in card.
+    async function begin(){
+      if(busy) return;
+      const project=wsname.value.trim();
+      if(!/^[A-Za-z0-9._-]{1,40}$/.test(project)){
+        note.innerHTML=`<div class="note err">Pick a workspace name: 1-40 chars, letters, digits, <span class="mono">. - _</span>.</div>`;
+        wsname.focus();
+        return;
+      }
+      busy=true; wsname.disabled=true; start.disabled=true;
+      status.innerHTML=`<span class="spin"></span> Finishing up…`;
+      const m=await api("POST","/v1/setup/token",{project});
+      if(myGen!==renderGen) return;
+      if(!m.res.ok || !m.data || !m.data.token){
+        busy=false; wsname.disabled=false; start.disabled=false;
+        status.innerHTML="Everything runs right here on this device.";
+        note.innerHTML=`<div class="note err">${esc(errMsg(m.data,"Could not mint the app token."))}</div>`;
+        return;
+      }
+      const s=await fetch("/v1/ui/session",{method:"POST",headers:{authorization:"Bearer "+m.data.token}}).catch(()=>null);
+      if(myGen!==renderGen) return;
+      if(!s || !s.ok){
+        busy=false; wsname.disabled=false; start.disabled=false;
+        status.innerHTML="Everything runs right here on this device.";
+        note.innerHTML=`<div class="note err">Session exchange failed — try again.</div>`;
+        return;
+      }
+      status.innerHTML=`Workspace <b>${esc(project)}</b> is ready.`;
+      location.href="/";
     }
-    const s=await fetch("/v1/ui/session",{method:"POST",headers:{authorization:"Bearer "+m.data.token}}).catch(()=>null);
-    if(myGen!==renderGen) return;
-    if(!s || !s.ok){
-      status.innerHTML="Setup is complete, but the app session couldn't start automatically.";
-      note.innerHTML=`<div class="note err">Session exchange failed. You can still open the app and sign in with a token from Advanced → Tokens.</div>`;
-      return;
-    }
-    status.innerHTML="Your workspace is ready — everything runs right here on this device.";
-    start.disabled=false;
-    start.onclick=()=>{ location.href="/"; };
+    start.onclick=begin;
+    wsname.addEventListener("keydown",e=>{ if(e.key==="Enter") begin(); });
   }
 
   function renderAlreadyDone(){

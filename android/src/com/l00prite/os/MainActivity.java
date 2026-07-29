@@ -286,7 +286,12 @@ public class MainActivity extends Activity {
                     }
                 }
                 String setupCookie = up ? exchangeSetupSecret(setupSecret) : null;
-                onPollFinished(up, setupCookie);
+                // Also restore the dashboard's UI session natively: the install secret doubles
+                // as the device-owner credential (see cli-os/internal/gateway/owner_session.go),
+                // so an expired 8h UI cookie — or a deliberate sign-out — self-heals on the next
+                // cold start instead of locking the user out of their own app.
+                String ownerCookie = up ? exchangeOwnerSession(setupSecret) : null;
+                onPollFinished(up, setupCookie, ownerCookie);
             }
         }, "l00prite-healthpoll");
         pollerThread.setDaemon(true);
@@ -318,9 +323,19 @@ public class MainActivity extends Activity {
     }
 
     private String exchangeSetupSecret(String setupSecret) {
+        return postSecretExchange("v1/setup/session", setupSecret);
+    }
+
+    private String exchangeOwnerSession(String setupSecret) {
+        return postSecretExchange("v1/owner/session", setupSecret);
+    }
+
+    /** POSTs the install secret to an exchange endpoint and returns its Set-Cookie header, or
+     *  null on any failure (best-effort: the WebView simply shows its own sign-in card then). */
+    private String postSecretExchange(String path, String setupSecret) {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(BASE_URL + "v1/setup/session");
+            URL url = new URL(BASE_URL + path);
             conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(1500);
             conn.setReadTimeout(1500);
@@ -341,7 +356,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void onPollFinished(final boolean succeeded, final String setupCookie) {
+    private void onPollFinished(final boolean succeeded, final String setupCookie, final String ownerCookie) {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
@@ -351,8 +366,11 @@ public class MainActivity extends Activity {
                 if (succeeded) {
 					if (setupCookie != null && !setupCookie.isEmpty()) {
 						CookieManager.getInstance().setCookie(BASE_URL, setupCookie);
-						CookieManager.getInstance().flush();
 					}
+					if (ownerCookie != null && !ownerCookie.isEmpty()) {
+						CookieManager.getInstance().setCookie(BASE_URL, ownerCookie);
+					}
+					CookieManager.getInstance().flush();
                     // Pass the device's night-mode setting to the page so its theme is
                     // device-determined (data-theme), independent of what the WebView reports for
                     // prefers-color-scheme. A device theme flip recreates this activity (no
