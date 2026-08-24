@@ -227,21 +227,31 @@ zipalign -f 4 "$WORK/work.apk" "$WORK/aligned.apk"
 zipalign -c -v 4 "$WORK/aligned.apk" >/dev/null
 echo
 
-# --- keystore: env override, else a locally generated debug keystore (NEVER in the repo) --
+# --- keystore: env override (release), else a locally generated debug keystore (NEVER in the repo) --
+# Published website APKs MUST be built with APK_KEYSTORE pointing at the LOOPRITE
+# production keystore (see /root/keystores/README.md). A bare invocation still
+# debug-signs, which is the right default for local sideload experiments.
+RELEASE_SIGN=0
 if [ -n "${APK_KEYSTORE:-}" ]; then
   KEYSTORE="$APK_KEYSTORE"
-  KS_PASS="${APK_KS_PASS:?APK_KS_PASS must be set when APK_KEYSTORE is set}"
+  [ -f "$KEYSTORE" ] || { echo "error: APK_KEYSTORE=$KEYSTORE does not exist" >&2; exit 1; }
+  : "${APK_KS_PASS:?APK_KS_PASS must be set when APK_KEYSTORE is set}"
+  export APK_KS_PASS
   KS_ALIAS="${APK_KS_ALIAS:-l00prite}"
-  echo "== using provided keystore $KEYSTORE =="
+  KS_PASS_SPEC="env:APK_KS_PASS"
+  KEY_PASS_SPEC="env:APK_KS_PASS"
+  RELEASE_SIGN=1
+  echo "== using provided (release) keystore $KEYSTORE alias $KS_ALIAS =="
 else
   KEYSTORE="$CACHE_DIR/debug.keystore"
   KS_ALIAS="l00pritedebug"
-  KS_PASS="android"
+  KS_PASS_SPEC="pass:android"
+  KEY_PASS_SPEC="pass:android"
   if [ ! -f "$KEYSTORE" ]; then
     echo "== generating debug keystore at $KEYSTORE (never inside the repo working tree) =="
     keytool -genkeypair -v \
       -keystore "$KEYSTORE" -alias "$KS_ALIAS" \
-      -storepass "$KS_PASS" -keypass "$KS_PASS" \
+      -storepass android -keypass android \
       -keyalg RSA -keysize 2048 -validity 10000 \
       -dname "CN=L00prite Debug"
   else
@@ -256,16 +266,22 @@ SIGNED_APK="$OUT/$APK_NAME"
 mkdir -p "$OUT"
 apksigner sign \
   --ks "$KEYSTORE" --ks-key-alias "$KS_ALIAS" \
-  --ks-pass "pass:$KS_PASS" --key-pass "pass:$KS_PASS" \
+  --ks-pass "$KS_PASS_SPEC" --key-pass "$KEY_PASS_SPEC" \
   --min-sdk-version 26 \
   --out "$SIGNED_APK" "$WORK/aligned.apk"
 echo
 
 echo "== apksigner verify =="
-VERIFY_OUT="$(apksigner verify --verbose "$SIGNED_APK")"
+VERIFY_OUT="$(apksigner verify --verbose --print-certs "$SIGNED_APK")"
 echo "$VERIFY_OUT"
 echo "$VERIFY_OUT" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" \
   || { echo "error: APK did not verify with v2 signature scheme" >&2; exit 1; }
+if [ "$RELEASE_SIGN" -eq 1 ]; then
+  echo "$VERIFY_OUT" | grep -qiE 'certificate DN:.*Debug' \
+    && { echo "error: APK_KEYSTORE was set but the APK is signed with a Debug certificate — refusing to ship" >&2; exit 1; }
+  echo "$VERIFY_OUT" | grep -q "Signer #1 certificate DN: CN=LOOPRITE" \
+    || { echo "error: release APK signer DN is not CN=LOOPRITE — refusing to ship" >&2; exit 1; }
+fi
 echo
 
 echo "== aapt dump badging =="

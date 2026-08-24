@@ -4,6 +4,19 @@ All notable changes to the L00prite OS Android app and marketing site are docume
 Dates are UTC. The protocol itself (`.l00prite/`, Planning Mode, Execution Mode) has no
 separate version — see `README.md` for what it currently supports.
 
+## v0.10.1-beta — 2026-08-24
+
+**First production-signed APK.** Same app as 0.10.0-beta, now signed with a dedicated
+LOOPRITE release certificate (`CN=LOOPRITE, O=LOOPRITE, C=US`, RSA-4096) instead of the
+local debug keystore (`CN=L00prite Debug`). Download: [looprite.click](https://looprite.click/).
+
+This is a signing-identity change: Android will refuse an in-place update from any
+0.10.0-beta or earlier install. Uninstall the old app first (that wipes on-device keys,
+tokens, and imported repos — nothing is in the cloud), then sideload 0.10.1-beta. Later
+0.10.x builds signed with this same certificate will update in place.
+
+No gateway, dashboard, or protocol behavior change.
+
 ## v0.10.0-beta — 2026-07-29
 
 **Never locked out again — named workspaces and a real sign-in.** Signing out (or the 8-hour

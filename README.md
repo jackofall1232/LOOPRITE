@@ -39,9 +39,9 @@ deterministic execution protocol for AI coding agents.**
 > models — `cd cli-os && ./install/install.sh && ./l00prite serve`, then open
 > <http://127.0.0.1:8787/>. The rest of this README describes the agent-memory protocol.
 
-> **📱 Prefer a signed Android APK you can sideload?** See [`index.html`](index.html) (the
-> marketing site) for the current beta download, or [`CHANGELOG.md`](CHANGELOG.md) for what's
-> new in each release.
+> **📱 Prefer a signed Android APK you can sideload?** Get the current release-signed
+> build from **[looprite.click](https://looprite.click/)** (the marketing site), or see
+> [`CHANGELOG.md`](CHANGELOG.md) for what's new in each release.
 
 ## What is l00prite?
 

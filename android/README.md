@@ -140,9 +140,22 @@ keys, register or clone a repo, and use the playground / runs API exactly as on 
   automatically to the pure-Go `go-git` implementation server-side (gap G4, implemented
   in `cli-os/internal/gitx`); the model-facing raw `git_command` passthrough tool and
   ssh-URL clones are unavailable in that fallback and return a clear error.
-- **This is a debug-signed build.** Both pipelines here sign with a locally/job-generated
-  debug keystore (`storepass android`), never a value from repo secrets. Release signing
-  is an explicit Phase 3 ceremony, not something either pipeline does today.
+- **CI and a bare `build-apk.sh` are debug-signed.** Both pipelines default to a
+  locally/job-generated debug keystore (`storepass android`, `CN=L00prite Debug`), never a
+  value from repo secrets. **Published APKs on the website are release-signed** starting
+  at `0.10.1-beta`, using the dedicated LOOPRITE production keystore via env override
+  (never committed):
+
+  ```
+  APK_KEYSTORE=/path/to/l00prite-release.keystore \
+  APK_KS_ALIAS=l00prite \
+  APK_KS_PASS=... \
+  bash cli-os/scripts/build-apk.sh <version>
+  ```
+
+  That keystore is the permanent update-identity of every installed app. Losing it strands
+  every install. A debug-signed APK cannot update a release-signed one (or vice versa) —
+  Android refuses the install.
 
 ## Security notes
 
